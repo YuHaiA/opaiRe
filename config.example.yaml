@@ -153,6 +153,8 @@ clash_proxy_pool:
   v2rayn_precheck_cache_minutes: 30
   # 单次批量测活最多抽检多少个节点；0 表示测完整个候选池
   v2rayn_precheck_max_nodes: 12
+  # 批量测活完成后，按延迟排序只保留前多少个活节点进入运行池
+  v2rayn_live_pool_limit: 50
   # 是否定时执行“订阅更新命令”，更新后自动重新批量测活
   v2rayn_subscription_update_enabled: false
   # 订阅更新间隔（分钟）；仅在上方开关开启后生效

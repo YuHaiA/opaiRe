@@ -27,6 +27,7 @@ V2RAYN_HIDE_WINDOW_ON_RESTART = True
 V2RAYN_PRECHECK_ON_START = True
 V2RAYN_PRECHECK_CACHE_MINUTES = 30
 V2RAYN_PRECHECK_MAX_NODES = 12
+V2RAYN_LIVE_POOL_LIMIT = 50
 V2RAYN_SUBSCRIPTION_UPDATE_ENABLED = False
 V2RAYN_SUBSCRIPTION_UPDATE_INTERVAL_MINUTES = 0
 V2RAYN_SUBSCRIPTION_UPDATE_COMMAND = ""
@@ -77,7 +78,7 @@ def reload_proxy_config():
     global CLASH_API_URL, LOCAL_PROXY_URL, ENABLE_NODE_SWITCH, PROXY_CLIENT_TYPE
     global V2RAYN_BASE_DIR, V2RAYN_GUI_CONFIG_PATH, V2RAYN_DB_PATH, V2RAYN_EXE_PATH
     global V2RAYN_RESTART_WAIT_SEC, V2RAYN_HIDE_WINDOW_ON_RESTART, V2RAYN_PRECHECK_ON_START
-    global V2RAYN_PRECHECK_CACHE_MINUTES, V2RAYN_PRECHECK_MAX_NODES
+    global V2RAYN_PRECHECK_CACHE_MINUTES, V2RAYN_PRECHECK_MAX_NODES, V2RAYN_LIVE_POOL_LIMIT
     global V2RAYN_SUBSCRIPTION_UPDATE_ENABLED, V2RAYN_SUBSCRIPTION_UPDATE_INTERVAL_MINUTES
     global V2RAYN_SUBSCRIPTION_UPDATE_COMMAND, POOL_MODE, FASTEST_MODE, PROXY_GROUP_NAME
     global CLASH_SECRET, NODE_BLACKLIST, _v2rayn_runtime_signature
@@ -118,6 +119,10 @@ def reload_proxy_config():
         V2RAYN_PRECHECK_MAX_NODES = int(clash_conf.get("v2rayn_precheck_max_nodes", 12))
     except Exception:
         V2RAYN_PRECHECK_MAX_NODES = 12
+    try:
+        V2RAYN_LIVE_POOL_LIMIT = max(1, int(clash_conf.get("v2rayn_live_pool_limit", 50)))
+    except Exception:
+        V2RAYN_LIVE_POOL_LIMIT = 50
     V2RAYN_SUBSCRIPTION_UPDATE_ENABLED = bool(clash_conf.get("v2rayn_subscription_update_enabled", False))
     try:
         V2RAYN_SUBSCRIPTION_UPDATE_INTERVAL_MINUTES = max(0, int(clash_conf.get("v2rayn_subscription_update_interval_minutes", 0)))
@@ -140,6 +145,7 @@ def reload_proxy_config():
         V2RAYN_PRECHECK_ON_START,
         V2RAYN_PRECHECK_CACHE_MINUTES,
         V2RAYN_PRECHECK_MAX_NODES,
+        V2RAYN_LIVE_POOL_LIMIT,
         tuple(str(x) for x in NODE_BLACKLIST),
     )
     if _v2rayn_runtime_signature != new_v2rayn_runtime_signature:
@@ -725,12 +731,12 @@ def _test_v2rayn_proxy_liveness(proxy_url=None, silent: bool = False):
                         return False, loc
                     if not silent:
                         print(f"[{ts()}] [代理测活] {display_name} 成功！地区 ({loc})，基础探测延迟: {probe_res.elapsed.total_seconds():.2f}s | 探测URL={probe_url}")
-                    return True, loc
+                    return True, loc, round(float(probe_res.elapsed.total_seconds() * 1000), 1)
             except Exception:
                 pass
             if not silent:
                 print(f"[{ts()}] [代理测活] {display_name} 基础探测成功，地区校验跳过。延迟: {probe_res.elapsed.total_seconds():.2f}s | 探测URL={probe_url}")
-            return True, "UNKNOWN"
+            return True, "UNKNOWN", round(float(probe_res.elapsed.total_seconds() * 1000), 1)
         except Exception as exc:
             last_error = exc
             if attempt == 0:
@@ -740,16 +746,16 @@ def _test_v2rayn_proxy_liveness(proxy_url=None, silent: bool = False):
                 continue
     if not silent:
         print(f"[{ts()}] [代理测活] {display_name} 链路中断或超时。{f' ({last_error})' if last_error else ''}")
-    return False, None
+    return False, None, None
 
 
 def _activate_v2rayn_profile(profile, proxy_url=None):
     if not _write_v2rayn_selection(profile):
-        return False, None
+        return False, None, None
     if not _restart_v2rayn():
-        return False, None
+        return False, None, None
     if not _wait_for_local_proxy_ready(proxy_url, timeout_sec=V2RAYN_RESTART_WAIT_SEC):
-        return False, None
+        return False, None, None
     time.sleep(0.8)
     print(f"[{ts()}] [代理池] v2rayN 节点 [{clean_for_log(profile['remarks'])}] 已生效，准备进入正式测活...")
     return _test_v2rayn_proxy_liveness(proxy_url)
@@ -878,16 +884,22 @@ def refresh_v2rayn_live_pool(proxy_url=None, force: bool = False, reason: str = 
             summary["tested_count"] += 1
             print(f"\n[{ts()}] [代理池] v2rayN 批量测活节点: [{clean_for_log(profile['remarks'])}] ({idx}/{len(targets)})")
             print(f"[{ts()}] [代理池] 节点切换详情: old={current_id or 'UNKNOWN'} -> new={profile['index_id']}")
-            is_ok, region = _activate_v2rayn_profile(profile, proxy_url)
+            is_ok, region, latency_ms = _activate_v2rayn_profile(profile, proxy_url)
             if is_ok:
-                live_profiles.append(profile)
+                profile_with_latency = dict(profile)
+                profile_with_latency["latency_ms"] = latency_ms if latency_ms is not None else float("inf")
+                live_profiles.append(profile_with_latency)
                 _mark_v2rayn_profile_valid(profile["index_id"])
                 current_id = profile["index_id"]
-                print(f"[{ts()}] [代理池] v2rayN 预检通过: [{clean_for_log(profile['remarks'])}] | 出口地区={region or 'UNKNOWN'} | 已纳入活节点池")
+                print(f"[{ts()}] [代理池] v2rayN 预检通过: [{clean_for_log(profile['remarks'])}] | 出口地区={region or 'UNKNOWN'} | 延迟={latency_ms if latency_ms is not None else '?'}ms | 已纳入活节点池")
             else:
                 summary["dead_count"] += 1
                 _mark_v2rayn_profile_invalid(profile["index_id"])
                 print(f"[{ts()}] [代理池] v2rayN 预检淘汰: [{clean_for_log(profile['remarks'])}] | {'出口地区=' + region if region in {'CN', 'HK'} else '链路不可用'}")
+        live_profiles.sort(key=lambda p: (float(p.get("latency_ms", float("inf"))), str(p.get("remarks") or "")))
+        if V2RAYN_LIVE_POOL_LIMIT > 0 and len(live_profiles) > V2RAYN_LIVE_POOL_LIMIT:
+            print(f"[{ts()}] [代理池] v2rayN 活节点池按延迟排序后裁剪为前 {V2RAYN_LIVE_POOL_LIMIT} 个节点。")
+            live_profiles = live_profiles[:V2RAYN_LIVE_POOL_LIMIT]
         _set_v2rayn_live_profiles(live_profiles)
         summary["live_profiles"] = _get_v2rayn_live_profiles()
         summary["live_count"] = len(summary["live_profiles"])
