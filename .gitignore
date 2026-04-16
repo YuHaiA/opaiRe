@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+!utils/auth_core.pyd
 
 data/
 run.out.log
