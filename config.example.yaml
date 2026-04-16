@@ -1,0 +1,332 @@
+# [邮箱 API 模式选择]
+# https://github.com/smanx/freemail
+# https://github.com/dreamhunter2333/cloudflare_temp_email
+# https://github.com/maillab/cloud-mail
+# https://github.com/s12ryt/mail-curl
+
+reg_mode: "protocol"
+# 可选值: "imap" / "freemail" / "cloudflare_temp_email" / "cloudmail" / "mail_curl" / "luckmail"
+email_api_mode: "cloudflare_temp_email"
+
+# [基础配置: cloudflare_temp_email / imap / cloudmail 共享]
+# 你的域名 (支持逗号分隔多域名随机轮换) 如果只有一个域名就只填一个域名
+
+mail_domains: "domain1.com,domain2.xyz,domain3.net"
+
+#二级域名开关
+enable_sub_domains: false
+
+sub_domain_count: 1
+#域名层级
+sub_domain_level: 1
+#随机层级开关
+random_sub_domain_level: false
+
+ai_service:
+  enable_profile: false
+  api_base: "http://your-domain.com:8317/v1"
+  api_key: ""
+  model: "gpt-5"
+
+
+# 你的临时邮箱 后端API 基础地址 结尾不要/，IMAP和freemail/cloudmail/mail_curl不需要配置此项。注意：用浏览器打开后端api验证是否可访问
+gptmail_base: "https://your-domain.com" #是后端访问链接，不是前端访问链接，正常情况浏览器打开访问会显示ok就是对的
+
+# [模式 "cloudflare_temp_email" 专属配置]
+# 你的临时邮箱管理员密码
+admin_auth: ""
+
+# [模式 "imap" 专属配置] (CF Catch-all 转发接收端)
+imap:
+  # 默认为gmail IMAP 服务器地址,QQ为imap.qq.com。不建议用QQ
+  server: "imap.gmail.com"
+  # IMAP 端口
+  port: 993
+  # 接收转发的真实邮箱账号
+  user: ""
+  # 16位应用专用密码，谷歌邮箱要去https://myaccount.google.com/apppasswords这里创建专属应用密码
+  pass: ""
+
+# [模式 "本地微软邮箱" 专属]
+local_microsoft:
+  # 是否开启无限裂变模式 (true/false)
+  enable_fission: false
+  # 裂变主邮箱（用来接收验证码）
+  master_email: ""
+  client_id: ""
+  refresh_token: ""
+  pool_fission: false
+
+# [模式 "freemail" 专属]
+freemail:
+  #访问链接
+  api_url: "https://your-domain.com"
+  #JWTTOKEN
+  api_token: ""
+  admin_username: 
+  admin_password: 
+
+# [模式 "cloud-mail" 专属配置]
+cloudmail:
+  #访问链接
+  api_url: "https://your-domain.com"
+  #管理员邮箱
+  admin_email: "admin@your-domain.com"
+  admin_password: "你的管理员密码"
+
+# [模式 "mail_curl" 专属配置]
+mail_curl:
+  #访问链接
+  api_base: "https://your-domain.com"
+  key: "" # 你的密钥
+
+# [DuckMail 鸭子邮箱配置]
+duckmail:
+  # 你的鸭子邮箱 API 地址，默认为官方公共接口
+  api_url: "https://api.duckmail.com"
+  # 专属域名 (如 duck.com)，留空则随机使用官方支持的域名
+  domain: ""
+  mode: duck_official
+  duck_api_token:
+  forward_mode: Gmail_OAuth
+  forward_email: ''
+# [luckmail 鸭子邮箱配置]
+luckmail:
+  api_key: ""
+  preferred_domain: ""
+  email_type: ms_graph
+  variant_mode: ''
+  # true = 调用你已导入到 LuckMail 私有邮箱池的邮箱；false = 走 LuckMail 购号/历史复用
+  use_imported_pool: false
+  # 私有邮箱池模式下可指定某个具体邮箱，不填则按 email_type/domain 自动分配
+  specified_email: ""
+  reuse_purchased: true
+  tag_id:
+# [temporam 邮箱配置]
+temporam:
+  cookie: ''
+# [tmailor 鸭子邮箱配置]
+tmailor:
+  current_token:
+# [FviaInboxes 配置]
+fvia:
+  token: ''
+# [代理配置]
+# openai注册时代理地址，例子：http://127.0.0.1:7897。如果是国外服务器此项可以不填
+default_proxy: ""
+
+# [HTTP 动态代理池]
+# 适用于 HTTP 动态代理网关（用户名:密码@主机:端口），支持多线程独立通道复用同一条或多条动态代理
+# 如果只填一条动态代理，系统会按 pool_size 复制成多个工作位；
+# 是否换 IP 取决于服务商是否按“新建连接/会话”轮换出口
+http_dynamic_proxy:
+  enable: false
+  # 动态代理池通道数。通常建议与 reg_threads 保持一致
+  pool_size: 3
+  # 支持填写一条或多条代理。保存时若缺少协议头会自动补全为 http://
+  # 若留空则回退使用上面的 default_proxy；若两者都为空，后端会拒绝保存
+  proxy_list:
+    - "http://user:pass@gate.example.com:10000"
+
+# 是否开启注册多线程并发 (true/false)
+enable_multi_thread_reg: false    
+# 注册时的最大并发线程数 (建议根据你的代理质量调整，不要设置过高)
+reg_threads: 10
+
+
+
+# Clash 节点智能轮换（本地使用clash软件）
+clash_proxy_pool:
+  # 【开关】是否在每次注册前自动通过 Clash 切换节点
+  enable: false
+  # 代理客户端类型：clash=Clash/Mihomo 控制 API 切点；v2rayn=自动切换当前选中节点
+  client_type: "clash"
+  # v2rayN 根目录（当 client_type=v2rayn 时必填）
+  v2rayn_base_dir: ""
+  # v2rayN 切换节点后等待核心重启生效的秒数
+  v2rayn_restart_wait_sec: 15
+  # v2rayN 切点后自动隐藏主窗口，避免每次切换都弹出界面
+  v2rayn_hide_window_on_restart: true
+  # 启动业务前先批量测活，后续仅在存活节点池内切换
+  v2rayn_precheck_on_start: true
+  # 批量测活结果缓存分钟数；0 表示只在启动时预检一次，不按时间刷新
+  v2rayn_precheck_cache_minutes: 30
+  # 单次批量测活最多抽检多少个节点；0 表示测完整个候选池
+  v2rayn_precheck_max_nodes: 12
+  # 是否定时执行“订阅更新命令”，更新后自动重新批量测活
+  v2rayn_subscription_update_enabled: false
+  # 订阅更新间隔（分钟）；仅在上方开关开启后生效
+  v2rayn_subscription_update_interval_minutes: 180
+  # 订阅更新命令（例如调用你本机现有的更新脚本、bat、powershell 命令）
+  v2rayn_subscription_update_command: ""
+  # 【核心开关】true=服务器10容器独立推算模式；false=本地单机/单容器模式
+  pool_mode: false
+  # Clash 的外部控制 API 地址 (注意端口通常是 9090 或 9097)
+  api_url: "http://127.0.0.1:9097"
+  #true为测速优选，false为随机盲抽。提示：如果A节点一直是最低延迟那么可能每次都是A节点。
+  fastest_mode: false
+  # 业务策略组名称。若使用“Clash 订阅自助更新”，更新后可在面板中自动识别并同步
+  group_name: "节点选择"
+  # Clash 的外部控制鉴权秘钥 (Secret)
+  secret: "set-your-secret"
+  # 用于连接外网测活的本地代理端口。独享池模式下当 warp_proxy_list 为空时会回退使用它
+  test_proxy_url: ""
+  # 节点过滤黑名单：严格剔除包含以下关键词的节点 (如港台地区、说明性节点)
+  blacklist:
+    - "自动"
+    - "故障"
+    - "剩余"
+    - "到期"
+    - "官网"
+    - "Traffic"
+    - "DIRECT"
+    - "REJECT"
+    - "港"
+    - "HK"
+    - "Hongkong"
+    - "台"
+    - "TW"
+    - "Taiwan"
+    - "中"
+    - "CN"
+    - "China"
+    - "回国"
+
+warp_proxy_list:
+  # 独享池模式下，每条代表一个独立通道 / 一个 Mihomo 实例对应的 HTTP 代理端口
+  - "http://127.0.0.1:41001"
+  - "http://127.0.0.1:41002"
+  - "http://127.0.0.1:41003"
+  - "http://127.0.0.1:41004"
+  - "http://127.0.0.1:41005"
+  - "http://127.0.0.1:41006"
+  - "http://127.0.0.1:41007"
+  - "http://127.0.0.1:41008"
+  - "http://127.0.0.1:41009"
+  - "http://127.0.0.1:41010"
+
+
+# [验证码重发次数配置，默认5次]
+max_otp_retries: 5
+
+# [邮箱代理专项配置]
+# 【开关】true 表示获取邮箱（谷歌）也用代理，false 表示直连（推荐先试 false）如果是国外服务器此项可以保持false
+use_proxy_for_email: false
+# 【开关】true 表示在控制台日志中隐藏邮箱域名，false 表示显示完整邮箱
+enable_email_masking: true
+
+
+#注册后等待多少秒在去拿tokens,默认是5-15秒之内
+login_delay_min: 20
+login_delay_max: 45
+
+# CPA 模式专属配置
+cpa_mode:
+  # 【开关】true 开启巡检补货上传，false 则只进行常规无限注册
+  enable: false
+  auto_check: true
+  # 【开关】开启 CPA 补货时，是否同时将账号 Token 备份到本地，默认true为备份
+  save_to_local: true
+  # CPA的访问地址
+  api_url: "http://your-domain.com:8317"
+  # CPA登陆密码
+  api_token: "xxxx"
+  # 仓库存量低于此值时触发补货
+  min_accounts_threshold: 30
+  # 每次触发补货注册的数量
+  batch_reg_count: 1
+  # 周限额剔除阈值设置 (0-100)
+  # 设为 80 代表额度剩余低于 80% 就当作死号剔除，设为 0 代表完全耗尽才剔除。
+  min_remaining_weekly_percent: 80
+  # 额度耗尽时是否删除 (false 则为不删除，恢复后自动唤醒)
+  remove_on_limit_reached: false 
+  # 账号彻底死亡(如封号、Token刷新失败)时是否删除 (false 则为不删除，只禁用)
+  remove_dead_accounts: false
+  # 是否开启刷新token功能
+  enable_token_revive: false
+  # CPA 仓库巡检的间隔时间，默认每60分钟巡检一次
+  check_interval_minutes: 60
+  #并发线程数配置，默认 10 线程
+  threads: 10
+
+# SUB2APIA配置 参数含义跟CPA相同
+sub2api_mode:
+  enable: false
+  auto_check: true
+  save_to_local: true
+  api_url: 
+  api_key: 
+  min_accounts_threshold: 20
+  batch_reg_count: 1
+  remove_on_limit_reached: true
+  remove_dead_accounts: true
+  enable_token_revive: false
+  check_interval_minutes: 60
+  threads: 10
+  account_concurrency: 10
+  account_load_factor: 10
+  account_priority: 1
+  account_rate_multiplier: 1.0
+  account_group_ids: ""
+  enable_ws_mode: true
+
+hero_sms:
+  enabled: false
+  api_key: 
+  base_url: https://hero-sms.com/stubs/handler_api.php
+  country: 50
+  service: dr
+  use_proxy: false
+  auto_pick_country: false
+  reuse_phone: true
+  max_price: 0.08
+  min_balance: 1
+  max_tries: 3
+  poll_timeout_sec: 120
+
+# 常规量产模式专属配置
+normal_mode:
+  # 每次循环注册成功或失败后，最短等待时间 (秒)
+  sleep_min: 5
+  # 每次循环注册成功或失败后，最长等待时间 (秒)
+  sleep_max: 30
+  # 单次(每批)执行的注册总数
+  target_count: 2
+
+tg_bot:
+  enable: false
+  token: ''
+  chat_id: ''
+  use_proxy: false
+  mask_email: false
+  mask_password: false
+  template_success: |
+    🎉 <b>注册成功</b>
+    ━━━━━━━━━━━━
+    ⏰ 时间：<code>{time}</code>
+    📧 账号：<code>{email}</code>
+    🔑 密码：<code>{password}</code>
+  template_stop: |
+    🛑 <b>任务已停止</b>
+    ━━━━━━━━━━━━
+    📊 成功率：<code>{success_rate}%</code>
+    ✅ 成功：<code>{success}/{target}</code>
+    ❌ 失败：<code>{failed}</code>
+    🚧 风控：<code>{retries}</code>
+    🔒 密码受阻：<code>{pwd_blocked}</code>
+    📱 出现手机：<code>{phone_verify}</code>
+    ⏱ 总耗时：<code>{elapsed_time}s</code>
+    📈 平均单号：<code>{avg_time}s</code>
+
+# WEB端密码
+web_password: admin
+#CF账号
+cf_api_email: 
+#CF KEY
+cf_api_key:
+
+#集群总控
+cluster_node_name: "NODE-1"
+cluster_master_url: ""
+# 请务必改成你自己的随机长字符串，不要使用默认值
+cluster_secret: "change-me-cluster-secret"
