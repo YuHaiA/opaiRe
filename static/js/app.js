@@ -18,7 +18,6 @@ createApp({
                 { id: 'sms', name: '手机接码', icon: '📱' },
 				// { id: 'cf_routes', name: 'CF 路由', icon: '🌍' },
                 { id: 'proxy', name: '网络代理', icon: '🌐' },
-                { id: 'mihomo', name: 'Mihomo 管理', icon: '🌀' },
                 { id: 'relay', name: '中转管仓', icon: '☁️' },
                 { id: 'notify', name: '消息通知', icon: '📢' },
                 { id: 'concurrency', name: '并发与系统', icon: '⚙️' }
@@ -62,17 +61,6 @@ createApp({
             clashPoolGroupError: '',
             clashPoolRuntime: null,
             clashPoolRuntimeError: '',
-            mihomoInfo: null,
-            mihomoCatalog: null,
-            mihomoSubUrl: '',
-            mihomoActiveGroup: '',
-            mihomoNodeSearch: '',
-            mihomoHealthSummary: null,
-            mihomoSwitchingNode: '',
-            isMihomoLoading: false,
-            isMihomoUpdating: false,
-            isMihomoHealthchecking: false,
-            isMihomoRemovingInvalid: false,
             isClashPoolUpdating: false,
             isProxyBatchChecking: false,
             isV2raynSubscriptionUpdating: false,
@@ -164,29 +152,6 @@ createApp({
         },
         cloudTotalPages() {
             return Math.ceil(this.cloudTotal / this.cloudPageSize) || 1;
-        },
-        mihomoGroups() {
-            return Array.isArray(this.mihomoCatalog?.groups) ? this.mihomoCatalog.groups : [];
-        },
-        mihomoProviders() {
-            return Array.isArray(this.mihomoCatalog?.providers) ? this.mihomoCatalog.providers : [];
-        },
-        activeMihomoGroupMeta() {
-            const active = (this.mihomoActiveGroup || '').trim();
-            if (!active) return null;
-            return this.mihomoGroups.find(item => item.name === active) || null;
-        },
-        filteredMihomoNodes() {
-            const allNodes = Array.isArray(this.mihomoCatalog?.nodes) ? this.mihomoCatalog.nodes : [];
-            const search = (this.mihomoNodeSearch || '').trim().toLowerCase();
-            const activeGroup = this.activeMihomoGroupMeta;
-            const allowedNames = activeGroup && Array.isArray(activeGroup.all) ? new Set(activeGroup.all) : null;
-            return allNodes.filter(node => {
-                const name = String(node.name || '');
-                if (allowedNames && !allowedNames.has(name)) return false;
-                if (search && !name.toLowerCase().includes(search)) return false;
-                return true;
-            });
         }
     },
     methods: {
@@ -269,9 +234,6 @@ createApp({
             }
             if (this.currentTab === 'proxy' && this.config?.clash_proxy_pool?.client_type !== 'v2rayn') {
                 this.fetchClashPoolInfo();
-            }
-            if (this.currentTab === 'mihomo') {
-                this.fetchMihomoInfo();
             }
         },
         async fetchWebProcessInfo() {
@@ -442,9 +404,6 @@ createApp({
                 if(this.config.clash_proxy_pool && Array.isArray(this.config.clash_proxy_pool.blacklist)) {
                     this.blacklistStr = this.config.clash_proxy_pool.blacklist.join('\n');
                 }
-                if (this.config.clash_proxy_pool && !Array.isArray(this.config.clash_proxy_pool.disabled_nodes)) {
-                    this.config.clash_proxy_pool.disabled_nodes = [];
-                }
                 if(Array.isArray(this.config.warp_proxy_list)) {
                     this.warpListStr = this.config.warp_proxy_list.join('\n');
                 }
@@ -454,9 +413,6 @@ createApp({
                 if (this.config.cluster_node_name === undefined) this.config.cluster_node_name = '';
                 if (this.config.cluster_master_url === undefined) this.config.cluster_master_url = '';
                 if (this.config.cluster_secret === undefined) this.config.cluster_secret = 'change-me-cluster-secret';
-                if (!this.mihomoActiveGroup && this.config.clash_proxy_pool?.group_name) {
-                    this.mihomoActiveGroup = this.config.clash_proxy_pool.group_name;
-                }
             } catch (e) {}
         },
         async fetchClashPoolInfo() {
@@ -476,171 +432,6 @@ createApp({
                 }
             } catch (e) {
                 this.showToast('读取 Clash 订阅信息失败', 'error');
-            }
-        },
-        applyMihomoInfoPayload(payload) {
-            const data = payload || {};
-            this.mihomoInfo = data;
-            this.mihomoCatalog = data.catalog || null;
-            this.mihomoSubUrl = (data.effective_sub_url || data.sub_url || '').trim();
-            if (!this.mihomoActiveGroup) {
-                this.mihomoActiveGroup =
-                    (data.catalog && (data.catalog.actual_group_name || data.catalog.group_keyword)) ||
-                    this.config?.clash_proxy_pool?.group_name ||
-                    '';
-            }
-            if (!this.mihomoActiveGroup && Array.isArray(data.catalog?.groups) && data.catalog.groups.length > 0) {
-                this.mihomoActiveGroup = data.catalog.groups[0].name || '';
-            }
-        },
-        async fetchMihomoInfo(showToast = false) {
-            this.isMihomoLoading = true;
-            try {
-                const res = await this.authFetch('/api/proxy/mihomo/info');
-                const data = await res.json();
-                if (data.status === 'success') {
-                    this.applyMihomoInfoPayload(data.data || {});
-                    if (showToast) this.showToast('Mihomo 信息已刷新', 'success');
-                } else {
-                    this.showToast(data.message || '读取 Mihomo 信息失败', 'warning');
-                }
-            } catch (e) {
-                this.showToast('读取 Mihomo 信息失败', 'error');
-            } finally {
-                this.isMihomoLoading = false;
-            }
-        },
-        async enableMihomoMode() {
-            if (!this.config?.clash_proxy_pool) return;
-            this.config.clash_proxy_pool.client_type = 'mihomo';
-            await this.saveConfig();
-            await this.fetchMihomoInfo();
-        },
-        useMihomoGroupName(name) {
-            this.mihomoActiveGroup = name || '';
-            if (this.config?.clash_proxy_pool) {
-                this.config.clash_proxy_pool.group_name = name || '';
-            }
-        },
-        async updateMihomoSubscription() {
-            const subUrl = (this.mihomoSubUrl || '').trim();
-            if (!subUrl) {
-                this.showToast('请先填写 Mihomo 订阅链接', 'warning');
-                return;
-            }
-            const confirmed = await this.customConfirm('确认更新 Mihomo 订阅并刷新节点目录吗？');
-            if (!confirmed) return;
-            this.isMihomoUpdating = true;
-            try {
-                const res = await this.authFetch('/api/proxy/mihomo/update_subscription', {
-                    method: 'POST',
-                    body: JSON.stringify({ sub_url: subUrl })
-                });
-                const data = await res.json();
-                if (data.status === 'success') {
-                    if (data.data?.effective_sub_url) this.mihomoSubUrl = data.data.effective_sub_url;
-                    this.showToast(data.message || 'Mihomo 订阅更新成功', 'success');
-                    await this.fetchMihomoInfo();
-                } else {
-                    this.showToast(data.message || 'Mihomo 订阅更新失败', 'error');
-                }
-            } catch (e) {
-                this.showToast('Mihomo 订阅更新失败', 'error');
-            } finally {
-                this.isMihomoUpdating = false;
-            }
-        },
-        async switchMihomoNode(nodeName) {
-            const groupName = (this.mihomoActiveGroup || this.config?.clash_proxy_pool?.group_name || '').trim();
-            if (!groupName) {
-                this.showToast('请先选择一个策略组', 'warning');
-                return;
-            }
-            this.mihomoSwitchingNode = nodeName;
-            try {
-                const res = await this.authFetch('/api/proxy/mihomo/switch_node', {
-                    method: 'POST',
-                    body: JSON.stringify({ group: groupName, node: nodeName })
-                });
-                const data = await res.json();
-                if (data.status === 'success') {
-                    this.showToast(data.message || `已切换到 ${nodeName}`, 'success');
-                    await this.fetchMihomoInfo();
-                } else {
-                    this.showToast(data.message || '切换节点失败', 'error');
-                }
-            } catch (e) {
-                this.showToast('切换节点失败', 'error');
-            } finally {
-                this.mihomoSwitchingNode = '';
-            }
-        },
-        async runMihomoBatchHealthcheck() {
-            const groupName = (this.mihomoActiveGroup || this.config?.clash_proxy_pool?.group_name || '').trim();
-            if (!groupName) {
-                this.showToast('请先选择一个策略组', 'warning');
-                return;
-            }
-            this.isMihomoHealthchecking = true;
-            try {
-                const payload = {
-                    group: groupName,
-                    timeout_ms: 2000,
-                    test_url: this.config?.clash_proxy_pool?.test_proxy_url || 'http://www.gstatic.com/generate_204',
-                    include_disabled: false
-                };
-                const res = await this.authFetch('/api/proxy/mihomo/batch_healthcheck', {
-                    method: 'POST',
-                    body: JSON.stringify(payload)
-                });
-                const data = await res.json();
-                if (data.status === 'success') {
-                    this.mihomoHealthSummary = data.data || null;
-                    this.showToast(data.message || 'Mihomo 批量测活完成', 'success');
-                } else {
-                    this.showToast(data.message || 'Mihomo 批量测活失败', 'error');
-                }
-            } catch (e) {
-                this.showToast('Mihomo 批量测活失败', 'error');
-            } finally {
-                this.isMihomoHealthchecking = false;
-            }
-        },
-        async removeMihomoInvalidNodes() {
-            const groupName = (this.mihomoActiveGroup || this.config?.clash_proxy_pool?.group_name || '').trim();
-            if (!groupName) {
-                this.showToast('请先选择一个策略组', 'warning');
-                return;
-            }
-            const confirmed = await this.customConfirm('确认把当前策略组中测活失败的节点加入禁用列表吗？');
-            if (!confirmed) return;
-            this.isMihomoRemovingInvalid = true;
-            try {
-                const payload = {
-                    group: groupName,
-                    nodes: [],
-                    timeout_ms: 2000,
-                    test_url: this.config?.clash_proxy_pool?.test_proxy_url || 'http://www.gstatic.com/generate_204'
-                };
-                const res = await this.authFetch('/api/proxy/mihomo/remove_invalid_nodes', {
-                    method: 'POST',
-                    body: JSON.stringify(payload)
-                });
-                const data = await res.json();
-                if (data.status === 'success') {
-                    this.mihomoHealthSummary = data.data?.healthcheck || this.mihomoHealthSummary;
-                    if (this.config?.clash_proxy_pool) {
-                        this.config.clash_proxy_pool.disabled_nodes = data.data?.disabled_nodes || this.config.clash_proxy_pool.disabled_nodes || [];
-                    }
-                    this.showToast(data.message || '无效节点已移除', 'success');
-                    await this.fetchMihomoInfo();
-                } else {
-                    this.showToast(data.message || '移除无效节点失败', 'error');
-                }
-            } catch (e) {
-                this.showToast('移除无效节点失败', 'error');
-            } finally {
-                this.isMihomoRemovingInvalid = false;
             }
         },
         async updateClashPoolSubscription() {
@@ -823,9 +614,6 @@ createApp({
 			}
             if (tabId === 'proxy' && this.config?.clash_proxy_pool?.client_type !== 'v2rayn') {
                 this.fetchClashPoolInfo();
-            }
-            if (tabId === 'mihomo') {
-                this.fetchMihomoInfo();
             }
 			if (tabId === 'cloud') {
 			    this.fetchCloudAccounts();
