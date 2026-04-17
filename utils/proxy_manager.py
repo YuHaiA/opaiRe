@@ -94,7 +94,7 @@ def reload_proxy_config():
     clash_conf = conf_data.get("clash_proxy_pool", {})
     ENABLE_NODE_SWITCH = bool(clash_conf.get("enable", False))
     PROXY_CLIENT_TYPE = str(clash_conf.get("client_type", "clash") or "clash").strip().lower()
-    if PROXY_CLIENT_TYPE not in {"clash", "v2rayn"}:
+    if PROXY_CLIENT_TYPE not in {"clash", "v2rayn", "v2raya"}:
         PROXY_CLIENT_TYPE = "clash"
     V2RAYN_BASE_DIR = str(clash_conf.get("v2rayn_base_dir", "") or "").strip()
     if V2RAYN_BASE_DIR:
@@ -435,6 +435,9 @@ def smart_switch_node(proxy_url=None):
         return True
     if PROXY_CLIENT_TYPE == "v2rayn":
         return _switch_v2rayn_node(proxy_url)
+    if PROXY_CLIENT_TYPE == "v2raya":
+        print(f"[{ts()}] [代理池] 当前为 v2rayA 模式：节点切换与订阅更新请在 v2rayA 面板中操作，本项目仅检测当前代理链路。")
+        return test_proxy_liveness(proxy_url)
     if POOL_MODE and proxy_url:
         return _do_smart_switch(proxy_url)
     with _global_switch_lock:

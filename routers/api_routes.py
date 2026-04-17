@@ -1073,6 +1073,22 @@ async def api_v2rayn_update_subscription(token: str = Depends(verify_token)):
     }
 
 
+@router.post("/api/proxy/v2raya/test_current")
+async def api_v2raya_test_current(token: str = Depends(verify_token)):
+    proxy_url = getattr(core_engine.cfg, "DEFAULT_PROXY", None)
+    if not proxy_url:
+        return {"status": "error", "message": "当前未配置 default_proxy，无法检测 v2rayA 当前链路。"}
+    ok = proxy_manager.test_proxy_liveness(proxy_url, silent=False)
+    return {
+        "status": "success" if ok else "warning",
+        "message": "v2rayA 当前代理链路可用。" if ok else "v2rayA 当前代理链路不可用，请检查 v2rayA 面板里的节点、订阅或本地代理端口。",
+        "data": {
+            "proxy_url": proxy_url,
+            "client_type": proxy_manager.PROXY_CLIENT_TYPE,
+        },
+    }
+
+
 @router.get("/api/ext/generate_task")
 def ext_generate_task(token: str = Depends(verify_token)):
     from utils.email_providers.mail_service import mask_email, get_email_and_token, clear_sticky_domain

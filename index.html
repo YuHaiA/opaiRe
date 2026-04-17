@@ -1694,12 +1694,36 @@
                                         <div>
                                             <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">代理客户端类型</label>
                                             <select v-model="config.clash_proxy_pool.client_type" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors shadow-sm text-sm">
-                                                <option value="clash">Clash / Mihomo（控制 API 切点）</option>
+                                                <option value="clash">Clash（控制 API 切点）</option>
+                                                <option value="v2raya">v2rayA（面板托管）</option>
                                                 <option value="v2rayn">v2rayN（全局节点池切换）</option>
                                             </select>
                                             <p class="text-[11px] text-slate-500 mt-2 font-medium" v-if="config.clash_proxy_pool.client_type === 'v2rayn'">
                                                 v2rayN 模式会按全局 IndexId 在全部节点里切换，并重启本地客户端，不依赖 Clash 控制 API。
                                             </p>
+                                            <p class="text-[11px] text-slate-500 mt-2 font-medium" v-else-if="config.clash_proxy_pool.client_type === 'v2raya'">
+                                                v2rayA 模式下订阅更新和节点切换在 v2rayA 面板完成，本项目仅使用 default_proxy 并检测当前链路。
+                                            </p>
+                                        </div>
+                                        <div v-if="config.clash_proxy_pool.client_type === 'v2raya'" class="space-y-4 border border-indigo-200 bg-indigo-50/50 rounded-2xl p-4">
+                                            <div>
+                                                <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">v2rayA 面板地址</label>
+                                                <input type="text" v-model="config.clash_proxy_pool.v2raya_url" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 http://127.0.0.1:2017">
+                                            </div>
+                                            <div class="text-xs text-indigo-800 font-bold bg-white border border-indigo-200 rounded-xl px-4 py-3 leading-relaxed shadow-sm">
+                                                订阅更新、节点切换、分组选择请在 v2rayA 面板完成；项目侧只负责使用上方 default_proxy，并检测当前链路是否可用。
+                                            </div>
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                <button @click="openV2rayAPanel" class="bg-white border border-indigo-200 text-indigo-700 px-4 py-2.5 rounded-xl hover:bg-indigo-50 active:scale-95 transition-all shadow-sm font-bold flex items-center justify-center gap-2">
+                                                    <span>🧭</span>
+                                                    打开 v2rayA 面板
+                                                </button>
+                                                <button @click="testV2rayACurrentProxy" :disabled="isV2rayATesting" class="bg-indigo-600 text-white px-4 py-2.5 rounded-xl hover:bg-indigo-700 active:scale-95 transition-all shadow-md shadow-indigo-500/20 font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                    <span v-if="isV2rayATesting" class="animate-spin">⏳</span>
+                                                    <span v-else>⚡</span>
+                                                    检测当前链路
+                                                </button>
+                                            </div>
                                         </div>
                                         <div v-if="config.clash_proxy_pool.client_type === 'v2rayn'" class="space-y-4 border border-indigo-200 bg-indigo-50/50 rounded-2xl p-4">
                                             <div>

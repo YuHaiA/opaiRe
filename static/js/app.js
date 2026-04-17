@@ -64,6 +64,7 @@ createApp({
             isClashPoolUpdating: false,
             isProxyBatchChecking: false,
             isV2raynSubscriptionUpdating: false,
+            isV2rayATesting: false,
             accounts: [],
             selectedAccounts: [],
 			currentPage: 1,
@@ -230,7 +231,7 @@ createApp({
             if (this.config && this.config.reg_mode === 'extension') {
                 this.listenToExtension();
             }
-            if (this.currentTab === 'proxy' && this.config?.clash_proxy_pool?.client_type !== 'v2rayn') {
+            if (this.currentTab === 'proxy' && this.config?.clash_proxy_pool?.client_type === 'clash') {
                 this.fetchClashPoolInfo();
             }
         },
@@ -390,6 +391,7 @@ createApp({
                     this.config.sub2api_mode.enable_ws_mode = true;
                 }
                 if (this.config.clash_proxy_pool.client_type === undefined) this.config.clash_proxy_pool.client_type = 'clash';
+                if (this.config.clash_proxy_pool.v2raya_url === undefined) this.config.clash_proxy_pool.v2raya_url = '';
                 if (this.config.clash_proxy_pool.v2rayn_base_dir === undefined) this.config.clash_proxy_pool.v2rayn_base_dir = '';
                 if (this.config.clash_proxy_pool.v2rayn_restart_wait_sec === undefined) this.config.clash_proxy_pool.v2rayn_restart_wait_sec = 15;
                 if (this.config.clash_proxy_pool.v2rayn_hide_window_on_restart === undefined) this.config.clash_proxy_pool.v2rayn_hide_window_on_restart = true;
@@ -563,6 +565,32 @@ createApp({
                 this.isV2raynSubscriptionUpdating = false;
             }
         },
+        openV2rayAPanel() {
+            const url = (this.config?.clash_proxy_pool?.v2raya_url || '').trim();
+            if (!url) {
+                this.showToast('请先填写 v2rayA 面板地址', 'warning');
+                return;
+            }
+            window.open(url, '_blank');
+        },
+        async testV2rayACurrentProxy() {
+            if (!this.config?.clash_proxy_pool || this.config.clash_proxy_pool.client_type !== 'v2raya') {
+                this.showToast('当前不是 v2rayA 模式', 'warning');
+                return;
+            }
+            this.isV2rayATesting = true;
+            try {
+                await this.saveConfig();
+                const res = await this.authFetch('/api/proxy/v2raya/test_current', { method: 'POST' });
+                const data = await res.json();
+                const level = data.status === 'success' ? 'success' : (data.status === 'warning' ? 'warning' : 'error');
+                this.showToast(data.message || 'v2rayA 当前链路检测已完成', level);
+            } catch (e) {
+                this.showToast('v2rayA 当前链路检测失败', 'error');
+            } finally {
+                this.isV2rayATesting = false;
+            }
+        },
 		async fetchAccounts(isManual = false) {
             if (isManual) {
                 this.currentPage = 1;
@@ -610,7 +638,7 @@ createApp({
 			if (tabId === 'email') {
 				this.fetchConfig();
 			}
-            if (tabId === 'proxy' && this.config?.clash_proxy_pool?.client_type !== 'v2rayn') {
+            if (tabId === 'proxy' && this.config?.clash_proxy_pool?.client_type === 'clash') {
                 this.fetchClashPoolInfo();
             }
 			if (tabId === 'cloud') {
