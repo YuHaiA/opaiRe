@@ -20,11 +20,13 @@ from utils.integrations.hero_sms import _try_verify_phone_via_hero_sms
 try:
     from utils.auth_core import generate_payload
 except ImportError as exc:
+    _auth_core_import_error = exc
+
     def generate_payload(*args, **kwargs):
         raise RuntimeError(
             "Missing compiled extension utils.auth_core for this platform. "
             "Expected utils/auth_core.pyd on Windows or the matching auth_core .so file on Linux/macOS."
-        ) from exc
+        ) from _auth_core_import_error
 
 AUTH_URL = "https://auth.openai.com/oauth/authorize"
 TOKEN_URL = "https://auth.openai.com/oauth/token"
