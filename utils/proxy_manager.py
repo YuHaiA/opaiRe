@@ -509,9 +509,7 @@ def _get_v2rayn_probe_urls() -> list[str]:
     if primary:
         urls.append(primary)
     for item in [
-        "https://www.gstatic.com/generate_204",
-        "https://www.apple.com/library/test/success.html",
-        "http://www.msftconnecttest.com/connecttest.txt",
+        "https://www.gstatic.com/generate_204"
     ]:
         if item not in urls:
             urls.append(item)
@@ -912,7 +910,7 @@ def refresh_v2rayn_live_pool(proxy_url=None, force: bool = False, reason: str = 
 
 
 def prepare_proxy_runtime(proxy_url=None, reason: str = "startup"):
-    if ENABLE_NODE_SWITCH and PROXY_CLIENT_TYPE == "v2rayn":
+    if ENABLE_NODE_SWITCH and PROXY_CLIENT_TYPE == "v2rayn" and V2RAYN_PRECHECK_ON_START:
         return refresh_v2rayn_live_pool(proxy_url, force=False, reason=reason)
     return {"tested_count": 0, "live_count": 0, "dead_count": 0, "live_profiles": [], "subscription_updated": False, "reason": reason}
 
@@ -936,34 +934,52 @@ def _switch_v2rayn_node(proxy_url=None):
         print(f"[{ts()}] [代理池] v2rayN 当前节点: [{clean_for_log(current_profile['remarks'])}] (IndexId={current_profile['index_id']})")
     elif current_id:
         print(f"[{ts()}] [代理池] v2rayN 当前节点 IndexId={current_id}")
-    candidates = (refresh_v2rayn_live_pool(proxy_url, force=False, reason='switch').get("live_profiles") or _list_v2rayn_profiles())
+    if V2RAYN_PRECHECK_ON_START:
+        candidates = (refresh_v2rayn_live_pool(proxy_url, force=False, reason='switch').get("live_profiles") or _list_v2rayn_profiles())
+    else:
+        candidates = _list_v2rayn_profiles()
     if not candidates:
-        print(f"[{ts()}] [WARNING] v2rayN 当前活节点池为空，尝试更新订阅并重建节点池...")
-        rebuilt = refresh_v2rayn_live_pool(proxy_url, force=True, reason="rebuild_after_pool_empty", refresh_subscription=True)
-        candidates = rebuilt.get("live_profiles") or _list_v2rayn_profiles()
-        if not candidates:
-            print(f"[{ts()}] [ERROR] v2rayN 更新订阅并重建节点池后仍无可用节点。")
+        if V2RAYN_PRECHECK_ON_START:
+            print(f"[{ts()}] [WARNING] v2rayN 当前活节点池为空，尝试更新订阅并重建节点池...")
+            rebuilt = refresh_v2rayn_live_pool(proxy_url, force=True, reason="rebuild_after_pool_empty", refresh_subscription=True)
+            candidates = rebuilt.get("live_profiles") or _list_v2rayn_profiles()
+            if not candidates:
+                print(f"[{ts()}] [ERROR] v2rayN 更新订阅并重建节点池后仍无可用节点。")
+                return False
+        else:
+            print(f"[{ts()}] [ERROR] v2rayN 过滤后无可用节点。")
             return False
     candidates = [dict(p) for p in candidates]
     random.shuffle(candidates)
     ordered = [p for p in candidates if p["index_id"] != current_id] or candidates
     if len(ordered) == 1 and ordered[0]["index_id"] == current_id:
-        print(f"[{ts()}] [代理池] v2rayN 活节点池已轮空，准备更新订阅并重建节点池...")
-        rebuilt = refresh_v2rayn_live_pool(proxy_url, force=True, reason="rebuild_after_pool_exhausted", refresh_subscription=True)
-        rebuilt_candidates = [dict(p) for p in (rebuilt.get("live_profiles") or _list_v2rayn_profiles())]
-        random.shuffle(rebuilt_candidates)
-        ordered = [p for p in rebuilt_candidates if p["index_id"] != current_id] or rebuilt_candidates
-        if not ordered:
-            print(f"[{ts()}] [ERROR] v2rayN 重建节点池后仍无可切换节点。")
-            return False
+        if V2RAYN_PRECHECK_ON_START:
+            print(f"[{ts()}] [代理池] v2rayN 活节点池已轮空，准备更新订阅并重建节点池...")
+            rebuilt = refresh_v2rayn_live_pool(proxy_url, force=True, reason="rebuild_after_pool_exhausted", refresh_subscription=True)
+            rebuilt_candidates = [dict(p) for p in (rebuilt.get("live_profiles") or _list_v2rayn_profiles())]
+            random.shuffle(rebuilt_candidates)
+            ordered = [p for p in rebuilt_candidates if p["index_id"] != current_id] or rebuilt_candidates
+            if not ordered:
+                print(f"[{ts()}] [ERROR] v2rayN 重建节点池后仍无可切换节点。")
+                return False
+        else:
+            ordered = candidates
     max_retries = min(8, len(ordered))
     for idx, profile in enumerate(ordered[:max_retries], 1):
         print(f"\n[{ts()}] [代理池] v2rayN 尝试切换节点: [{clean_for_log(profile['remarks'])}] ({idx}/{max_retries})")
         print(f"[{ts()}] [代理池] 节点切换详情: old={current_id or 'UNKNOWN'} -> new={profile['index_id']}")
         if _activate_v2rayn_profile_runtime(profile, proxy_url):
-            _mark_v2rayn_profile_valid(profile["index_id"])
-            print(f"[{ts()}] [代理池] v2rayN 切换确认: IndexId={profile['index_id']} | 节点=[{clean_for_log(profile['remarks'])}] | 已从活节点池切换成功")
-            return True
+            if V2RAYN_PRECHECK_ON_START:
+                _mark_v2rayn_profile_valid(profile["index_id"])
+                print(f"[{ts()}] [代理池] v2rayN 切换确认: IndexId={profile['index_id']} | 节点=[{clean_for_log(profile['remarks'])}] | 已从活节点池切换成功")
+                return True
+            is_ok, region, latency_ms = _test_v2rayn_proxy_liveness(proxy_url)
+            if is_ok:
+                print(f"[{ts()}] [代理池] v2rayN 切换确认: IndexId={profile['index_id']} | 节点=[{clean_for_log(profile['remarks'])}] | 出口地区={region or 'UNKNOWN'} | 延迟={latency_ms if latency_ms is not None else '?'}ms")
+                return True
+            _mark_v2rayn_profile_invalid(profile["index_id"])
+            print(f"[{ts()}] [代理池] v2rayN 当前抽中节点验证失败，继续抽取下一节点...")
+            continue
         _mark_v2rayn_profile_invalid(profile["index_id"])
         print(f"[{ts()}] [代理池] v2rayN 节点测活失败，继续尝试下一节点...")
     print(f"\n[{ts()}] [ERROR] v2rayN 连续切换 {max_retries} 个节点后仍不可用。")

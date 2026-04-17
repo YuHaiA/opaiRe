@@ -1819,12 +1819,18 @@ def get_sub2api_groups(token: str = Depends(verify_token)):
     from curl_cffi import requests as cffi_requests
     sub2api_url = getattr(core_engine.cfg, "SUB2API_URL", "").strip()
     sub2api_key = getattr(core_engine.cfg, "SUB2API_KEY", "").strip()
+    proxy_url = getattr(core_engine.cfg, "DEFAULT_PROXY", "").strip()
     if not sub2api_url or not sub2api_key: return {"status": "error",
                                                    "message": "Please save the Sub2API URL and API key first."}
     try:
-        response = cffi_requests.get(f"{sub2api_url.rstrip('/')}/api/v1/admin/groups/all",
-                                     headers={"x-api-key": sub2api_key, "Content-Type": "application/json"}, timeout=10,
-                                     impersonate="chrome110")
+        request_kwargs = {
+            "headers": {"x-api-key": sub2api_key, "Content-Type": "application/json"},
+            "timeout": 10,
+            "impersonate": "chrome110",
+        }
+        if proxy_url:
+            request_kwargs["proxies"] = {"http": proxy_url, "https": proxy_url}
+        response = cffi_requests.get(f"{sub2api_url.rstrip('/')}/api/v1/admin/groups/all", **request_kwargs)
         if response.status_code != 200: return {"status": "error",
                                                 "message": f"HTTP {response.status_code}: {response.text[:200]}"}
         return {"status": "success", "data": response.json().get("data", [])}

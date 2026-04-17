@@ -112,7 +112,7 @@ tmailor:
 fvia:
   token: ''
 # [代理配置]
-# openai注册时代理地址，例子：http://127.0.0.1:7897。如果是国外服务器此项可以不填
+# openai注册时代理地址，例子：socks5://127.0.0.1:10808。如果是国外服务器此项可以不填
 default_proxy: ""
 
 # [HTTP 动态代理池]
@@ -148,11 +148,11 @@ clash_proxy_pool:
   # v2rayN 切点后自动隐藏主窗口，避免每次切换都弹出界面
   v2rayn_hide_window_on_restart: true
   # 启动业务前先批量测活，后续仅在存活节点池内切换
-  v2rayn_precheck_on_start: true
+  v2rayn_precheck_on_start: false
   # 批量测活结果缓存分钟数；0 表示只在启动时预检一次，不按时间刷新
   v2rayn_precheck_cache_minutes: 30
   # 单次批量测活最多抽检多少个节点；0 表示测完整个候选池
-  v2rayn_precheck_max_nodes: 12
+  v2rayn_precheck_max_nodes: 50
   # 批量测活完成后，按延迟排序只保留前多少个活节点进入运行池
   v2rayn_live_pool_limit: 50
   # 是否定时执行“订阅更新命令”，更新后自动重新批量测活

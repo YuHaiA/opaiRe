@@ -31,7 +31,7 @@ def normalize_proxy_url(url: str) -> str:
     if not url:
         return ""
     if "://" not in url:
-        url = f"http://{url}"
+        url = f"socks5://{url}"
     return format_docker_url(url)
 
 def deep_update_config(default_dict, user_dict):

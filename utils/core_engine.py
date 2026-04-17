@@ -845,9 +845,19 @@ def _get_sub2api_accounts_with_failover(client: Any, args: Any, scene: str) -> t
     success, account_list = client.get_all_accounts()
     if success:
         return success, account_list
-    if _is_proxy_timeout_like_error(account_list) and _switch_proxy_for_timeout(args, scene):
-        print(f"[{ts()}] [INFO] {scene} 正在使用新代理重新拉取 Sub2API 全量库存...")
-        return client.get_all_accounts()
+    max_retries = 5
+    attempts = 0
+    last_error = account_list
+    while attempts < max_retries and _is_proxy_timeout_like_error(last_error):
+        attempts += 1
+        switched = _switch_proxy_for_timeout(args, f"{scene} 第{attempts}次重试")
+        if not switched:
+            break
+        print(f"[{ts()}] [INFO] {scene} 正在使用新代理重新拉取 Sub2API 全量库存... ({attempts}/{max_retries})")
+        success, account_list = client.get_all_accounts()
+        if success:
+            return success, account_list
+        last_error = account_list
     return success, account_list
 
 def process_sub2api_worker(i: int, total: int, item: dict, client: Any, args: Any) -> bool:

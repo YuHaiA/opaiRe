@@ -4,6 +4,10 @@ from curl_cffi import requests
 from utils import config as cfg
 
 
+class GeneratorEmailNetworkAbort(RuntimeError):
+    """Raised when GeneratorEmail repeatedly fails due to network issues."""
+
+
 class GeneratorEmailService:
     def __init__(self, proxies=None):
         self.proxies = proxies
@@ -35,7 +39,7 @@ class GeneratorEmailService:
             if attempt < retries:
                 time.sleep(min(2 * attempt, 5))
         if last_error:
-            raise last_error
+            raise GeneratorEmailNetworkAbort(str(last_error))
         return None
 
     def _parse_email(self, html: str) -> str:
@@ -96,6 +100,8 @@ class GeneratorEmailService:
                     generic = re.findall(r"\b(\d{6})\b", html)
                     if generic: return generic[-1]
 
-        except Exception as e:
+        except GeneratorEmailNetworkAbort:
+            raise
+        except Exception:
             pass
         return ""

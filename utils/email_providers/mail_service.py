@@ -714,7 +714,7 @@ def get_oai_code(
         proxies: Any = None,
         processed_mail_ids: set = None,
         pattern: str = OTP_CODE_PATTERN,
-        max_attempts: int = 20,
+        max_attempts: int = 10,
 ) -> str:
     """轮询各邮箱服务商收取 OpenAI 验证码，返回 6 位字符串或空串。"""
     mailbox_id = jwt
@@ -1129,7 +1129,7 @@ def get_oai_code(
                     print(f"\n[{cfg.ts()}] [ERROR] GeneratorEmail 缺少凭证 (surl)，无法提取验证码！")
                     return ""
                 try:
-                    from utils.email_providers.generator_email_service import GeneratorEmailService
+                    from utils.email_providers.generator_email_service import GeneratorEmailService, GeneratorEmailNetworkAbort
                     ge_service = GeneratorEmailService(proxies=mail_proxies)
 
                     code = ge_service.get_verification_code(jwt)
@@ -1137,7 +1137,10 @@ def get_oai_code(
                         processed_mail_ids.add(jwt)
                         print(f"\n[{cfg.ts()}] [SUCCESS] GeneratorEmail ({mask_email(email)})邮箱提取成功: {code}")
                         return code
-                except Exception as e:
+                except GeneratorEmailNetworkAbort as e:
+                    print(f"\n[{cfg.ts()}] [ERROR] GeneratorEmail 连续网络异常，直接跳过当前邮箱任务: {e}")
+                    return ""
+                except Exception:
                     pass
 
             elif mode == "tempmail":

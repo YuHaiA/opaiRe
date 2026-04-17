@@ -530,16 +530,16 @@ createApp({
             }
             this.isProxyBatchChecking = true;
             this.currentTab = 'console';
-            this.showToast(refreshSubscription ? '正在更新订阅并重建 v2rayN 全局活节点池...' : '正在批量测活 v2rayN 全部节点...', 'info');
+            this.showToast(refreshSubscription ? '正在更新订阅并重新筛选可用节点...' : '正在重新筛选可用节点...', 'info');
             try {
                 await this.saveConfig();
                 const suffix = refreshSubscription ? '?refresh_subscription=true' : '';
                 const res = await this.authFetch(`/api/proxy/v2rayn/precheck${suffix}`, { method: 'POST' });
                 const data = await res.json();
                 const level = data.status === 'success' ? 'success' : (data.status === 'warning' ? 'warning' : 'error');
-                this.showToast(data.message || 'v2rayN 全局节点池测活已完成', level);
+                this.showToast(data.message || 'v2rayN 可用节点筛选已完成', level);
             } catch (e) {
-                this.showToast('v2rayN 批量测活请求失败', 'error');
+                this.showToast('v2rayN 节点筛选请求失败', 'error');
             } finally {
                 this.isProxyBatchChecking = false;
             }

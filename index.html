@@ -1504,7 +1504,7 @@
                             <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-200/60 lg:max-w-3xl">
                                 <h3 class="text-lg md:text-xl font-black text-emerald-600 mb-5 flex items-center gap-2 tracking-tight"><span>🌐</span> 基础代理设置</h3>
                                 <label class="block text-slate-700 text-sm font-extrabold mb-1">全局默认代理</label>
-                                <span class="block text-xs text-slate-400 mb-3 font-medium">基础请求代理地址，如 http://127.0.0.1:7897</span>
+                                <span class="block text-xs text-slate-400 mb-3 font-medium">基础请求代理地址，如 socks5://127.0.0.1:10808</span>
                                 <div class="relative">
                                     <input v-if="!showPwd.proxy" readonly :value="maskValue(config.default_proxy)"
                                            class="w-full appearance-none bg-white border-2 border-slate-200 text-slate-700 font-mono rounded-xl py-3 px-4 focus:outline-none focus:ring-0 focus:border-emerald-500 transition-colors shadow-sm text-sm">
@@ -1722,17 +1722,17 @@
                                                 <input type="checkbox" v-model="config.clash_proxy_pool.v2rayn_precheck_on_start" class="sr-only peer">
                                                 <div class="relative w-11 h-6 shrink-0 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all after:shadow-sm peer-checked:bg-indigo-600 shadow-inner transition-colors duration-300"></div>
                                                 <div class="ml-3">
-                                                    <span class="font-black text-indigo-900 text-sm block tracking-wide">启动前先批量测活</span>
-                                                    <span class="text-[10px] md:text-xs text-slate-500">先从全部节点里筛掉失活节点，再在全局活节点池内切换</span>
+                                                    <span class="font-black text-indigo-900 text-sm block tracking-wide">启动前先筛选可用节点</span>
+                                                    <span class="text-[10px] md:text-xs text-slate-500">关闭后将直接从节点池随机切换，只对当前抽中的节点做验证</span>
                                                 </div>
                                             </label>
                                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                 <div>
-                                                    <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">预检缓存分钟数</label>
+                                                    <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">筛选缓存分钟数</label>
                                                     <input type="number" min="0" v-model.number="config.clash_proxy_pool.v2rayn_precheck_cache_minutes" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors shadow-sm text-sm">
                                                 </div>
                                                 <div>
-                                                    <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">单次最多测活节点数</label>
+                                                    <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">单次最多筛选节点数</label>
                                                     <input type="number" min="0" v-model.number="config.clash_proxy_pool.v2rayn_precheck_max_nodes" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors shadow-sm text-sm">
                                                 </div>
                                             </div>
@@ -1752,7 +1752,7 @@
                                                 <div class="relative w-11 h-6 shrink-0 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all after:shadow-sm peer-checked:bg-indigo-600 shadow-inner transition-colors duration-300"></div>
                                                 <div class="ml-3">
                                                     <span class="font-black text-indigo-900 text-sm block tracking-wide">定时更新订阅后重测</span>
-                                                    <span class="text-[10px] md:text-xs text-slate-500">按上面的命令和间隔执行更新，再自动重建全局活节点池</span>
+                                                    <span class="text-[10px] md:text-xs text-slate-500">按上面的命令和间隔执行更新，再自动重新筛选可用节点</span>
                                                 </div>
                                             </label>
                                             <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1764,12 +1764,12 @@
                                                 <button @click="runV2raynPrecheck(false)" :disabled="isProxyBatchChecking" class="bg-white border border-indigo-200 text-indigo-700 px-4 py-2.5 rounded-xl hover:bg-indigo-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
                                                     <span v-if="isProxyBatchChecking" class="animate-spin">⏳</span>
                                                     <span v-else>⚡</span>
-                                                    全局批量测活
+                                                    重新筛选节点
                                                 </button>
                                                 <button @click="runV2raynPrecheck(true)" :disabled="isProxyBatchChecking" class="bg-indigo-600 text-white px-4 py-2.5 rounded-xl hover:bg-indigo-700 active:scale-95 transition-all shadow-md shadow-indigo-500/20 font-bold disabled:opacity-50 flex items-center justify-center gap-2">
                                                     <span v-if="isProxyBatchChecking" class="animate-spin">⏳</span>
                                                     <span v-else>🔄</span>
-                                                    更新订阅后重建全局节点池
+                                                    更新订阅并筛选
                                                 </button>
                                             </div>
                                         </div>
