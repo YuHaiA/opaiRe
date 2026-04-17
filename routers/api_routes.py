@@ -11,6 +11,7 @@ import sys
 import subprocess
 import shlex
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 import yaml
 import httpx
 from fastapi import APIRouter, Depends, Header, Query, Request, WebSocket, HTTPException
@@ -88,6 +89,26 @@ class ClusterControlReq(BaseModel): node_name: str; action: str
 class ClashPoolUpdateReq(BaseModel): sub_url: str
 
 
+class MihomoSubscriptionReq(BaseModel): sub_url: Optional[str] = None
+
+
+class MihomoSwitchNodeReq(BaseModel): group: Optional[str] = ""; node: str
+
+
+class MihomoBatchHealthReq(BaseModel):
+    group: Optional[str] = ""
+    timeout_ms: int = 2000
+    test_url: str = "http://www.gstatic.com/generate_204"
+    include_disabled: bool = False
+
+
+class MihomoRemoveInvalidReq(BaseModel):
+    group: Optional[str] = ""
+    nodes: List[str] = []
+    timeout_ms: int = 2000
+    test_url: str = "http://www.gstatic.com/generate_204"
+
+
 class ExtResultReq(BaseModel):
     status: str
     task_id: Optional[str] = ""
@@ -99,6 +120,10 @@ class ExtResultReq(BaseModel):
     code_verifier: Optional[str] = ""
     expected_state: Optional[str] = ""
     error_type: Optional[str] = "failed"
+
+
+class GitUpdateReq(BaseModel):
+    remote: str = "origin"
 
 
 # ==========================================
@@ -831,6 +856,319 @@ def _inspect_clash_pool_runtime(env_map: dict | None = None) -> tuple[dict, str]
     except Exception as e:
         return {}, f"读取 Clash 运行态失败: {e}"
 
+
+def _load_project_config() -> dict:
+    if not os.path.exists(CONFIG_PATH):
+        return {}
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def _save_project_config(conf: dict) -> None:
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        yaml.dump(conf, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
+
+
+def _get_mihomo_disabled_nodes(conf_data: dict | None = None) -> list[str]:
+    conf = conf_data or _load_project_config()
+    clash_conf = conf.get("clash_proxy_pool", {}) if isinstance(conf.get("clash_proxy_pool", {}), dict) else {}
+    raw = clash_conf.get("disabled_nodes", [])
+    if isinstance(raw, str):
+        raw = [line.strip() for line in raw.splitlines() if line.strip()]
+    elif not isinstance(raw, list):
+        raw = []
+    out = []
+    seen = set()
+    for item in raw:
+        name = str(item or "").strip()
+        if name and name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out
+
+
+def _persist_mihomo_disabled_nodes(node_names: list[str], remove: bool = False) -> list[str]:
+    conf = _load_project_config()
+    clash_conf = conf.setdefault("clash_proxy_pool", {})
+    existing = _get_mihomo_disabled_nodes(conf)
+    normalized = []
+    seen = set(existing)
+    if remove:
+        remove_set = {str(x or "").strip() for x in node_names if str(x or "").strip()}
+        normalized = [name for name in existing if name not in remove_set]
+    else:
+        normalized = list(existing)
+        for item in node_names:
+            name = str(item or "").strip()
+            if name and name not in seen:
+                seen.add(name)
+                normalized.append(name)
+    clash_conf["disabled_nodes"] = normalized
+    _save_project_config(conf)
+    try:
+        reload_all_configs()
+    except Exception:
+        pass
+    return normalized
+
+
+def _get_mihomo_api_headers(env_map: dict | None = None) -> tuple[dict, list[str]]:
+    env_map = env_map or _read_clash_pool_env()
+    secret = str(env_map.get("SECRET") or "").strip()
+    headers = {"Authorization": f"Bearer {secret}"} if secret else {}
+    return headers, _get_clash_pool_api_urls(env_map)
+
+
+def _get_mihomo_runtime_catalog(env_map: dict | None = None) -> tuple[dict, str]:
+    try:
+        env_map = env_map or _read_clash_pool_env()
+        headers, api_urls = _get_mihomo_api_headers(env_map)
+        if not api_urls:
+            return {}, "未配置 Mihomo API"
+        resp = httpx.get(f"{api_urls[0]}/proxies", headers=headers, timeout=15.0)
+        if resp.status_code != 200:
+            return {}, f"读取 Mihomo proxies 失败: HTTP {resp.status_code}"
+        proxies_payload = resp.json().get("proxies") or {}
+        conf = _load_project_config()
+        clash_conf = conf.get("clash_proxy_pool", {}) if isinstance(conf.get("clash_proxy_pool", {}), dict) else {}
+        keyword_blacklist = clash_conf.get("blacklist", []) or []
+        disabled_nodes = _get_mihomo_disabled_nodes(conf)
+        group_keyword = str(clash_conf.get("group_name") or "").strip()
+        actual_group_name = _find_actual_group_name(proxies_payload, group_keyword)
+
+        groups = []
+        all_nodes = []
+        for name, meta in proxies_payload.items():
+            if not isinstance(meta, dict):
+                continue
+            all_items = meta.get("all")
+            if isinstance(all_items, list):
+                available = []
+                children = []
+                for raw in all_items:
+                    child = str(raw or "").strip()
+                    if not child:
+                        continue
+                    child_meta = proxies_payload.get(child)
+                    if isinstance(child_meta, dict) and isinstance(child_meta.get("all"), list):
+                        children.append(child)
+                    else:
+                        available.append(child)
+                groups.append({
+                    "name": str(name),
+                    "type": str(meta.get("type") or ""),
+                    "current": str(meta.get("now") or ""),
+                    "node_count": len(available),
+                    "child_group_count": len(children),
+                    "all": [str(x or "").strip() for x in all_items if str(x or "").strip()],
+                })
+            else:
+                history = meta.get("history") or []
+                last_delay = None
+                if isinstance(history, list) and history:
+                    try:
+                        last_delay = history[-1].get("delay")
+                    except Exception:
+                        last_delay = None
+                all_nodes.append({
+                    "name": str(name),
+                    "type": str(meta.get("type") or ""),
+                    "alive": bool(meta.get("alive", False)),
+                    "udp": bool(meta.get("udp", False)),
+                    "delay": last_delay,
+                    "disabled": str(name) in set(disabled_nodes),
+                    "filtered": proxy_manager._is_node_filtered(str(name), keyword_blacklist, disabled_nodes),
+                })
+
+        providers = []
+        try:
+            provider_resp = httpx.get(f"{api_urls[0]}/providers/proxies", headers=headers, timeout=15.0)
+            if provider_resp.status_code == 200:
+                provider_payload = provider_resp.json().get("providers") or {}
+                for name, meta in provider_payload.items():
+                    if not isinstance(meta, dict):
+                        continue
+                    proxies = meta.get("proxies") or []
+                    providers.append({
+                        "name": str(name),
+                        "type": str(meta.get("vehicleType") or meta.get("type") or ""),
+                        "proxy_count": len(proxies) if isinstance(proxies, list) else 0,
+                        "updated_at": meta.get("updatedAt") or meta.get("updateAt") or "",
+                    })
+        except Exception:
+            providers = []
+
+        groups.sort(key=lambda x: (-int(x.get("node_count") or 0), x.get("name") or ""))
+        all_nodes.sort(key=lambda x: (x.get("disabled", False), x.get("name") or ""))
+        providers.sort(key=lambda x: x.get("name") or "")
+        return {
+            "actual_group_name": actual_group_name,
+            "group_keyword": group_keyword,
+            "default_route_groups": _extract_default_route_groups(env_map),
+            "groups": groups,
+            "nodes": all_nodes,
+            "providers": providers,
+        }, ""
+    except Exception as e:
+        return {}, f"读取 Mihomo 目录失败: {e}"
+
+
+def _run_mihomo_batch_healthcheck(group_name: str = "", timeout_ms: int = 2000, test_url: str = "http://www.gstatic.com/generate_204", include_disabled: bool = False, env_map: dict | None = None) -> tuple[dict, str]:
+    try:
+        env_map = env_map or _read_clash_pool_env()
+        headers, api_urls = _get_mihomo_api_headers(env_map)
+        if not api_urls:
+            return {}, "未配置 Mihomo API"
+        api_url = api_urls[0]
+        resp = httpx.get(f"{api_url}/proxies", headers=headers, timeout=15.0)
+        if resp.status_code != 200:
+            return {}, f"读取 Mihomo proxies 失败: HTTP {resp.status_code}"
+        proxies_payload = resp.json().get("proxies") or {}
+        conf = _load_project_config()
+        clash_conf = conf.get("clash_proxy_pool", {}) if isinstance(conf.get("clash_proxy_pool", {}), dict) else {}
+        keyword_blacklist = clash_conf.get("blacklist", []) or []
+        disabled_nodes = _get_mihomo_disabled_nodes(conf)
+        resolved_group = _find_actual_group_name(proxies_payload, str(group_name or clash_conf.get("group_name") or "").strip())
+        if not resolved_group:
+            return {}, "未找到目标策略组"
+        group_meta = proxies_payload.get(resolved_group) or {}
+        all_items = group_meta.get("all") or []
+        candidate_nodes = []
+        for raw in all_items:
+            node_name = str(raw or "").strip()
+            if not node_name or node_name == resolved_group:
+                continue
+            node_meta = proxies_payload.get(node_name, {})
+            if isinstance(node_meta, dict) and isinstance(node_meta.get("all"), list):
+                continue
+            if not include_disabled and proxy_manager._is_node_filtered(node_name, keyword_blacklist, disabled_nodes):
+                continue
+            candidate_nodes.append(node_name)
+        if not candidate_nodes:
+            return {
+                "group": resolved_group,
+                "tested_count": 0,
+                "live_count": 0,
+                "dead_count": 0,
+                "live_nodes": [],
+                "dead_nodes": [],
+            }, ""
+
+        def _worker(node_name: str) -> dict:
+            encoded = urllib.parse.quote(node_name, safe="")
+            try:
+                resp = httpx.get(
+                    f"{api_url}/proxies/{encoded}/delay",
+                    headers=headers,
+                    params={"timeout": int(timeout_ms), "url": test_url},
+                    timeout=max(8.0, float(timeout_ms) / 1000.0 + 3.0),
+                )
+                if resp.status_code != 200:
+                    return {"name": node_name, "ok": False, "delay": None, "error": f"HTTP {resp.status_code}"}
+                payload = resp.json() if resp.text else {}
+                delay = payload.get("delay")
+                ok = isinstance(delay, (int, float)) and delay > 0
+                return {"name": node_name, "ok": ok, "delay": delay if ok else None, "error": "" if ok else "delay<=0"}
+            except Exception as e:
+                return {"name": node_name, "ok": False, "delay": None, "error": str(e)}
+
+        with ThreadPoolExecutor(max_workers=min(20, len(candidate_nodes))) as executor:
+            results = list(executor.map(_worker, candidate_nodes))
+
+        live_nodes = [item for item in results if item.get("ok")]
+        dead_nodes = [item for item in results if not item.get("ok")]
+        live_nodes.sort(key=lambda x: (float(x.get("delay") or 10**9), x.get("name") or ""))
+        dead_nodes.sort(key=lambda x: x.get("name") or "")
+        return {
+            "group": resolved_group,
+            "tested_count": len(results),
+            "live_count": len(live_nodes),
+            "dead_count": len(dead_nodes),
+            "live_nodes": live_nodes,
+            "dead_nodes": dead_nodes,
+            "test_url": test_url,
+            "timeout_ms": int(timeout_ms),
+        }, ""
+    except Exception as e:
+        return {}, f"批量测活失败: {e}"
+
+
+def _switch_mihomo_node(group_name: str, node_name: str, env_map: dict | None = None) -> tuple[bool, dict, str]:
+    try:
+        env_map = env_map or _read_clash_pool_env()
+        headers, api_urls = _get_mihomo_api_headers(env_map)
+        if not api_urls:
+            return False, {}, "未配置 Mihomo API"
+        api_url = api_urls[0]
+        resp = httpx.get(f"{api_url}/proxies", headers=headers, timeout=15.0)
+        if resp.status_code != 200:
+            return False, {}, f"读取 Mihomo proxies 失败: HTTP {resp.status_code}"
+        proxies_payload = resp.json().get("proxies") or {}
+        resolved_group = _find_actual_group_name(proxies_payload, str(group_name or "").strip())
+        if not resolved_group:
+            return False, {}, "未找到目标策略组"
+        group_meta = proxies_payload.get(resolved_group) or {}
+        all_items = [str(x or "").strip() for x in (group_meta.get("all") or []) if str(x or "").strip()]
+        if str(node_name or "").strip() not in all_items:
+            return False, {}, f"节点 [{node_name}] 不在策略组 [{resolved_group}] 中"
+        switch_resp = httpx.put(
+            f"{api_url}/proxies/{urllib.parse.quote(resolved_group, safe='')}",
+            headers=headers,
+            json={"name": node_name},
+            timeout=8.0,
+        )
+        if switch_resp.status_code != 204:
+            return False, {}, f"切换失败: HTTP {switch_resp.status_code}"
+        proxies_payload.setdefault(resolved_group, {})["now"] = node_name
+        route_ops = []
+        route_error = ""
+        for root_group in _extract_default_route_groups(env_map):
+            ops, err = _align_default_route_group(api_url, headers, proxies_payload, root_group, resolved_group)
+            if ops:
+                route_ops.extend(ops)
+            if err and not route_error:
+                route_error = err
+        return True, {
+            "group": resolved_group,
+            "node": node_name,
+            "route_ops": route_ops,
+            "route_error": route_error,
+        }, ""
+    except Exception as e:
+        return False, {}, f"切换节点失败: {e}"
+
+
+def _run_project_command(command: list[str], timeout: int = 300) -> tuple[int, str]:
+    proc = subprocess.run(
+        command,
+        cwd=BASE_DIR,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=timeout,
+    )
+    return proc.returncode, (proc.stdout or "").strip()
+
+
+def _get_project_venv_python() -> str:
+    candidates = [
+        os.path.join(BASE_DIR, ".venv", "Scripts", "python.exe"),
+        os.path.join(BASE_DIR, ".venv", "bin", "python"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return sys.executable
+
+
+def _sync_project_dependencies() -> tuple[int, str]:
+    python_bin = _get_project_venv_python()
+    if os.path.exists(os.path.join(BASE_DIR, "requirements.txt")):
+        return _run_project_command([python_bin, "-m", "pip", "install", "-r", "requirements.txt"], timeout=900)
+    if os.path.exists(os.path.join(BASE_DIR, "pyproject.toml")):
+        return _run_project_command([python_bin, "-m", "pip", "install", "."], timeout=900)
+    return 0, "未发现 requirements.txt 或 pyproject.toml，跳过依赖同步。"
+
 def parse_cpa_usage_to_details(raw_usage: dict) -> dict:
     details = {"is_cpa": True}
     try:
@@ -1222,6 +1560,98 @@ async def restart_system(token: str = Depends(verify_token)):
     except Exception as e:
         return {"status": "error", "message": f"重启异常: {str(e)}"}
 
+
+@router.post("/api/system/update_from_github")
+async def update_from_github(req: GitUpdateReq, token: str = Depends(verify_token)):
+    try:
+        remote = str(req.remote or "origin").strip() or "origin"
+        code, branch = _run_project_command(["git", "branch", "--show-current"], timeout=30)
+        current_branch = (branch or "").strip()
+        if code != 0 or not current_branch:
+            return {"status": "error", "message": "无法识别当前 Git 分支。", "output": branch}
+
+        code, dirty = _run_project_command(["git", "status", "--porcelain"], timeout=30)
+        if code != 0:
+            return {"status": "error", "message": "无法检查当前工作区状态。", "output": dirty}
+        if (dirty or "").strip():
+            return {
+                "status": "warning",
+                "message": "当前工作区存在未提交改动，为避免覆盖代码，本次未执行更新。",
+                "data": {
+                    "branch": current_branch,
+                    "remote": remote,
+                    "dirty": True,
+                },
+                "output": dirty[-4000:],
+            }
+
+        fetch_code, fetch_output = _run_project_command(["git", "fetch", remote], timeout=300)
+        if fetch_code != 0:
+            return {
+                "status": "error",
+                "message": f"git fetch 失败（remote={remote}）。",
+                "data": {"branch": current_branch, "remote": remote},
+                "output": fetch_output[-4000:],
+            }
+
+        behind_code, behind_output = _run_project_command(
+            ["git", "rev-list", "--count", f"HEAD..{remote}/{current_branch}"],
+            timeout=30,
+        )
+        behind_count = 0
+        try:
+            behind_count = int(str(behind_output or "0").strip())
+        except Exception:
+            behind_count = 0
+        if behind_code != 0:
+            return {
+                "status": "error",
+                "message": "无法判断远端是否有新提交。",
+                "data": {"branch": current_branch, "remote": remote},
+                "output": behind_output[-4000:],
+            }
+
+        pull_output = "Already up to date."
+        if behind_count > 0:
+            pull_code, pull_output = _run_project_command(["git", "pull", "--rebase", remote, current_branch], timeout=900)
+            if pull_code != 0:
+                return {
+                    "status": "error",
+                    "message": "git pull 失败，请检查冲突或远端权限。",
+                    "data": {"branch": current_branch, "remote": remote, "behind_count": behind_count},
+                    "output": pull_output[-4000:],
+                }
+
+        dep_code, dep_output = _sync_project_dependencies()
+        if dep_code != 0:
+            return {
+                "status": "warning",
+                "message": "代码已更新，但依赖同步失败，请手动检查环境。",
+                "data": {
+                    "branch": current_branch,
+                    "remote": remote,
+                    "behind_count": behind_count,
+                    "updated": behind_count > 0,
+                    "restart_required": behind_count > 0,
+                },
+                "output": ("\n\n".join([pull_output, dep_output])).strip()[-4000:],
+            }
+
+        return {
+            "status": "success",
+            "message": "GitHub 手动更新完成。若拉到了新代码，请手动重启项目服务。",
+            "data": {
+                "branch": current_branch,
+                "remote": remote,
+                "behind_count": behind_count,
+                "updated": behind_count > 0,
+                "restart_required": behind_count > 0,
+            },
+            "output": ("\n\n".join([fetch_output, pull_output, dep_output])).strip()[-4000:],
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"GitHub 手动更新失败: {e}"}
+
 @router.get("/api/config")
 async def get_config(token: str = Depends(verify_token)):
     config_data = {}
@@ -1472,6 +1902,110 @@ def update_clash_pool_subscription(req: ClashPoolUpdateReq, token: str = Depends
         return {"status": "error", "message": "更新脚本执行超时", "output": partial[-4000:]}
     except Exception as e:
         return {"status": "error", "message": f"Clash 订阅更新失败: {e}"}
+
+
+@router.get("/api/proxy/mihomo/info")
+def get_mihomo_info(token: str = Depends(verify_token)):
+    try:
+        env_map = _read_clash_pool_env()
+        group_candidates, group_error = _get_clash_pool_group_candidates(env_map)
+        runtime_status, runtime_error = _inspect_clash_pool_runtime(env_map)
+        catalog, catalog_error = _get_mihomo_runtime_catalog(env_map)
+        return {
+            "status": "success",
+            "data": {
+                "sub_url": env_map.get("SUB_URL", ""),
+                "effective_sub_url": env_map.get("SUB_URL", ""),
+                "count": env_map.get("COUNT", ""),
+                "image": env_map.get("IMAGE", ""),
+                "status_output": _get_clash_pool_status_output(),
+                "group_candidates": group_candidates,
+                "group_error": group_error,
+                "runtime_status": runtime_status,
+                "runtime_error": runtime_error,
+                "catalog": catalog,
+                "catalog_error": catalog_error,
+            },
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"读取 Mihomo 信息失败: {e}"}
+
+
+@router.get("/api/proxy/mihomo/catalog")
+def get_mihomo_catalog(token: str = Depends(verify_token)):
+    catalog, err = _get_mihomo_runtime_catalog()
+    if not catalog:
+        return {"status": "error", "message": err or "读取 Mihomo 节点目录失败"}
+    return {"status": "success", "data": catalog, "message": err or ""}
+
+
+@router.post("/api/proxy/mihomo/update_subscription")
+def api_mihomo_update_subscription(req: MihomoSubscriptionReq, token: str = Depends(verify_token)):
+    try:
+        env_map = _read_clash_pool_env()
+        target_sub_url = str(req.sub_url or env_map.get("SUB_URL") or "").strip()
+        if not target_sub_url:
+            return {"status": "error", "message": "当前未配置 Mihomo 订阅链接。"}
+        return update_clash_pool_subscription(ClashPoolUpdateReq(sub_url=target_sub_url), token)
+    except Exception as e:
+        return {"status": "error", "message": f"Mihomo 订阅更新失败: {e}"}
+
+
+@router.post("/api/proxy/mihomo/switch_node")
+def api_mihomo_switch_node(req: MihomoSwitchNodeReq, token: str = Depends(verify_token)):
+    ok, data, err = _switch_mihomo_node(req.group or "", req.node)
+    return {
+        "status": "success" if ok else "error",
+        "message": (f"已切换到节点 [{req.node}]" if ok else err),
+        "data": data,
+    }
+
+
+@router.post("/api/proxy/mihomo/batch_healthcheck")
+def api_mihomo_batch_healthcheck(req: MihomoBatchHealthReq, token: str = Depends(verify_token)):
+    summary, err = _run_mihomo_batch_healthcheck(
+        group_name=req.group or "",
+        timeout_ms=req.timeout_ms,
+        test_url=req.test_url,
+        include_disabled=req.include_disabled,
+    )
+    if not summary:
+        return {"status": "error", "message": err or "批量测活失败"}
+    message = f"Mihomo 批量测活完成：存活 {summary['live_count']} / {summary['tested_count']}"
+    if summary.get("dead_count"):
+        message += f"，失效 {summary['dead_count']}"
+    return {"status": "success", "message": message, "data": summary}
+
+
+@router.post("/api/proxy/mihomo/remove_invalid_nodes")
+def api_mihomo_remove_invalid_nodes(req: MihomoRemoveInvalidReq, token: str = Depends(verify_token)):
+    try:
+        target_nodes = [str(x or "").strip() for x in (req.nodes or []) if str(x or "").strip()]
+        summary = None
+        if not target_nodes:
+            summary, err = _run_mihomo_batch_healthcheck(
+                group_name=req.group or "",
+                timeout_ms=req.timeout_ms,
+                test_url=req.test_url,
+                include_disabled=True,
+            )
+            if not summary:
+                return {"status": "error", "message": err or "批量测活失败，无法移除无效节点"}
+            target_nodes = [str(item.get("name") or "").strip() for item in summary.get("dead_nodes", []) if str(item.get("name") or "").strip()]
+        if not target_nodes:
+            return {"status": "success", "message": "当前没有识别到无效节点。", "data": {"removed_nodes": [], "disabled_nodes": _get_mihomo_disabled_nodes()}}
+        disabled_nodes = _persist_mihomo_disabled_nodes(target_nodes, remove=False)
+        return {
+            "status": "success",
+            "message": f"已移除 {len(target_nodes)} 个无效节点（加入 disabled_nodes 隐藏列表）。",
+            "data": {
+                "removed_nodes": target_nodes,
+                "disabled_nodes": disabled_nodes,
+                "healthcheck": summary or {},
+            },
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"移除无效节点失败: {e}"}
 
 
 @router.post("/api/config/add_wildcard_dns")

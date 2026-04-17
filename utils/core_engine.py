@@ -1131,9 +1131,7 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event):
                     return run_and_refresh(args.proxy, args, cpa_upload=True, skip_switch=True)
 
                 while success_in_this_cycle < need_to_reg and not async_stop_event.is_set() and not cfg.POOL_EXHAUSTED:
-                    remaining  = need_to_reg - success_in_this_cycle
-                    batch_size = min(cfg.REG_THREADS, remaining)
-                    batch_size = _pool_parallel_limit(batch_size)
+                    batch_size = _pool_parallel_limit(max(1, int(cfg.REG_THREADS)))
                     if batch_size <= 0:
                         print(f"[{ts()}] [ERROR] [CPA补货] 当前代理池无可用通道，终止本轮补货。")
                         break
@@ -1281,9 +1279,7 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event):
                     return _sub2api_run_wrapper(args.proxy, True)
 
                 while success_in_this_cycle < need_to_reg and not async_stop_event.is_set() and not cfg.POOL_EXHAUSTED:
-                    remaining  = need_to_reg - success_in_this_cycle
-                    batch_size = min(cfg.REG_THREADS, remaining)
-                    batch_size = _pool_parallel_limit(batch_size)
+                    batch_size = _pool_parallel_limit(max(1, int(cfg.REG_THREADS)))
                     if batch_size <= 0:
                         print(f"[{ts()}] [ERROR] [Sub2API补货] 当前代理池无可用通道，终止本轮补货。")
                         break

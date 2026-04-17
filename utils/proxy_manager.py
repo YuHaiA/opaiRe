@@ -44,6 +44,7 @@ FASTEST_MODE = False
 PROXY_GROUP_NAME = "节点选择"
 CLASH_SECRET = ""
 NODE_BLACKLIST = []
+DISABLED_NODE_NAMES = []
 _IS_IN_DOCKER = os.path.exists("/.dockerenv")
 _global_switch_lock = threading.Lock()
 _socket_restore_lock = threading.Lock()
@@ -81,7 +82,7 @@ def reload_proxy_config():
     global V2RAYN_PRECHECK_CACHE_MINUTES, V2RAYN_PRECHECK_MAX_NODES, V2RAYN_LIVE_POOL_LIMIT
     global V2RAYN_SUBSCRIPTION_UPDATE_ENABLED, V2RAYN_SUBSCRIPTION_UPDATE_INTERVAL_MINUTES
     global V2RAYN_SUBSCRIPTION_UPDATE_COMMAND, POOL_MODE, FASTEST_MODE, PROXY_GROUP_NAME
-    global CLASH_SECRET, NODE_BLACKLIST, _v2rayn_runtime_signature
+    global CLASH_SECRET, NODE_BLACKLIST, DISABLED_NODE_NAMES, _v2rayn_runtime_signature
 
     config_path = os.path.join(BASE_DIR, "data", "config.yaml")
     if not os.path.exists(config_path):
@@ -94,7 +95,7 @@ def reload_proxy_config():
     clash_conf = conf_data.get("clash_proxy_pool", {})
     ENABLE_NODE_SWITCH = bool(clash_conf.get("enable", False))
     PROXY_CLIENT_TYPE = str(clash_conf.get("client_type", "clash") or "clash").strip().lower()
-    if PROXY_CLIENT_TYPE not in {"clash", "v2rayn"}:
+    if PROXY_CLIENT_TYPE not in {"clash", "mihomo", "v2rayn"}:
         PROXY_CLIENT_TYPE = "clash"
     V2RAYN_BASE_DIR = str(clash_conf.get("v2rayn_base_dir", "") or "").strip()
     if V2RAYN_BASE_DIR:
@@ -136,6 +137,12 @@ def reload_proxy_config():
     PROXY_GROUP_NAME = clash_conf.get("group_name", "节点选择")
     CLASH_SECRET = clash_conf.get("secret", "")
     NODE_BLACKLIST = clash_conf.get("blacklist", ["港", "HK", "台", "TW", "中国", "CN"])
+    _raw_disabled_nodes = clash_conf.get("disabled_nodes", [])
+    if isinstance(_raw_disabled_nodes, str):
+        _raw_disabled_nodes = [line.strip() for line in _raw_disabled_nodes.splitlines() if line.strip()]
+    elif not isinstance(_raw_disabled_nodes, list):
+        _raw_disabled_nodes = []
+    DISABLED_NODE_NAMES = [str(x or "").strip() for x in _raw_disabled_nodes if str(x or "").strip()]
     new_v2rayn_runtime_signature = (
         PROXY_CLIENT_TYPE,
         V2RAYN_BASE_DIR,
@@ -147,6 +154,7 @@ def reload_proxy_config():
         V2RAYN_PRECHECK_MAX_NODES,
         V2RAYN_LIVE_POOL_LIMIT,
         tuple(str(x) for x in NODE_BLACKLIST),
+        tuple(str(x) for x in DISABLED_NODE_NAMES),
     )
     if _v2rayn_runtime_signature != new_v2rayn_runtime_signature:
         _reset_v2rayn_runtime_state()
@@ -296,6 +304,24 @@ def _find_group_path(proxies_data: dict, start_group: str, target_group: str) ->
                 visited.add(child)
                 queue_items.append((child, path + [child]))
     return []
+
+
+def _is_node_filtered(node_name: str, keyword_blacklist: list[str] | None = None, disabled_nodes: list[str] | None = None) -> bool:
+    name = str(node_name or "").strip()
+    if not name:
+        return True
+    exact_disabled = {
+        str(x or "").strip()
+        for x in (disabled_nodes if disabled_nodes is not None else DISABLED_NODE_NAMES)
+        if str(x or "").strip()
+    }
+    if name in exact_disabled:
+        return True
+    upper_name = name.upper()
+    for flag in (keyword_blacklist if keyword_blacklist is not None else NODE_BLACKLIST):
+        if str(flag or "").strip().upper() in upper_name:
+            return True
+    return False
 
 
 def _ensure_default_route_alignment(api_url: str, headers: dict, proxies_data: dict, target_group: str, proxy_url: str | None = None) -> tuple[bool, list[dict], str]:
@@ -567,7 +593,7 @@ def _list_v2rayn_profiles(ignore_runtime_invalid: bool = False):
             continue
         if not ignore_runtime_invalid and str(row["IndexId"]) in invalid_ids:
             continue
-        if any(kw.upper() in remarks.upper() for kw in NODE_BLACKLIST):
+        if _is_node_filtered(remarks):
             continue
         result.append({
             "index_id": str(row["IndexId"]),
@@ -1013,7 +1039,7 @@ def _do_smart_switch(proxy_url=None):
             node_meta = proxies_data.get(node_name, {})
             if isinstance(node_meta, dict) and "all" in node_meta:
                 continue
-            if any(kw.upper() in node_name.upper() for kw in NODE_BLACKLIST):
+            if _is_node_filtered(node_name):
                 continue
             valid_nodes.append(node_name)
         if not valid_nodes:

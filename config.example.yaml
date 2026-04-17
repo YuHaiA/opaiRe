@@ -258,6 +258,7 @@ sub2api_mode:
   save_to_local: true
   api_url: 
   api_key: 
+  test_model: "gpt-5.2"
   min_accounts_threshold: 20
   batch_reg_count: 1
   remove_on_limit_reached: true
@@ -281,6 +282,7 @@ hero_sms:
   use_proxy: false
   auto_pick_country: false
   reuse_phone: true
+  verify_on_register: false
   max_price: 0.08
   min_balance: 1
   max_tries: 3
