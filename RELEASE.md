@@ -1,48 +1,124 @@
 # 发版说明
 
-仓库已经内置根目录脚本 `release.ps1`，用于统一更新版本号、文档元数据，并可选创建提交 / tag / push。
+这份说明只保留你真正常用的发版命令。
 
-## 最常用命令
+---
 
-只更新版本文件与文档：
+## 最短命令
 
-```powershell
-.\release.ps1 -Version v10.1.6 -UpstreamVersion v10.1.1
-```
-
-更新版本并直接完成提交、打 tag、推送：
+如果你只是正常发一个新版本，直接用这一条：
 
 ```powershell
-.\release.ps1 -Version v10.1.6 -UpstreamVersion v10.1.1 -CreateCommit -CreateTag -Push
+.\release.ps1 -Version v10.1.7 -Auto
 ```
+
+这条命令会自动完成：
+
+- 更新版本号
+- 更新文档里的版本元数据
+- 创建提交
+- 创建 tag
+- 推送 `main`
+- 推送 tag
+
+推送 tag 后，GitHub Actions 会自动创建对应 Release。
+
+---
+
+## 你真正要记住的流程
+
+平时只要记这 3 步：
+
+1. 改代码
+2. 确认工作区没脏文件
+3. 执行：
+
+```powershell
+.\release.ps1 -Version v10.1.7 -Auto
+```
+
+---
+
+## 如果上游基线变了
+
+如果你这次不只是改自己仓库版本，还同步了新的上游基线，再用这一条：
+
+```powershell
+.\release.ps1 -Version v10.1.7 -UpstreamVersion v10.1.2 -Auto
+```
+
+---
+
+## 如果你只想先改版本，不马上发
+
+```powershell
+.\release.ps1 -Version v10.1.7
+```
+
+这时脚本只会：
+
+- 改 `VERSION`
+- 改 `UPSTREAM_VERSION`
+- 同步前端版本号
+- 同步 README / CHANGELOG / PR 描述里的版本元数据
+
+不会自动提交、不会打 tag、不会推送。
+
+---
 
 ## 自动 Release
 
-仓库现在已内置 GitHub Actions 工作流：
+仓库已经内置自动 Release 工作流：
 
-- 工作流文件：`.github/workflows/release.yml`
+- 文件：`.github/workflows/release.yml`
 - 触发条件：推送符合 `v*` 的 tag
-- 行为：自动创建对应版本的 GitHub Release，并生成基础发布说明
+- 行为：自动创建 GitHub Release
 
-也就是说，以后只要把新 tag 推到远程，GitHub 就会自动补出 Release 页面。
+也就是说，你只要成功 push tag，Release 会自动出现。
 
-## 脚本会做什么
+---
 
-- 校验当前分支必须是 `main`
-- 校验工作区必须干净
-- 更新 [VERSION](/C:/Users/admin/Desktop/opaiRe/VERSION)
-- 更新 [UPSTREAM_VERSION](/C:/Users/admin/Desktop/opaiRe/UPSTREAM_VERSION)
-- 同步更新前端版本号与核心文档里的版本元数据
+## 当前项目怎么检查更新
 
-## 当前项目的版本来源
+网页“检查更新”现在会：
+
+1. 优先读取 GitHub 最新 Release
+2. 如果 Release 不可用，再回退读取最新 tag
+
+普通用户更新会下载并解压到：
+
+```text
+updates/<版本>/source
+```
+
+开发者更新则走当前 Git 工作区的安全更新流程。
+
+---
+
+## 发版前的硬规则
+
+`release.ps1` 会自动检查：
+
+- 当前分支必须是 `main`
+- 工作区必须干净
+
+如果不满足，脚本会直接拦住，不会继续发版。
+
+---
+
+## 当前版本来源
 
 - 本仓库独立版本：`VERSION`
 - 上游对齐基线：`UPSTREAM_VERSION`
 
-网页“检查更新”现在会优先读取 GitHub 上最新的 Release；如果 Release 不可用，再回退读取最新 tag，并下载对应源码压缩包。
+---
 
-## 注意
+## 备注
 
-- `release.ps1` 会拒绝在脏工作区上执行，避免把未提交修改混进版本更新
-- 如果你只想改本仓库版本，不想改上游基线，可以省略 `-UpstreamVersion`，脚本会沿用当前 `UPSTREAM_VERSION`
-- 该脚本不会自动帮你写 changelog 详情，只会同步当前“公共发布版本号”元数据
+- 脚本不会自动帮你写详细 changelog
+- 如果需要更漂亮的 Release 描述，可以去 GitHub 网页上再补充
+- 日常发版，优先用：
+
+```powershell
+.\release.ps1 -Version 新版本号 -Auto
+```

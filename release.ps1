@@ -4,6 +4,7 @@
 
     [string]$UpstreamVersion = "",
 
+    [switch]$Auto,
     [switch]$CreateCommit,
     [switch]$CreateTag,
     [switch]$Push
@@ -83,6 +84,12 @@ Set-Location $repoRoot
 
 $versionFile = Join-Path $repoRoot "VERSION"
 $upstreamVersionFile = Join-Path $repoRoot "UPSTREAM_VERSION"
+
+if ($Auto) {
+    $CreateCommit = $true
+    $CreateTag = $true
+    $Push = $true
+}
 
 $normalizedVersion = NormalizeVersion -Value $Version
 $normalizedUpstreamVersion = ""

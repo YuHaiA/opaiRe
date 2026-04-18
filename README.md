@@ -125,7 +125,45 @@
 
 ---
 
-## 4. 目录说明
+## 4. 开发者工作流
+
+日常开发建议只记两段流程。
+
+### 4.1 平时改代码
+
+```powershell
+git add .
+git commit -m "feat: 你的改动说明"
+git push origin main
+```
+
+### 4.2 正式发一个新版本
+
+最短命令：
+
+```powershell
+.\release.ps1 -Version v10.1.8 -Auto
+```
+
+如果这次连上游对齐基线也变了：
+
+```powershell
+.\release.ps1 -Version v10.1.8 -UpstreamVersion v10.1.2 -Auto
+```
+
+这条命令会自动完成：
+
+- 更新版本号
+- 更新版本元数据
+- 创建 release 提交
+- 创建 tag
+- 推送 `main`
+- 推送 tag
+- 触发 GitHub Actions 自动创建 Release
+
+---
+
+## 5. 目录说明
 
 ```text
 .
@@ -145,7 +183,7 @@
 
 ---
 
-## 5. 快速开始（推荐 Docker）
+## 6. 快速开始（推荐 Docker）
 
 ### 5.1 克隆仓库
 
@@ -180,7 +218,7 @@ admin
 
 ---
 
-## 6. 首次配置建议顺序
+## 7. 首次配置建议顺序
 
 建议第一次使用时按下面顺序配置：
 
@@ -201,7 +239,7 @@ admin
 
 ---
 
-## 7. Clash / Mihomo 使用说明
+## 8. Clash / Mihomo 使用说明
 
 ### 7.1 什么时候用 Clash 订阅自助更新
 
@@ -244,7 +282,7 @@ admin
 
 ---
 
-## 8. HTTP 动态代理池与 Clash 池怎么选
+## 9. HTTP 动态代理池与 Clash 池怎么选
 
 ### 用 HTTP 动态代理池的情况
 
@@ -275,7 +313,7 @@ http://user:pass@gateway.example.com:10000
 
 ---
 
-## 9. 本地源码运行（非 Docker）
+## 10. 本地源码运行（非 Docker）
 
 ### 9.1 Python 版本
 
@@ -304,7 +342,7 @@ http://127.0.0.1:8000
 
 ---
 
-## 10. Docker Compose 示例说明
+## 11. Docker Compose 示例说明
 
 仓库自带的 `docker-compose.yml` 默认采用 **本地源码构建**，更适合公开仓库直接复用。
 
@@ -324,7 +362,7 @@ http://127.0.0.1:8000
 
 ---
 
-## 11. 升级建议
+## 12. 升级建议
 
 推荐升级流程：
 
@@ -337,7 +375,7 @@ docker compose up -d --build
 
 ---
 
-## 12. 公共仓库使用注意
+## 13. 公共仓库使用注意
 
 请不要提交以下内容：
 
@@ -359,7 +397,7 @@ docker compose up -d --build
 
 ---
 
-## 13. 截图预览
+## 14. 截图预览
 
 <details>
 <summary><strong>点击展开界面截图</strong></summary>
@@ -376,7 +414,7 @@ docker compose up -d --build
 
 ---
 
-## 14. 上游来源与说明
+## 15. 上游来源与说明
 
 本仓库基于上游项目二次开发整理而来：
 
@@ -392,7 +430,7 @@ docker compose up -d --build
 
 ---
 
-## 15. 相关文档
+## 16. 相关文档
 
 - [部署说明 DEPLOY.md](./DEPLOY.md)
 - [变更记录 CHANGELOG.md](./CHANGELOG.md)
@@ -400,6 +438,6 @@ docker compose up -d --build
 
 ---
 
-## 16. English Summary
+## 17. English Summary
 
 This repository is a Chinese-enhanced public-ready fork of `wenfxl/openai-cpa`, focused on practical web-based operations, Clash/Mihomo proxy-pool management, HTTP dynamic proxy pooling, mailbox backends, and CPA/Sub2API inventory workflows.
