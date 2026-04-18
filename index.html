@@ -1546,7 +1546,7 @@
                                             <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">代理客户端类型</label>
                                             <select v-model="config.clash_proxy_pool.client_type" @change="handleProxyClientTypeChange" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-slate-500/20 focus:border-slate-500 transition-colors shadow-sm text-sm">
                                                 <option value="clash">Clash（控制 API 切点）</option>
-                                                <option value="v2raya">v2rayA（面板读取 + 手动切点）</option>
+                                                <option value="v2raya">v2rayA（自动切点 + 面板管理）</option>
                                                 <option value="v2rayn">v2rayN（全局节点池切换）</option>
                                             </select>
                                         </div>
@@ -2017,8 +2017,8 @@
                                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <div class="bg-fuchsia-50/70 border border-fuchsia-200 rounded-2xl px-4 py-4 shadow-sm">
                                                 <label class="block text-[11px] text-fuchsia-700 font-black mb-2 uppercase tracking-wider">当前接管状态</label>
-                                                <div class="text-sm text-slate-700 font-bold">{{ config.clash_proxy_pool.client_type === 'v2raya' ? '已切到 v2rayA 模式' : '未切到 v2rayA 模式' }}</div>
-                                                <div class="text-[11px] text-slate-500 mt-2">当前高亮与切换能力会按 <code class="font-mono">client_type=v2raya</code> 生效。</div>
+                                                <div class="text-sm text-slate-700 font-bold">{{ config.clash_proxy_pool.enable && config.clash_proxy_pool.client_type === 'v2raya' ? '已启用 v2rayA 自动切点' : '当前未启用 v2rayA 自动切点' }}</div>
+                                                <div class="text-[11px] text-slate-500 mt-2">只要上方已开启 <code class="font-mono">智能切点</code> 且 <code class="font-mono">client_type=v2raya</code>，业务运行时就会自动切换；下方按钮只是手动指定覆盖。</div>
                                             </div>
                                             <div class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
                                                 <label class="block text-[11px] text-slate-500 font-black mb-2 uppercase tracking-wider">节点缓存</label>
@@ -2059,54 +2059,175 @@
                                     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
                                         <div>
                                             <h4 class="text-lg font-black text-slate-800">节点列表</h4>
-                                            <p class="text-xs text-slate-500 mt-1">当前节点会高亮，点击右侧按钮即可手动切换。</p>
+                                            <p class="text-xs text-slate-500 mt-1">支持“全部节点”和“订阅分组”两种视图，运行时会按活节点池自动切换。</p>
                                         </div>
                                         <div class="text-[11px] text-slate-500 font-medium">
-                                            延迟数据来自 v2rayA API，若面板版本不兼容会保持为空。
+                                            固定高度表格视图，支持内部滚动和分页；延迟数据来自 v2rayA API。
                                         </div>
                                     </div>
 
-                                    <div v-if="v2rayANodes.length > 0" class="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                                        <div
-                                            v-for="node in v2rayANodes"
-                                            :key="getV2rayANodeKey(node)"
-                                            class="bg-white border rounded-2xl px-4 py-4 shadow-sm transition-all"
-                                            :class="node.is_current ? 'border-fuchsia-300 shadow-fuchsia-100 bg-fuchsia-50/50' : 'border-slate-200'"
-                                        >
-                                            <div class="flex items-start justify-between gap-3">
-                                                <div class="min-w-0">
-                                                    <div class="font-black text-slate-800 break-all">{{ node.name || node.address || node.node_id }}</div>
-                                                    <div class="text-[11px] text-slate-400 font-mono mt-1 break-all">{{ node.address || '地址未知' }}<span v-if="node.port">:{{ node.port }}</span></div>
-                                                </div>
-                                                <span class="px-2.5 py-1 rounded-lg text-[11px] font-black border"
-                                                      :class="node.is_current ? 'bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200' : 'bg-slate-50 text-slate-600 border-slate-200'">
-                                                    {{ node.is_current ? '当前节点' : '候选节点' }}
-                                                </span>
-                                            </div>
-                                            <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-600 font-medium">
-                                                <div>
-                                                    订阅：<code class="font-mono">{{ node.subscription_name || node.subscription_id || '-' }}</code>
-                                                </div>
-                                                <div>
-                                                    类型：<code class="font-mono">{{ node.node_type || '-' }}</code>
-                                                </div>
-                                                <div>
-                                                    节点 ID：<code class="font-mono">{{ node.node_id || '-' }}</code>
-                                                </div>
-                                                <div>
-                                                    延迟：<code class="font-mono">{{ formatV2rayALatency(node) }}</code>
-                                                </div>
-                                            </div>
-                                            <div class="mt-4">
-                                                <button
-                                                    @click="switchV2rayANode(node)"
-                                                    :disabled="switchingV2rayANodeKey === getV2rayANodeKey(node) || node.is_current"
-                                                    class="w-full bg-fuchsia-600 text-white px-4 py-2.5 rounded-xl hover:bg-fuchsia-700 active:scale-95 transition-all shadow-md shadow-fuchsia-500/20 font-bold disabled:opacity-50 flex items-center justify-center gap-2"
-                                                >
-                                                    <span v-if="switchingV2rayANodeKey === getV2rayANodeKey(node)" class="animate-spin">⏳</span>
-                                                    <span v-else>{{ node.is_current ? '✅' : '🔀' }}</span>
-                                                    <span>{{ node.is_current ? '当前已选' : '切换到这个节点' }}</span>
+                                    <div v-if="v2rayANodes.length > 0" class="space-y-4">
+                                        <div class="bg-white border border-slate-200 rounded-2xl p-3 shadow-sm">
+                                            <div class="flex flex-wrap gap-2">
+                                                <button @click="changeV2rayAListMode('all')" class="px-4 py-2 rounded-xl border text-sm font-black transition-all"
+                                                        :class="v2rayAListMode === 'all' ? 'bg-slate-900 text-white border-slate-900 shadow-lg shadow-slate-900/10' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'">
+                                                    全部节点
                                                 </button>
+                                                <button @click="changeV2rayAListMode('grouped')" class="px-4 py-2 rounded-xl border text-sm font-black transition-all"
+                                                        :class="v2rayAListMode === 'grouped' ? 'bg-slate-900 text-white border-slate-900 shadow-lg shadow-slate-900/10' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'">
+                                                    订阅分组
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <div v-if="v2rayAListMode === 'all'" class="space-y-4">
+                                            <div class="bg-white border border-slate-200 rounded-2xl p-3 shadow-sm">
+                                                <div class="flex flex-wrap gap-2">
+                                                    <button @click="selectV2rayAGroupFilter('all')" class="px-3 py-2 rounded-xl border text-xs font-black transition-all"
+                                                            :class="v2rayAGroupFilter === 'all' ? 'bg-fuchsia-600 text-white border-fuchsia-600 shadow-md shadow-fuchsia-500/20' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'">
+                                                        所有
+                                                    </button>
+                                                    <button v-for="group in v2rayASubscriptionTabs" :key="group.key" @click="selectV2rayAGroupFilter(group.key)" class="px-3 py-2 rounded-xl border text-xs font-black transition-all"
+                                                            :class="v2rayAGroupFilter === group.key ? 'bg-fuchsia-600 text-white border-fuchsia-600 shadow-md shadow-fuchsia-500/20' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'">
+                                                        {{ group.name }} <span class="opacity-80">({{ group.count }})</span>
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <div class="rounded-2xl border border-slate-200 shadow-sm bg-white overflow-hidden">
+                                                <div class="h-[520px] overflow-auto">
+                                                    <table class="min-w-full text-sm">
+                                                        <thead class="sticky top-0 z-10 bg-slate-50/95 backdrop-blur border-b border-slate-200">
+                                                            <tr>
+                                                                <th class="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-500 w-16">#</th>
+                                                                <th class="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-500 w-28">状态</th>
+                                                                <th class="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-500 min-w-[260px]">节点</th>
+                                                                <th class="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-500 min-w-[200px]">订阅</th>
+                                                                <th class="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-500 w-40">类型</th>
+                                                                <th class="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-500 w-32">延迟</th>
+                                                                <th class="px-4 py-3 text-right text-[11px] font-black uppercase tracking-wider text-slate-500 w-44">操作</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            <tr
+                                                                v-for="(node, index) in v2rayAPagedNodes"
+                                                                :key="getV2rayANodeKey(node)"
+                                                                class="border-b border-slate-100 last:border-b-0"
+                                                                :class="node.is_current ? 'bg-fuchsia-50/60' : 'bg-white'"
+                                                            >
+                                                                <td class="px-4 py-3 text-xs font-mono text-slate-500 align-top">
+                                                                    {{ ((v2rayAPage - 1) * v2rayAPageSize) + index + 1 }}
+                                                                </td>
+                                                                <td class="px-4 py-3 align-top">
+                                                                    <span class="inline-flex px-2.5 py-1 rounded-lg text-[11px] font-black border"
+                                                                          :class="node.is_current ? 'bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200' : 'bg-slate-50 text-slate-600 border-slate-200'">
+                                                                        {{ node.is_current ? '当前节点' : '候选节点' }}
+                                                                    </span>
+                                                                </td>
+                                                                <td class="px-4 py-3 align-top">
+                                                                    <div class="font-black text-slate-800 break-all">{{ node.name || node.address || node.node_id || '-' }}</div>
+                                                                    <div class="mt-1 text-[11px] text-slate-400 font-mono break-all">
+                                                                        {{ node.address || '地址未知' }}<span v-if="node.port">:{{ node.port }}</span>
+                                                                    </div>
+                                                                    <div class="mt-1 text-[11px] text-slate-400 font-mono break-all">
+                                                                        节点 ID：{{ node.node_id || '-' }}
+                                                                    </div>
+                                                                </td>
+                                                                <td class="px-4 py-3 align-top text-xs text-slate-600 font-medium break-all">
+                                                                    <code class="font-mono">{{ node.subscription_name || node.subscription_id || '-' }}</code>
+                                                                </td>
+                                                                <td class="px-4 py-3 align-top text-xs text-slate-600 font-medium">
+                                                                    <code class="font-mono">{{ node.node_type || '-' }}</code>
+                                                                </td>
+                                                                <td class="px-4 py-3 align-top text-xs font-mono text-slate-700">
+                                                                    {{ formatV2rayALatency(node) }}
+                                                                </td>
+                                                                <td class="px-4 py-3 align-top text-right">
+                                                                    <button
+                                                                        @click="switchV2rayANode(node)"
+                                                                        :disabled="switchingV2rayANodeKey === getV2rayANodeKey(node) || node.is_current"
+                                                                        class="inline-flex min-w-[120px] items-center justify-center gap-2 px-3 py-2 rounded-xl bg-fuchsia-600 text-white text-xs font-black hover:bg-fuchsia-700 active:scale-95 transition-all shadow-md shadow-fuchsia-500/20 disabled:opacity-50"
+                                                                    >
+                                                                        <span v-if="switchingV2rayANodeKey === getV2rayANodeKey(node)" class="animate-spin">⏳</span>
+                                                                        <span v-else>{{ node.is_current ? '✅' : '🔀' }}</span>
+                                                                        <span>{{ node.is_current ? '当前已选' : '切换' }}</span>
+                                                                    </button>
+                                                                </td>
+                                                            </tr>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                                <div class="px-4 py-3 border-t border-slate-200 bg-slate-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                                    <div class="text-xs text-slate-500 font-medium">
+                                                        当前筛选 <span class="font-black text-slate-800">{{ v2rayAGroupFilter === 'all' ? '所有分组' : (v2rayASubscriptionTabs.find(item => item.key === v2rayAGroupFilter)?.name || '当前分组') }}</span>，
+                                                        共 <span class="font-black text-slate-800">{{ v2rayAFilteredNodes.length }}</span> 个节点，
+                                                        第 <span class="font-black text-slate-800">{{ v2rayAPage }}</span>/<span class="font-black text-slate-800">{{ v2rayATotalPages }}</span> 页
+                                                    </div>
+                                                    <div class="flex items-center gap-2">
+                                                        <button @click="changeV2rayAPage(v2rayAPage - 1)" :disabled="v2rayAPage <= 1" class="px-3 py-2 rounded-xl text-xs font-black bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+                                                            上一页
+                                                        </button>
+                                                        <button @click="changeV2rayAPage(v2rayAPage + 1)" :disabled="v2rayAPage >= v2rayATotalPages" class="px-3 py-2 rounded-xl text-xs font-black bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+                                                            下一页
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div v-else class="rounded-2xl border border-slate-200 shadow-sm bg-white overflow-hidden">
+                                            <div class="h-[520px] overflow-auto">
+                                                <table class="min-w-full text-sm">
+                                                    <thead class="sticky top-0 z-10 bg-slate-50/95 backdrop-blur border-b border-slate-200">
+                                                        <tr>
+                                                            <th class="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-500 w-16">#</th>
+                                                            <th class="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-500 min-w-[220px]">订阅分组</th>
+                                                            <th class="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-500 w-28">节点数</th>
+                                                            <th class="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-500 w-28">当前节点</th>
+                                                            <th class="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-500 w-28">最佳延迟</th>
+                                                            <th class="px-4 py-3 text-right text-[11px] font-black uppercase tracking-wider text-slate-500 w-44">操作</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        <tr v-for="(group, index) in v2rayAPagedGroups" :key="group.key" class="border-b border-slate-100 last:border-b-0">
+                                                            <td class="px-4 py-3 text-xs font-mono text-slate-500 align-top">
+                                                                {{ ((v2rayAGroupPage - 1) * v2rayAGroupPageSize) + index + 1 }}
+                                                            </td>
+                                                            <td class="px-4 py-3 align-top">
+                                                                <div class="font-black text-slate-800 break-all">{{ group.name }}</div>
+                                                                <div class="mt-1 text-[11px] text-slate-400 font-mono break-all">Key: {{ group.key }}</div>
+                                                            </td>
+                                                            <td class="px-4 py-3 align-top text-sm font-black text-slate-700">
+                                                                {{ group.nodeCount }}
+                                                            </td>
+                                                            <td class="px-4 py-3 align-top text-sm font-black" :class="group.currentCount > 0 ? 'text-fuchsia-700' : 'text-slate-500'">
+                                                                {{ group.currentCount > 0 ? group.currentCount : '-' }}
+                                                            </td>
+                                                            <td class="px-4 py-3 align-top text-xs font-mono text-slate-700">
+                                                                {{ group.bestLatency === null ? '--' : formatV2rayALatency({ latency_ms: group.bestLatency }) }}
+                                                            </td>
+                                                            <td class="px-4 py-3 align-top text-right">
+                                                                <button @click="selectV2rayAGroupFilter(group.key)" class="inline-flex min-w-[120px] items-center justify-center gap-2 px-3 py-2 rounded-xl bg-white border border-fuchsia-200 text-fuchsia-700 text-xs font-black hover:bg-fuchsia-50 transition-all">
+                                                                    查看本组
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            <div class="px-4 py-3 border-t border-slate-200 bg-slate-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                                <div class="text-xs text-slate-500 font-medium">
+                                                    共 <span class="font-black text-slate-800">{{ v2rayAGroupedSubscriptions.length }}</span> 个分组，
+                                                    第 <span class="font-black text-slate-800">{{ v2rayAGroupPage }}</span>/<span class="font-black text-slate-800">{{ v2rayAGroupTotalPages }}</span> 页
+                                                </div>
+                                                <div class="flex items-center gap-2">
+                                                    <button @click="changeV2rayAGroupPage(v2rayAGroupPage - 1)" :disabled="v2rayAGroupPage <= 1" class="px-3 py-2 rounded-xl text-xs font-black bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+                                                        上一页
+                                                    </button>
+                                                    <button @click="changeV2rayAGroupPage(v2rayAGroupPage + 1)" :disabled="v2rayAGroupPage >= v2rayAGroupTotalPages" class="px-3 py-2 rounded-xl text-xs font-black bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
+                                                        下一页
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>

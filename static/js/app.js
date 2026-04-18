@@ -87,6 +87,12 @@ createApp({
             v2rayARuntime: null,
             v2rayANodes: [],
             v2rayAStatusMessage: '',
+            v2rayAListMode: 'all',
+            v2rayAGroupFilter: 'all',
+            v2rayAPage: 1,
+            v2rayAPageSize: 12,
+            v2rayAGroupPage: 1,
+            v2rayAGroupPageSize: 10,
             projectUpdateStatus: null,
             updatePackages: [],
             accounts: [],
@@ -176,6 +182,74 @@ createApp({
         },
         cloudTotalPages() {
             return Math.ceil(this.cloudTotal / this.cloudPageSize) || 1;
+        },
+        v2rayASubscriptionTabs() {
+            const groups = new Map();
+            for (const node of (this.v2rayANodes || [])) {
+                const key = String(node.subscription_id || node.subscription_name || 'ungrouped');
+                const existing = groups.get(key) || {
+                    key,
+                    name: String(node.subscription_name || node.subscription_id || '未分组'),
+                    count: 0,
+                };
+                existing.count += 1;
+                groups.set(key, existing);
+            }
+            return Array.from(groups.values()).sort((a, b) => {
+                if (b.count !== a.count) return b.count - a.count;
+                return String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN');
+            });
+        },
+        v2rayAFilteredNodes() {
+            if (this.v2rayAGroupFilter === 'all') {
+                return this.v2rayANodes || [];
+            }
+            return (this.v2rayANodes || []).filter(node => {
+                const key = String(node.subscription_id || node.subscription_name || 'ungrouped');
+                return key === this.v2rayAGroupFilter;
+            });
+        },
+        v2rayATotalPages() {
+            return Math.max(1, Math.ceil((this.v2rayAFilteredNodes || []).length / this.v2rayAPageSize));
+        },
+        v2rayAPagedNodes() {
+            const currentPage = Math.min(Math.max(1, this.v2rayAPage), this.v2rayATotalPages);
+            const start = (currentPage - 1) * this.v2rayAPageSize;
+            return (this.v2rayAFilteredNodes || []).slice(start, start + this.v2rayAPageSize);
+        },
+        v2rayAGroupedSubscriptions() {
+            const groups = new Map();
+            for (const node of (this.v2rayANodes || [])) {
+                const key = String(node.subscription_id || node.subscription_name || 'ungrouped');
+                const existing = groups.get(key) || {
+                    key,
+                    name: String(node.subscription_name || node.subscription_id || '未分组'),
+                    nodeCount: 0,
+                    currentCount: 0,
+                    bestLatency: null,
+                };
+                existing.nodeCount += 1;
+                if (node.is_current) {
+                    existing.currentCount += 1;
+                }
+                const latency = Number(node.latency_ms);
+                if (Number.isFinite(latency)) {
+                    existing.bestLatency = existing.bestLatency === null ? latency : Math.min(existing.bestLatency, latency);
+                }
+                groups.set(key, existing);
+            }
+            return Array.from(groups.values()).sort((a, b) => {
+                if (b.nodeCount !== a.nodeCount) return b.nodeCount - a.nodeCount;
+                return String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN');
+            });
+        },
+        v2rayAGroupTotalPages() {
+            return Math.max(1, Math.ceil((this.v2rayAGroupedSubscriptions || []).length / this.v2rayAGroupPageSize));
+        },
+        v2rayAPagedGroups() {
+            const currentPage = Math.min(Math.max(1, this.v2rayAGroupPage), this.v2rayAGroupTotalPages);
+            const start = (currentPage - 1) * this.v2rayAGroupPageSize;
+            return (this.v2rayAGroupedSubscriptions || []).slice(start, start + this.v2rayAGroupPageSize);
         }
     },
     methods: {
@@ -772,6 +846,24 @@ createApp({
                 return String(a.name || a.address || a.node_id || '').localeCompare(String(b.name || b.address || b.node_id || ''), 'zh-CN');
             });
         },
+        changeV2rayAPage(nextPage) {
+            const target = Math.min(this.v2rayATotalPages, Math.max(1, Number(nextPage) || 1));
+            this.v2rayAPage = target;
+        },
+        changeV2rayAGroupPage(nextPage) {
+            const target = Math.min(this.v2rayAGroupTotalPages, Math.max(1, Number(nextPage) || 1));
+            this.v2rayAGroupPage = target;
+        },
+        changeV2rayAListMode(mode) {
+            this.v2rayAListMode = mode === 'grouped' ? 'grouped' : 'all';
+            this.v2rayAPage = 1;
+            this.v2rayAGroupPage = 1;
+        },
+        selectV2rayAGroupFilter(groupKey) {
+            this.v2rayAGroupFilter = groupKey || 'all';
+            this.v2rayAListMode = 'all';
+            this.v2rayAPage = 1;
+        },
         async fetchV2rayANodes(withLatency = false, showToast = true) {
             if (!this.config?.clash_proxy_pool || this.config.clash_proxy_pool.client_type !== 'v2raya') {
                 if (showToast) {
@@ -791,6 +883,11 @@ createApp({
                 if (data.status === 'success' || data.status === 'warning') {
                     const payload = data.data || {};
                     this.v2rayANodes = this.sortV2rayANodes(Array.isArray(payload.nodes) ? payload.nodes : []);
+                    this.v2rayAPage = 1;
+                    this.v2rayAGroupPage = 1;
+                    if (this.v2rayAGroupFilter !== 'all' && !this.v2rayASubscriptionTabs.some(item => item.key === this.v2rayAGroupFilter)) {
+                        this.v2rayAGroupFilter = 'all';
+                    }
                     this.v2rayAStatusMessage = payload.message || '';
                     if (payload.runtime) {
                         this.v2rayARuntime = payload.runtime;
@@ -834,6 +931,11 @@ createApp({
                 if (data.status === 'success' || data.status === 'warning') {
                     const payload = data.data || {};
                     this.v2rayANodes = this.sortV2rayANodes(Array.isArray(payload.nodes) ? payload.nodes : this.v2rayANodes);
+                    this.v2rayAPage = 1;
+                    this.v2rayAGroupPage = 1;
+                    if (this.v2rayAGroupFilter !== 'all' && !this.v2rayASubscriptionTabs.some(item => item.key === this.v2rayAGroupFilter)) {
+                        this.v2rayAGroupFilter = 'all';
+                    }
                     this.v2rayAStatusMessage = payload.message || this.v2rayAStatusMessage;
                     if (payload.runtime) {
                         this.v2rayARuntime = payload.runtime;
