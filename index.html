@@ -1686,11 +1686,11 @@
                                 </div>
                             </div>
 
-                            <div v-if="proxySubTab === 'clash' && config.clash_proxy_pool && config.clash_proxy_pool.client_type !== 'v2rayn'" class="bg-white p-6 md:p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-200/60 border-l-4 border-l-cyan-500 bg-gradient-to-br from-cyan-50/30 to-white">
-                                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 border-b border-cyan-100 pb-5">
+                            <div v-if="proxySubTab === 'clash' && config.clash_proxy_pool && config.clash_proxy_pool.client_type !== 'v2rayn'" class="bg-white p-6 md:p-8 rounded-2xl border border-slate-200 shadow-sm">
+                                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 border-b border-slate-100 pb-5">
                                     <div>
-                                        <h3 class="text-xl md:text-2xl font-black text-cyan-700 tracking-tight flex items-center gap-2"><span>🛰️</span> Clash 订阅自助更新</h3>
-                                        <p class="text-xs text-slate-500 mt-2 font-medium">修改宿主机 <code class="font-mono">/opt/mihomo-pool/pool.env</code> 里的订阅链接，并自动执行代理池重载脚本。</p>
+                                        <h3 class="text-lg md:text-xl font-black text-slate-900 tracking-tight flex items-center gap-2"><span>🛰️</span> Clash 订阅更新</h3>
+                                        <p class="text-xs text-slate-500 mt-2 font-medium">更新宿主机订阅并同步代理池状态。</p>
                                     </div>
                                     <div class="flex gap-3 w-full sm:w-auto">
                                         <button @click="fetchClashPoolInfo" class="w-full sm:w-auto px-4 py-2.5 bg-white border border-cyan-200 text-cyan-700 rounded-xl hover:bg-cyan-50 active:scale-95 transition-all shadow-sm font-black text-sm">
@@ -1761,7 +1761,7 @@
 
                                     <div class="space-y-4">
                                         <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                                            <div class="bg-cyan-50/70 border border-cyan-200 rounded-2xl px-4 py-4 shadow-sm">
+                                            <div class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
                                                 <label class="block text-[11px] text-cyan-700 font-black mb-2 uppercase tracking-wider">系统当前实际生效订阅入口</label>
                                                 <div class="text-xs text-cyan-900 font-medium leading-relaxed">
                                                     后端真正写入并使用的是下面这条链接；如果你贴入的是普通订阅串，系统会自动修正成可用的 Mihomo 入口。
@@ -1770,7 +1770,7 @@
                                                     {{ clashPoolInfo?.effective_sub_url || clashPoolInfo?.sub_url || clashPoolSubUrl || '暂无' }}
                                                 </code>
                                             </div>
-                                            <div class="bg-indigo-50/70 border border-indigo-200 rounded-2xl px-4 py-4 shadow-sm">
+                                            <div class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
                                                 <label class="block text-[11px] text-indigo-700 font-black mb-2 uppercase tracking-wider">默认路由对齐状态</label>
                                                 <div v-if="clashPoolRuntime" class="space-y-2">
                                                     <div class="flex flex-wrap items-center gap-2">
@@ -1845,9 +1845,9 @@
                                 </div>
                             </div>
 
-                            <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-200/60 border-l-4 border-l-indigo-500 bg-gradient-to-br from-indigo-50/30 to-white" v-if="config.clash_proxy_pool && (proxySubTab === 'clash' || proxySubTab === 'v2rayn')">
-                                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 md:mb-8 border-b border-indigo-100 pb-5 gap-4">
-                                    <h3 class="text-xl md:text-2xl font-black text-indigo-700 tracking-tight flex items-center gap-2"><span>🌍</span> Clash 节点智能池</h3>
+                            <div class="bg-white p-6 md:p-8 rounded-2xl border border-slate-200 shadow-sm" v-if="config.clash_proxy_pool && proxySubTab === 'clash'">
+                                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 md:mb-8 border-b border-slate-100 pb-5 gap-4">
+                                    <h3 class="text-lg md:text-xl font-black text-slate-900 tracking-tight flex items-center gap-2"><span>🌍</span> Clash 智能切点</h3>
                                     <label class="relative inline-flex bg-white px-4 py-2.5 md:px-5 md:py-3 rounded-xl cursor-pointer hover:bg-indigo-50 transition-colors shadow-sm border border-indigo-200 w-full sm:w-auto items-center justify-center group">
                                         <input type="checkbox" v-model="config.clash_proxy_pool.enable" @change="handleClashEnableToggle" class="sr-only peer">
                                         <div class="relative w-11 h-6 shrink-0 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all after:shadow-sm peer-checked:bg-indigo-600 shadow-inner transition-colors duration-300 group-hover:shadow-md"></div>
@@ -1857,7 +1857,7 @@
 
                                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-10" :class="{'opacity-50 pointer-events-none grayscale-[50%] transition-opacity duration-300': !config.clash_proxy_pool.enable}">
                                     <div class="space-y-5">
-                                        <div class="text-xs text-indigo-800 font-bold bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 leading-relaxed shadow-sm">
+                                        <div class="text-xs text-slate-600 font-medium bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 leading-relaxed">
                                             <span class="font-black">互斥说明：</span>
                                             <code class="font-mono">开启智能切点</code> 与 <code class="font-mono">HTTP 动态代理池</code> 不能同时生效。现在如果你开启智能切点，系统会自动关闭 HTTP 动态代理池；如果你开启 HTTP 动态代理池，系统会自动关闭智能切点。
                                         </div>
@@ -1868,86 +1868,6 @@
                                                 <option value="v2raya">v2rayA（面板托管）</option>
                                                 <option value="v2rayn">v2rayN（全局节点池切换）</option>
                                             </select>
-                                            <p class="text-[11px] text-slate-500 mt-2 font-medium" v-if="config.clash_proxy_pool.client_type === 'v2rayn'">
-                                                v2rayN 模式会按全局 IndexId 在全部节点里切换，并重启本地客户端，不依赖 Clash 控制 API。
-                                            </p>
-                                            <p class="text-[11px] text-slate-500 mt-2 font-medium" v-else-if="config.clash_proxy_pool.client_type === 'v2raya'">
-                                                v2rayA 模式下订阅更新和节点切换在 v2rayA 面板完成，本项目仅使用 default_proxy 并检测当前链路。
-                                            </p>
-                                        </div>
-                                        <div v-if="config.clash_proxy_pool.client_type === 'v2raya'" class="space-y-4 border border-indigo-200 bg-indigo-50/50 rounded-2xl p-4">
-                                            <div>
-                                                <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">v2rayA 面板地址</label>
-                                                <input type="text" v-model="config.clash_proxy_pool.v2raya_url" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 http://127.0.0.1:2017">
-                                            </div>
-                                            <div class="text-xs text-indigo-800 font-bold bg-white border border-indigo-200 rounded-xl px-4 py-3 leading-relaxed shadow-sm">
-                                                订阅更新、节点切换、分组选择请在 v2rayA 面板完成；项目侧只负责使用上方 default_proxy，并检测当前链路是否可用。
-                                            </div>
-                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                <button @click="openV2rayAPanel" class="bg-white border border-indigo-200 text-indigo-700 px-4 py-2.5 rounded-xl hover:bg-indigo-50 active:scale-95 transition-all shadow-sm font-bold flex items-center justify-center gap-2">
-                                                    <span>🧭</span>
-                                                    打开 v2rayA 面板
-                                                </button>
-                                                <button @click="testV2rayACurrentProxy" :disabled="isV2rayATesting" class="bg-indigo-600 text-white px-4 py-2.5 rounded-xl hover:bg-indigo-700 active:scale-95 transition-all shadow-md shadow-indigo-500/20 font-bold disabled:opacity-50 flex items-center justify-center gap-2">
-                                                    <span v-if="isV2rayATesting" class="animate-spin">⏳</span>
-                                                    <span v-else>⚡</span>
-                                                    检测当前链路
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <div v-if="config.clash_proxy_pool.client_type === 'v2rayn'" class="space-y-4 border border-indigo-200 bg-indigo-50/50 rounded-2xl p-4">
-                                            <div>
-                                                <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">v2rayN 根目录</label>
-                                                <input type="text" v-model="config.clash_proxy_pool.v2rayn_base_dir" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 C:/Users/admin/Desktop/v2rayN-windows-64">
-                                            </div>
-                                            <div>
-                                                <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">切换后等待秒数</label>
-                                                <input type="number" min="1" v-model.number="config.clash_proxy_pool.v2rayn_restart_wait_sec" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors shadow-sm text-sm">
-                                            </div>
-                                            <label class="relative inline-flex bg-white px-4 py-3 rounded-xl cursor-pointer hover:bg-indigo-50 transition-colors shadow-sm border border-indigo-200 w-full items-center">
-                                                <input type="checkbox" v-model="config.clash_proxy_pool.v2rayn_hide_window_on_restart" class="sr-only peer">
-                                                <div class="relative w-11 h-6 shrink-0 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all after:shadow-sm peer-checked:bg-indigo-600 shadow-inner transition-colors duration-300"></div>
-                                                <div class="ml-3">
-                                                    <span class="font-black text-indigo-900 text-sm block tracking-wide">切点后自动隐藏 v2rayN 窗口</span>
-                                                    <span class="text-[10px] md:text-xs text-slate-500">减少每次切换时主窗口弹出</span>
-                                                </div>
-                                            </label>
-                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                <div>
-                                                    <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">订阅更新间隔（分钟）</label>
-                                                    <input type="number" min="0" v-model.number="config.clash_proxy_pool.v2rayn_subscription_update_interval_minutes" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors shadow-sm text-sm">
-                                                </div>
-                                                <div class="rounded-xl border border-indigo-200 bg-white/80 px-4 py-3 shadow-sm">
-                                                    <label class="block text-slate-700 text-xs font-extrabold mb-1 uppercase tracking-wider">订阅更新方式</label>
-                                                    <p class="text-sm font-bold text-indigo-700">已内置自动更新脚本</p>
-                                                    <p class="text-[11px] text-slate-500 mt-1">这里不用再填写命令。点击“更新订阅”后，会在下次切换节点时自动重新筛选活节点池。</p>
-                                                </div>
-                                            </div>
-                                            <label class="relative inline-flex bg-white px-4 py-3 rounded-xl cursor-pointer hover:bg-indigo-50 transition-colors shadow-sm border border-indigo-200 w-full items-center">
-                                                <input type="checkbox" v-model="config.clash_proxy_pool.v2rayn_subscription_update_enabled" class="sr-only peer">
-                                                <div class="relative w-11 h-6 shrink-0 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all after:shadow-sm peer-checked:bg-indigo-600 shadow-inner transition-colors duration-300"></div>
-                                                <div class="ml-3">
-                                                    <span class="font-black text-indigo-900 text-sm block tracking-wide">定时更新订阅后重测</span>
-                                                    <span class="text-[10px] md:text-xs text-slate-500">按上面的命令和间隔执行更新，再自动重新筛选可用节点</span>
-                                                </div>
-                                            </label>
-                                            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                                <button @click="runV2raynSubscriptionUpdateOnly()" :disabled="isV2raynSubscriptionUpdating" class="bg-white border border-indigo-200 text-indigo-700 px-4 py-2.5 rounded-xl hover:bg-indigo-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
-                                                    <span v-if="isV2raynSubscriptionUpdating" class="animate-spin">⏳</span>
-                                                    <span v-else>🛰️</span>
-                                                    更新订阅
-                                                </button>
-                                                <button @click="runV2raynPrecheck(false)" :disabled="isProxyBatchChecking" class="bg-white border border-indigo-200 text-indigo-700 px-4 py-2.5 rounded-xl hover:bg-indigo-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
-                                                    <span v-if="isProxyBatchChecking" class="animate-spin">⏳</span>
-                                                    <span v-else>⚡</span>
-                                                    重新筛选节点
-                                                </button>
-                                                <button @click="runV2raynPrecheck(true)" :disabled="isProxyBatchChecking" class="bg-indigo-600 text-white px-4 py-2.5 rounded-xl hover:bg-indigo-700 active:scale-95 transition-all shadow-md shadow-indigo-500/20 font-bold disabled:opacity-50 flex items-center justify-center gap-2">
-                                                    <span v-if="isProxyBatchChecking" class="animate-spin">⏳</span>
-                                                    <span v-else>🔄</span>
-                                                    更新订阅并筛选
-                                                </button>
-                                            </div>
                                         </div>
                                         <div class="flex flex-col sm:flex-row gap-4 mb-2">
                                             <label class="relative inline-flex flex-1 text-rose-700 font-bold bg-rose-50/80 p-4 rounded-xl border border-rose-200/60 items-center cursor-pointer shadow-sm hover:bg-rose-100 transition-colors group" :class="{'opacity-50 cursor-not-allowed': config.clash_proxy_pool.client_type === 'v2rayn'}">
@@ -2033,18 +1953,18 @@
                                 </div>
                             </div>
 
-                            <div v-if="config.clash_proxy_pool && proxySubTab === 'v2raya'" class="bg-white p-6 md:p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-200/60 border-l-4 border-l-fuchsia-500 bg-gradient-to-br from-fuchsia-50/30 to-white">
-                                <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-fuchsia-100 pb-5 mb-6">
+                            <div v-if="config.clash_proxy_pool && proxySubTab === 'v2raya'" class="bg-white p-6 md:p-8 rounded-2xl border border-slate-200 shadow-sm">
+                                <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-slate-100 pb-5 mb-6">
                                     <div>
-                                        <h3 class="text-xl md:text-2xl font-black text-fuchsia-700 tracking-tight flex items-center gap-2"><span>🧩</span> v2rayA 面板接管</h3>
-                                        <p class="text-xs text-slate-500 mt-2 font-medium">这里直接对接 v2rayA Web API，支持读取节点、拉取延迟、当前节点高亮和手动切换。</p>
+                                        <h3 class="text-lg md:text-xl font-black text-slate-900 tracking-tight flex items-center gap-2"><span>🧩</span> v2rayA 配置与节点管理</h3>
+                                        <p class="text-xs text-slate-500 mt-2 font-medium">连接 v2rayA 面板，读取节点、延迟和当前链路状态。</p>
                                     </div>
                                     <div v-if="config.clash_proxy_pool.client_type !== 'v2raya'" class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 font-bold">
                                         当前客户端类型不是 <code class="font-mono">v2raya</code>。先切到 v2rayA 模式，下面的读取与切换能力才会生效。
                                     </div>
                                 </div>
 
-                                <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                                <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.3fr)_minmax(360px,0.9fr)] gap-6">
                                     <div class="space-y-4">
                                         <div>
                                             <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">v2rayA 面板地址</label>
@@ -2079,20 +1999,20 @@
                                         </div>
                                     </div>
 
-                                    <div class="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-4">
-                                        <div class="rounded-3xl border border-fuchsia-100 bg-gradient-to-br from-fuchsia-50/75 via-white to-white p-4 md:p-5 shadow-[0_18px_45px_-28px_rgba(192,38,211,0.35)]">
-                                            <div class="flex items-center justify-between gap-3 mb-4">
-                                                <div>
-                                                    <div class="text-[11px] font-black uppercase tracking-[0.24em] text-fuchsia-500">Quick Actions</div>
-                                                    <h4 class="mt-1 text-base md:text-lg font-black text-slate-900">v2rayA 节点工具区</h4>
+                                        <div class="space-y-4">
+                                            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 md:p-5 shadow-sm">
+                                                <div class="flex items-center justify-between gap-3 mb-4">
+                                                    <div>
+                                                        <div class="text-[11px] font-black uppercase tracking-[0.24em] text-slate-400">Actions</div>
+                                                        <h4 class="mt-1 text-base md:text-lg font-black text-slate-900">节点工具</h4>
+                                                    </div>
+                                                    <div class="hidden md:flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-500 shadow-sm">
+                                                        <span class="w-2 h-2 rounded-full" :class="config.clash_proxy_pool.enable && config.clash_proxy_pool.client_type === 'v2raya' ? 'bg-emerald-500' : 'bg-slate-300'"></span>
+                                                        {{ config.clash_proxy_pool.enable && config.clash_proxy_pool.client_type === 'v2raya' ? '自动切点已接管' : '当前未接管' }}
+                                                    </div>
                                                 </div>
-                                                <div class="hidden md:flex items-center gap-2 rounded-full border border-fuchsia-100 bg-white/80 px-3 py-1.5 text-[11px] font-bold text-slate-500 shadow-sm">
-                                                    <span class="w-2 h-2 rounded-full" :class="config.clash_proxy_pool.enable && config.clash_proxy_pool.client_type === 'v2raya' ? 'bg-emerald-500' : 'bg-slate-300'"></span>
-                                                    {{ config.clash_proxy_pool.enable && config.clash_proxy_pool.client_type === 'v2raya' ? '自动切点已接管' : '当前未接管' }}
-                                                </div>
-                                            </div>
 
-                                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                                 <button @click="fetchV2rayANodes(true, true)" :disabled="isV2rayALatencyLoading" class="sm:col-span-2 bg-slate-900 text-white px-4 py-3 rounded-2xl hover:bg-slate-800 active:scale-95 transition-all shadow-md shadow-slate-900/20 font-black disabled:opacity-50 flex items-center justify-center gap-2">
                                                     <span v-if="isV2rayALatencyLoading" class="animate-spin">⏳</span>
                                                     <span v-else>📶</span>
@@ -2128,7 +2048,7 @@
                                                     <span v-else>🛠️</span>
                                                     环境检查
                                                 </button>
-                                                <button @click="openV2rayAPanel" class="sm:col-span-2 bg-fuchsia-50/80 border border-fuchsia-200 text-fuchsia-700 px-4 py-2.5 rounded-2xl hover:bg-fuchsia-100 active:scale-95 transition-all shadow-sm font-bold flex items-center justify-center gap-2">
+                                                <button @click="openV2rayAPanel" class="sm:col-span-2 bg-white border border-slate-200 text-slate-700 px-4 py-2.5 rounded-2xl hover:bg-slate-50 active:scale-95 transition-all shadow-sm font-bold flex items-center justify-center gap-2">
                                                     <span>🧭</span>
                                                     打开 v2rayA 面板
                                                 </button>
@@ -2136,17 +2056,17 @@
                                         </div>
 
                                         <div class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-1 gap-3">
-                                            <div class="rounded-3xl border border-fuchsia-200 bg-gradient-to-br from-fuchsia-50 via-white to-white px-4 py-4 shadow-[0_18px_40px_-30px_rgba(192,38,211,0.3)]">
+                                            <div class="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
                                                 <label class="block text-[11px] text-fuchsia-700 font-black mb-2 uppercase tracking-wider">当前接管状态</label>
                                                 <div class="text-sm text-slate-700 font-bold leading-relaxed">{{ config.clash_proxy_pool.enable && config.clash_proxy_pool.client_type === 'v2raya' ? '已启用 v2rayA 自动切点' : '当前未启用 v2rayA 自动切点' }}</div>
                                                 <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">只要上方已开启 <code class="font-mono">智能切点</code> 且 <code class="font-mono">client_type=v2raya</code>，业务运行时就会自动切换；下方按钮只是手动指定覆盖。</div>
                                             </div>
-                                            <div class="rounded-3xl border border-slate-200 bg-white px-4 py-4 shadow-[0_18px_40px_-30px_rgba(15,23,42,0.22)]">
+                                            <div class="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
                                                 <label class="block text-[11px] text-slate-500 font-black mb-2 uppercase tracking-wider">节点缓存</label>
                                                 <div class="text-2xl font-black text-slate-900">{{ v2rayANodes.length }}</div>
                                                 <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">{{ v2rayAStatusMessage || 'v2rayA 节点列表已刷新。' }}</div>
                                             </div>
-                                            <div class="rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-white px-4 py-4 shadow-[0_18px_40px_-30px_rgba(245,158,11,0.25)]">
+                                            <div class="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
                                                 <label class="block text-[11px] text-amber-700 font-black mb-2 uppercase tracking-wider">节点整理状态</label>
                                                 <div class="text-sm text-slate-700 font-bold leading-relaxed">失效 {{ v2rayAInvalidKeys.length }} 个 · 重复组 {{ v2rayADuplicateGroups.length }} 个</div>
                                                 <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">“移除重复”会把重复节点标记为失效，自动切点时会跳过它们。</div>
@@ -2370,6 +2290,93 @@
                                     </div>
                                     <div v-else class="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-6 font-medium">
                                         还没有读取到 v2rayA 节点。先确认面板地址与登录信息，再点击“读取节点列表”。
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div v-if="config.clash_proxy_pool && proxySubTab === 'v2rayn'" class="bg-white p-6 md:p-8 rounded-2xl border border-slate-200 shadow-sm">
+                                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 border-b border-slate-100 pb-5">
+                                    <div>
+                                        <h3 class="text-lg md:text-xl font-black text-slate-900 tracking-tight flex items-center gap-2"><span>🪟</span> v2rayN 节点池</h3>
+                                        <p class="text-xs text-slate-500 mt-2 font-medium">仅保留 v2rayN 自己需要的节点切换与订阅管理项。</p>
+                                    </div>
+                                    <label class="relative inline-flex bg-white px-4 py-2.5 md:px-5 md:py-3 rounded-xl cursor-pointer hover:bg-indigo-50 transition-colors shadow-sm border border-indigo-200 w-full sm:w-auto items-center justify-center group">
+                                        <input type="checkbox" v-model="config.clash_proxy_pool.enable" @change="handleClashEnableToggle" class="sr-only peer">
+                                        <div class="relative w-11 h-6 shrink-0 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all after:shadow-sm peer-checked:bg-indigo-600 shadow-inner transition-colors duration-300 group-hover:shadow-md"></div>
+                                        <span class="font-black text-indigo-900 text-sm md:text-base ml-3 tracking-wide">开启智能切点</span>
+                                    </label>
+                                </div>
+
+                                <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)] gap-6" :class="{'opacity-50 pointer-events-none grayscale-[50%] transition-opacity duration-300': !config.clash_proxy_pool.enable}">
+                                    <div class="space-y-4">
+                                        <div>
+                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">v2rayN 根目录</label>
+                                            <input type="text" v-model="config.clash_proxy_pool.v2rayn_base_dir" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 C:/Users/admin/Desktop/v2rayN-windows-64">
+                                        </div>
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">切换后等待秒数</label>
+                                                <input type="number" min="1" v-model.number="config.clash_proxy_pool.v2rayn_restart_wait_sec" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors shadow-sm text-sm">
+                                            </div>
+                                            <div>
+                                                <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">订阅更新间隔（分钟）</label>
+                                                <input type="number" min="0" v-model.number="config.clash_proxy_pool.v2rayn_subscription_update_interval_minutes" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors shadow-sm text-sm">
+                                            </div>
+                                        </div>
+                                        <label class="relative inline-flex bg-white px-4 py-3 rounded-xl cursor-pointer hover:bg-indigo-50 transition-colors shadow-sm border border-slate-200 w-full items-center">
+                                            <input type="checkbox" v-model="config.clash_proxy_pool.v2rayn_hide_window_on_restart" class="sr-only peer">
+                                            <div class="relative w-11 h-6 shrink-0 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all after:shadow-sm peer-checked:bg-indigo-600 shadow-inner transition-colors duration-300"></div>
+                                            <div class="ml-3">
+                                                <span class="font-black text-slate-900 text-sm block tracking-wide">切点后自动隐藏窗口</span>
+                                                <span class="text-[10px] md:text-xs text-slate-500">减少 v2rayN 主窗口频繁弹出。</span>
+                                            </div>
+                                        </label>
+                                        <label class="relative inline-flex bg-white px-4 py-3 rounded-xl cursor-pointer hover:bg-indigo-50 transition-colors shadow-sm border border-slate-200 w-full items-center">
+                                            <input type="checkbox" v-model="config.clash_proxy_pool.v2rayn_subscription_update_enabled" class="sr-only peer">
+                                            <div class="relative w-11 h-6 shrink-0 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all after:shadow-sm peer-checked:bg-indigo-600 shadow-inner transition-colors duration-300"></div>
+                                            <div class="ml-3">
+                                                <span class="font-black text-slate-900 text-sm block tracking-wide">定时更新订阅</span>
+                                                <span class="text-[10px] md:text-xs text-slate-500">按间隔执行更新，并在下次切换时重新使用最新节点池。</span>
+                                            </div>
+                                        </label>
+                                        <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 shadow-sm">
+                                            <div class="text-[11px] font-black uppercase tracking-wider text-slate-500">订阅更新方式</div>
+                                            <div class="text-sm font-bold text-slate-800 mt-2">项目已内置更新脚本</div>
+                                            <div class="text-[11px] text-slate-500 mt-2">这里不用再填写命令。需要时直接点击下方按钮即可。</div>
+                                        </div>
+                                        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                            <button @click="runV2raynSubscriptionUpdateOnly()" :disabled="isV2raynSubscriptionUpdating" class="bg-white border border-indigo-200 text-indigo-700 px-4 py-2.5 rounded-xl hover:bg-indigo-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                <span v-if="isV2raynSubscriptionUpdating" class="animate-spin">⏳</span>
+                                                <span v-else>🛰️</span>
+                                                更新订阅
+                                            </button>
+                                            <button @click="runV2raynPrecheck(false)" :disabled="isProxyBatchChecking" class="bg-white border border-indigo-200 text-indigo-700 px-4 py-2.5 rounded-xl hover:bg-indigo-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                <span v-if="isProxyBatchChecking" class="animate-spin">⏳</span>
+                                                <span v-else>⚡</span>
+                                                重新筛选节点
+                                            </button>
+                                            <button @click="runV2raynPrecheck(true)" :disabled="isProxyBatchChecking" class="bg-indigo-600 text-white px-4 py-2.5 rounded-xl hover:bg-indigo-700 active:scale-95 transition-all shadow-md shadow-indigo-500/20 font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                <span v-if="isProxyBatchChecking" class="animate-spin">⏳</span>
+                                                <span v-else>🔄</span>
+                                                更新后筛选
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div class="space-y-4">
+                                        <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 shadow-sm">
+                                            <div class="text-[11px] font-black uppercase tracking-wider text-slate-500">运行说明</div>
+                                            <div class="text-sm font-bold text-slate-800 mt-2">v2rayN 模式不依赖 Clash 控制 API</div>
+                                            <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">项目会按全局节点池切换当前节点，并在需要时重新筛选可用节点。</div>
+                                        </div>
+                                        <div class="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                                            <label class="block text-slate-700 text-xs font-black mb-2 flex items-center justify-between uppercase tracking-wider">
+                                                节点过滤黑名单
+                                                <span class="text-[10px] font-bold text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">换行分隔</span>
+                                            </label>
+                                            <textarea v-model="blacklistStr" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors shadow-inner h-[180px] font-mono text-xs leading-relaxed placeholder:text-slate-300" placeholder="如:&#10;故障&#10;官网&#10;HK&#10;CN"></textarea>
+                                            <div class="text-[11px] text-slate-500 mt-2">会在筛选和切点时跳过这些关键词命中的节点。</div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
