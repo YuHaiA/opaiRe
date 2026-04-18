@@ -3,7 +3,7 @@ const { createApp } = Vue;
 createApp({
     data() {
         return {
-            appVersion: 'v10.1.4',
+            appVersion: 'v10.1.5',
             versionPageUrl: 'https://github.com/YuHaiA/opaiRe/releases/latest',
             isLoggedIn: !!localStorage.getItem('auth_token'),
             loginPassword: '',
@@ -983,6 +983,35 @@ createApp({
                 }
             } catch (e) {
                 this.showToast('标记失效失败', 'error');
+            } finally {
+                this.isV2rayAInvalidMutating = false;
+            }
+        },
+        async markV2rayANodesWithoutLatencyInvalid() {
+            const nodeKeys = Array.from(new Set((this.v2rayANodes || [])
+                .filter(node => !node?.is_current && !node?.is_invalid)
+                .filter(node => node?.latency_ms === null || node?.latency_ms === undefined || node?.latency_ms === '' || Number.isNaN(Number(node?.latency_ms)))
+                .map(node => node.key)
+                .filter(Boolean)));
+            if (!nodeKeys.length) {
+                this.showToast('当前没有可标记的无延迟节点', 'warning');
+                return;
+            }
+            this.isV2rayAInvalidMutating = true;
+            try {
+                const res = await this.authFetch('/api/proxy/v2raya/mark_invalid', {
+                    method: 'POST',
+                    body: JSON.stringify({ node_keys: nodeKeys })
+                });
+                const data = await res.json();
+                if (data.status === 'success' || data.status === 'warning') {
+                    this.applyV2rayANodesPayload(data.data || {});
+                    this.showToast(data.message || `已将 ${nodeKeys.length} 个无延迟节点标记为失效`, data.status === 'success' ? 'success' : 'warning');
+                } else {
+                    this.showToast(data.message || '无延迟节点标记失败', 'error');
+                }
+            } catch (e) {
+                this.showToast('无延迟节点标记失败', 'error');
             } finally {
                 this.isV2rayAInvalidMutating = false;
             }
