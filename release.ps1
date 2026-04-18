@@ -117,7 +117,7 @@ WriteUtf8File -Path $upstreamVersionFile -Content ($normalizedUpstreamVersion + 
 
 ReplaceOrFail -Path (Join-Path $repoRoot "static\js\app.js") -Pattern "appVersion:\s*'[^']+'," -Replacement ("appVersion: '" + $normalizedVersion + "',") -Label "前端版本号"
 
-ReplaceOrFail -Path (Join-Path $repoRoot "README.md") -Pattern '当前公开整理版本已对齐上游 `[^`]+` 注册流程更新' -Replacement ('当前公开整理版本已对齐上游 `' + $normalizedUpstreamVersion + '` 注册流程更新') -Label "README 顶部上游版本说明"
+ReplaceOrFail -Path (Join-Path $repoRoot "README.md") -Pattern '当前公开整理版本已对齐上游 `[^`]+` 注册流程更新[^`]*' -Replacement ('当前公开整理版本已对齐上游 `' + $normalizedUpstreamVersion + '` 注册流程更新，并保留了已经在实际环境中验证过的增强能力，重点优化了：') -Label "README 顶部上游版本说明"
 ReplaceOrFail -Path (Join-Path $repoRoot "README.md") -Pattern '- 上游对齐基线：`[^`]+`' -Replacement ('- 上游对齐基线：`' + $normalizedUpstreamVersion + '`') -Label "README 上游基线"
 ReplaceOrFail -Path (Join-Path $repoRoot "README.md") -Pattern '- 本仓库独立版本：`[^`]+`' -Replacement ('- 本仓库独立版本：`' + $normalizedVersion + '`') -Label "README 仓库版本"
 
