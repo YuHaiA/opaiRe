@@ -1,3 +1,4 @@
+﻿# GPT Auto Manager
 # GPT Auto Manager
 
 一个基于上游 `wenfxl/openai-cpa` 深度整理的 **中文增强版 Web 控制台项目**。
@@ -100,7 +101,7 @@
 当前版本采用“双版本线”说明：
 
 - 上游对齐基线：`v10.1.1`
-- 本仓库独立版本：`v10.1.1-bfansye-hotfix2`
+- 本仓库独立版本：`v10.1.1-bfansye-hotfix3`
 
 说明：
 
@@ -441,3 +442,4 @@ docker compose up -d --build
 ## 17. English Summary
 
 This repository is a Chinese-enhanced public-ready fork of `wenfxl/openai-cpa`, focused on practical web-based operations, Clash/Mihomo proxy-pool management, HTTP dynamic proxy pooling, mailbox backends, and CPA/Sub2API inventory workflows.
+

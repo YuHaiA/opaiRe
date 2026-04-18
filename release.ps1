@@ -68,6 +68,22 @@ function ReplaceOrFail {
     Set-Content -LiteralPath $Path -Value $updated -Encoding UTF8
 }
 
+function ReplaceLineOrFail {
+    param(
+        [string]$Path,
+        [string]$Pattern,
+        [string]$Replacement,
+        [string]$Label
+    )
+
+    $content = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
+    $updated = [regex]::Replace($content, $Pattern, $Replacement, [System.Text.RegularExpressions.RegexOptions]::Multiline)
+    if ($updated -eq $content) {
+        throw "未能在 $Path 中匹配到 $Label，请手动检查文件结构后再发版。"
+    }
+    Set-Content -LiteralPath $Path -Value $updated -Encoding UTF8
+}
+
 function InvokeGit {
     param(
         [string[]]$Args
@@ -124,14 +140,14 @@ WriteUtf8File -Path $upstreamVersionFile -Content ($normalizedUpstreamVersion + 
 
 ReplaceOrFail -Path (Join-Path $repoRoot "static\js\app.js") -Pattern "appVersion:\s*'[^']+'," -Replacement ("appVersion: '" + $normalizedVersion + "',") -Label "前端版本号"
 
-ReplaceOrFail -Path (Join-Path $repoRoot "README.md") -Pattern '当前公开整理版本已对齐上游 `[^`]+` 注册流程更新[^`]*' -Replacement ('当前公开整理版本已对齐上游 `' + $normalizedUpstreamVersion + '` 注册流程更新，并保留了已经在实际环境中验证过的增强能力，重点优化了：') -Label "README 顶部上游版本说明"
-ReplaceOrFail -Path (Join-Path $repoRoot "README.md") -Pattern '- 上游对齐基线：`[^`]+`' -Replacement ('- 上游对齐基线：`' + $normalizedUpstreamVersion + '`') -Label "README 上游基线"
-ReplaceOrFail -Path (Join-Path $repoRoot "README.md") -Pattern '- 本仓库独立版本：`[^`]+`' -Replacement ('- 本仓库独立版本：`' + $normalizedVersion + '`') -Label "README 仓库版本"
+ReplaceLineOrFail -Path (Join-Path $repoRoot "README.md") -Pattern '^当前公开整理版本已对齐上游 `[^`]+` 注册流程更新.*$' -Replacement ('当前公开整理版本已对齐上游 `' + $normalizedUpstreamVersion + '` 注册流程更新，并保留了已经在实际环境中验证过的增强能力，重点优化了：') -Label "README 顶部上游版本说明"
+ReplaceLineOrFail -Path (Join-Path $repoRoot "README.md") -Pattern '^- 上游对齐基线：`[^`]+`$' -Replacement ('- 上游对齐基线：`' + $normalizedUpstreamVersion + '`') -Label "README 上游基线"
+ReplaceLineOrFail -Path (Join-Path $repoRoot "README.md") -Pattern '^- 本仓库独立版本：`[^`]+`$' -Replacement ('- 本仓库独立版本：`' + $normalizedVersion + '`') -Label "README 仓库版本"
 
-ReplaceOrFail -Path (Join-Path $repoRoot "PR_DESCRIPTION.md") -Pattern '- 上游版本：`[^`]+`' -Replacement ('- 上游版本：`' + $normalizedUpstreamVersion + '`') -Label "PR 描述上游版本"
-ReplaceOrFail -Path (Join-Path $repoRoot "PR_DESCRIPTION.md") -Pattern '- 当前公开热修版本：`[^`]+`' -Replacement ('- 当前公开热修版本：`' + $normalizedVersion + '`') -Label "PR 描述仓库版本"
+ReplaceLineOrFail -Path (Join-Path $repoRoot "PR_DESCRIPTION.md") -Pattern '^- 上游版本：`[^`]+`$' -Replacement ('- 上游版本：`' + $normalizedUpstreamVersion + '`') -Label "PR 描述上游版本"
+ReplaceLineOrFail -Path (Join-Path $repoRoot "PR_DESCRIPTION.md") -Pattern '^- 当前公开热修版本：`[^`]+`$' -Replacement ('- 当前公开热修版本：`' + $normalizedVersion + '`') -Label "PR 描述仓库版本"
 
-ReplaceOrFail -Path (Join-Path $repoRoot "CHANGELOG.md") -Pattern '- 公共发布版本号更新为 `[^`]+`' -Replacement ('- 公共发布版本号更新为 `' + $normalizedVersion + '`') -Label "CHANGELOG 当前发布版本"
+ReplaceLineOrFail -Path (Join-Path $repoRoot "CHANGELOG.md") -Pattern '^- 公共发布版本号更新为 `[^`]+`$' -Replacement ('- 公共发布版本号更新为 `' + $normalizedVersion + '`') -Label "CHANGELOG 当前发布版本"
 
 Write-Host "版本文件已更新：" -ForegroundColor Green
 Write-Host ("  本仓库版本: " + $normalizedVersion)
