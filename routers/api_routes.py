@@ -98,6 +98,10 @@ class V2rayASwitchReq(BaseModel):
     node_name: Optional[str] = ""
 
 
+class V2rayANodeKeysReq(BaseModel):
+    node_keys: List[str] = []
+
+
 class ProjectUpdateReq(BaseModel):
     restart_after_update: bool = False
 
@@ -1874,6 +1878,58 @@ def _sort_v2raya_nodes(nodes: list[dict]) -> list[dict]:
     return sorted(nodes, key=_node_sort_key)
 
 
+def _build_v2raya_duplicate_signature(node: dict) -> str:
+    address = _first_v2raya_text(node.get("address"), "").lower()
+    port = _first_v2raya_text(node.get("port"), "").lower()
+    node_type = _first_v2raya_text(node.get("node_type"), "").lower()
+    if address or port:
+        return f"{node_type}|{address}|{port}"
+    return f"{node_type}|{_first_v2raya_text(node.get('name'), node.get('node_id'), '').lower()}"
+
+
+def _annotate_v2raya_nodes(nodes: list[dict]) -> tuple[list[dict], list[dict], list[str]]:
+    invalid_keys = set(proxy_manager.get_v2raya_invalid_node_keys())
+    grouped: dict[str, list[dict]] = {}
+    for raw in nodes or []:
+        item = dict(raw)
+        signature = _build_v2raya_duplicate_signature(item)
+        item["duplicate_signature"] = signature
+        item["is_invalid"] = str(item.get("key") or "") in invalid_keys
+        item["is_duplicate"] = False
+        item["duplicate_count"] = 1
+        grouped.setdefault(signature, []).append(item)
+
+    duplicate_groups: list[dict] = []
+    for signature, items in grouped.items():
+        if len(items) <= 1:
+            continue
+        sorted_items = sorted(
+            items,
+            key=lambda node: (
+                0 if node.get("is_current") else 1,
+                0 if not node.get("is_invalid") else 1,
+                float(node.get("latency_ms", float("inf"))) if isinstance(node.get("latency_ms"), (int, float)) else float("inf"),
+                _first_v2raya_text(node.get("subscription_name"), ""),
+                _first_v2raya_text(node.get("name"), node.get("node_id"), ""),
+            ),
+        )
+        keep_key = str((sorted_items[0] or {}).get("key") or "")
+        group_name = _first_v2raya_text(sorted_items[0].get("name"), sorted_items[0].get("address"), keep_key)
+        duplicate_groups.append({
+            "signature": signature,
+            "keep_key": keep_key,
+            "count": len(sorted_items),
+            "name": group_name,
+            "keys": [str(item.get("key") or "") for item in sorted_items if item.get("key")],
+        })
+        for item in items:
+            item["duplicate_count"] = len(items)
+            item["is_duplicate"] = str(item.get("key") or "") != keep_key
+
+    annotated_nodes = [item for bucket in grouped.values() for item in bucket]
+    return _sort_v2raya_nodes(annotated_nodes), duplicate_groups, sorted(invalid_keys)
+
+
 async def _load_v2raya_nodes_snapshot(with_latency: bool = False) -> dict:
     config_data = _read_current_yaml_config()
     runtime = _build_v2raya_runtime_snapshot()
@@ -1918,6 +1974,17 @@ async def _load_v2raya_nodes_snapshot(with_latency: bool = False) -> dict:
             "auth_token_present": bool(token),
             "message": "v2rayA 节点列表已刷新。",
         }
+
+
+def _build_v2raya_nodes_response_data(data: dict) -> dict:
+    payload = dict(data or {})
+    annotated_nodes, duplicate_groups, invalid_keys = _annotate_v2raya_nodes(payload.get("nodes") or [])
+    payload["nodes"] = annotated_nodes
+    payload["duplicate_groups"] = duplicate_groups
+    payload["invalid_keys"] = invalid_keys
+    payload["duplicate_count"] = sum(max(0, int(group.get("count") or 0) - 1) for group in duplicate_groups)
+    payload["invalid_count"] = len(invalid_keys)
+    return payload
 
 
 def _build_v2raya_switch_payloads(req: V2rayASwitchReq) -> list[dict]:
@@ -1984,7 +2051,7 @@ async def api_v2raya_inspect(token: str = Depends(verify_token)):
 @router.get("/api/proxy/v2raya/nodes")
 async def api_v2raya_nodes(with_latency: bool = Query(False), token: str = Depends(verify_token)):
     try:
-        data = await _load_v2raya_nodes_snapshot(with_latency=with_latency)
+        data = _build_v2raya_nodes_response_data(await _load_v2raya_nodes_snapshot(with_latency=with_latency))
         runtime = data.get("runtime") or {}
         issues = runtime.get("issues", []) if isinstance(runtime, dict) else []
         status = "success" if not issues else "warning"
@@ -2029,7 +2096,7 @@ async def api_v2raya_switch(req: V2rayASwitchReq, token: str = Depends(verify_to
             if not switch_ok:
                 return {"status": "error", "message": last_message or "v2rayA 节点切换失败，请检查面板登录态或 API 兼容性。"}
         await asyncio.sleep(0.8)
-        data = await _load_v2raya_nodes_snapshot(with_latency=False)
+        data = _build_v2raya_nodes_response_data(await _load_v2raya_nodes_snapshot(with_latency=False))
         target_name = str(req.node_name or req.node_id or "").strip()
         return {
             "status": "success",
@@ -2038,6 +2105,58 @@ async def api_v2raya_switch(req: V2rayASwitchReq, token: str = Depends(verify_to
         }
     except Exception as e:
         return {"status": "error", "message": f"切换 v2rayA 节点失败: {e}"}
+
+
+@router.post("/api/proxy/v2raya/mark_invalid")
+async def api_v2raya_mark_invalid(req: V2rayANodeKeysReq, token: str = Depends(verify_token)):
+    node_keys = [str(item or "").strip() for item in (req.node_keys or []) if str(item or "").strip()]
+    if not node_keys:
+        return {"status": "warning", "message": "请至少选择一个节点。"}
+    changed = proxy_manager.set_v2raya_node_invalid_state(node_keys, invalid=True)
+    data = _build_v2raya_nodes_response_data(await _load_v2raya_nodes_snapshot(with_latency=False))
+    return {
+        "status": "success",
+        "message": f"已标记 {len(changed)} 个节点为失效，自动切点时会跳过它们。",
+        "data": data,
+    }
+
+
+@router.post("/api/proxy/v2raya/clear_invalid")
+async def api_v2raya_clear_invalid(token: str = Depends(verify_token)):
+    proxy_manager.clear_v2raya_invalid_node_keys()
+    data = _build_v2raya_nodes_response_data(await _load_v2raya_nodes_snapshot(with_latency=False))
+    return {
+        "status": "success",
+        "message": "已清空 v2rayA 失效标记。",
+        "data": data,
+    }
+
+
+@router.post("/api/proxy/v2raya/dedupe")
+async def api_v2raya_dedupe(token: str = Depends(verify_token)):
+    data = _build_v2raya_nodes_response_data(await _load_v2raya_nodes_snapshot(with_latency=False))
+    duplicate_groups = data.get("duplicate_groups") or []
+    duplicate_keys: list[str] = []
+    for group in duplicate_groups:
+        keep_key = str(group.get("keep_key") or "")
+        for node_key in group.get("keys") or []:
+            text = str(node_key or "").strip()
+            if text and text != keep_key:
+                duplicate_keys.append(text)
+    duplicate_keys = sorted(set(duplicate_keys))
+    if not duplicate_keys:
+        return {
+            "status": "success",
+            "message": "当前没有检测到可移除的重复节点。",
+            "data": data,
+        }
+    proxy_manager.set_v2raya_node_invalid_state(duplicate_keys, invalid=True)
+    data = _build_v2raya_nodes_response_data(await _load_v2raya_nodes_snapshot(with_latency=False))
+    return {
+        "status": "success",
+        "message": f"已将 {len(duplicate_keys)} 个重复节点标记为失效，后续自动切点会忽略它们。",
+        "data": data,
+    }
 
 
 @router.get("/api/ext/generate_task")

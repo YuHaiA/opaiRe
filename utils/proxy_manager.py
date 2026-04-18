@@ -855,6 +855,32 @@ def _mark_v2raya_node_valid(node_key: str):
         _v2raya_invalid_node_keys.discard(str(node_key))
 
 
+def get_v2raya_invalid_node_keys():
+    with _v2raya_invalid_lock:
+        return sorted(str(item) for item in _v2raya_invalid_node_keys)
+
+
+def clear_v2raya_invalid_node_keys():
+    global _v2raya_last_precheck_at
+    with _v2raya_invalid_lock:
+        _v2raya_invalid_node_keys.clear()
+    _v2raya_last_precheck_at = 0.0
+
+
+def set_v2raya_node_invalid_state(node_keys, invalid: bool = True):
+    changed = []
+    for raw_key in node_keys or []:
+        node_key = str(raw_key or "").strip()
+        if not node_key:
+            continue
+        if invalid:
+            _mark_v2raya_node_invalid(node_key)
+        else:
+            _mark_v2raya_node_valid(node_key)
+        changed.append(node_key)
+    return changed
+
+
 def _list_v2raya_nodes(ignore_runtime_invalid: bool = False, with_latency: bool = False):
     snapshot = _load_v2raya_nodes_snapshot(with_latency=with_latency)
     nodes = snapshot.get("nodes") or []

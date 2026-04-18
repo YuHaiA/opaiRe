@@ -3,7 +3,7 @@ const { createApp } = Vue;
 createApp({
     data() {
         return {
-            appVersion: 'v10.1.3',
+            appVersion: 'v10.1.4',
             versionPageUrl: 'https://github.com/YuHaiA/opaiRe/releases/latest',
             isLoggedIn: !!localStorage.getItem('auth_token'),
             loginPassword: '',
@@ -83,10 +83,13 @@ createApp({
             isV2rayAInspecting: false,
             isV2rayANodesLoading: false,
             isV2rayALatencyLoading: false,
+            isV2rayAInvalidMutating: false,
             switchingV2rayANodeKey: '',
             v2rayARuntime: null,
             v2rayANodes: [],
             v2rayAStatusMessage: '',
+            v2rayADuplicateGroups: [],
+            v2rayAInvalidKeys: [],
             v2rayAListMode: 'all',
             v2rayAGroupFilter: 'all',
             v2rayAPage: 1,
@@ -834,9 +837,24 @@ createApp({
             }
             return `${value.toFixed(value >= 100 ? 0 : 1)} ms`;
         },
+        getV2rayAStatusMeta(node) {
+            if (!node) return { text: '未知', className: 'bg-slate-50 text-slate-600 border-slate-200' };
+            if (node.is_current) {
+                return { text: '当前节点', className: 'bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200' };
+            }
+            if (node.is_invalid) {
+                return { text: '失效标记', className: 'bg-rose-100 text-rose-700 border-rose-200' };
+            }
+            if (node.is_duplicate) {
+                return { text: '重复节点', className: 'bg-amber-100 text-amber-700 border-amber-200' };
+            }
+            return { text: '候选节点', className: 'bg-slate-50 text-slate-600 border-slate-200' };
+        },
         sortV2rayANodes(nodes) {
             return [...(nodes || [])].sort((a, b) => {
                 if (!!a.is_current !== !!b.is_current) return a.is_current ? -1 : 1;
+                if (!!a.is_invalid !== !!b.is_invalid) return a.is_invalid ? 1 : -1;
+                if (!!a.is_duplicate !== !!b.is_duplicate) return a.is_duplicate ? 1 : -1;
                 const aLatency = Number.isFinite(Number(a.latency_ms)) ? Number(a.latency_ms) : Number.POSITIVE_INFINITY;
                 const bLatency = Number.isFinite(Number(b.latency_ms)) ? Number(b.latency_ms) : Number.POSITIVE_INFINITY;
                 if (aLatency !== bLatency) return aLatency - bLatency;
@@ -864,6 +882,20 @@ createApp({
             this.v2rayAListMode = 'all';
             this.v2rayAPage = 1;
         },
+        applyV2rayANodesPayload(payload = {}) {
+            this.v2rayANodes = this.sortV2rayANodes(Array.isArray(payload.nodes) ? payload.nodes : []);
+            this.v2rayADuplicateGroups = Array.isArray(payload.duplicate_groups) ? payload.duplicate_groups : [];
+            this.v2rayAInvalidKeys = Array.isArray(payload.invalid_keys) ? payload.invalid_keys : [];
+            this.v2rayAPage = 1;
+            this.v2rayAGroupPage = 1;
+            if (this.v2rayAGroupFilter !== 'all' && !this.v2rayASubscriptionTabs.some(item => item.key === this.v2rayAGroupFilter)) {
+                this.v2rayAGroupFilter = 'all';
+            }
+            this.v2rayAStatusMessage = payload.message || this.v2rayAStatusMessage;
+            if (payload.runtime) {
+                this.v2rayARuntime = payload.runtime;
+            }
+        },
         async fetchV2rayANodes(withLatency = false, showToast = true) {
             if (!this.config?.clash_proxy_pool || this.config.clash_proxy_pool.client_type !== 'v2raya') {
                 if (showToast) {
@@ -882,16 +914,8 @@ createApp({
                 const data = await res.json();
                 if (data.status === 'success' || data.status === 'warning') {
                     const payload = data.data || {};
-                    this.v2rayANodes = this.sortV2rayANodes(Array.isArray(payload.nodes) ? payload.nodes : []);
-                    this.v2rayAPage = 1;
-                    this.v2rayAGroupPage = 1;
-                    if (this.v2rayAGroupFilter !== 'all' && !this.v2rayASubscriptionTabs.some(item => item.key === this.v2rayAGroupFilter)) {
-                        this.v2rayAGroupFilter = 'all';
-                    }
                     this.v2rayAStatusMessage = payload.message || '';
-                    if (payload.runtime) {
-                        this.v2rayARuntime = payload.runtime;
-                    }
+                    this.applyV2rayANodesPayload(payload);
                     if (showToast) {
                         const level = data.status === 'success' ? 'success' : 'warning';
                         this.showToast(data.message || (withLatency ? 'v2rayA 节点延迟已刷新' : 'v2rayA 节点列表已刷新'), level);
@@ -930,16 +954,7 @@ createApp({
                 const data = await res.json();
                 if (data.status === 'success' || data.status === 'warning') {
                     const payload = data.data || {};
-                    this.v2rayANodes = this.sortV2rayANodes(Array.isArray(payload.nodes) ? payload.nodes : this.v2rayANodes);
-                    this.v2rayAPage = 1;
-                    this.v2rayAGroupPage = 1;
-                    if (this.v2rayAGroupFilter !== 'all' && !this.v2rayASubscriptionTabs.some(item => item.key === this.v2rayAGroupFilter)) {
-                        this.v2rayAGroupFilter = 'all';
-                    }
-                    this.v2rayAStatusMessage = payload.message || this.v2rayAStatusMessage;
-                    if (payload.runtime) {
-                        this.v2rayARuntime = payload.runtime;
-                    }
+                    this.applyV2rayANodesPayload({ ...payload, message: payload.message || this.v2rayAStatusMessage });
                     const level = data.status === 'success' ? 'success' : 'warning';
                     this.showToast(data.message || 'v2rayA 节点切换已提交', level);
                 } else {
@@ -949,6 +964,61 @@ createApp({
                 this.showToast('v2rayA 节点切换失败', 'error');
             } finally {
                 this.switchingV2rayANodeKey = '';
+            }
+        },
+        async markV2rayANodeInvalid(node) {
+            if (!node?.key) return;
+            this.isV2rayAInvalidMutating = true;
+            try {
+                const res = await this.authFetch('/api/proxy/v2raya/mark_invalid', {
+                    method: 'POST',
+                    body: JSON.stringify({ node_keys: [node.key] })
+                });
+                const data = await res.json();
+                if (data.status === 'success' || data.status === 'warning') {
+                    this.applyV2rayANodesPayload(data.data || {});
+                    this.showToast(data.message || '节点已标记为失效', data.status === 'success' ? 'success' : 'warning');
+                } else {
+                    this.showToast(data.message || '标记失效失败', 'error');
+                }
+            } catch (e) {
+                this.showToast('标记失效失败', 'error');
+            } finally {
+                this.isV2rayAInvalidMutating = false;
+            }
+        },
+        async clearV2rayAInvalidMarks() {
+            this.isV2rayAInvalidMutating = true;
+            try {
+                const res = await this.authFetch('/api/proxy/v2raya/clear_invalid', { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'success' || data.status === 'warning') {
+                    this.applyV2rayANodesPayload(data.data || {});
+                    this.showToast(data.message || '已清空失效标记', data.status === 'success' ? 'success' : 'warning');
+                } else {
+                    this.showToast(data.message || '清空失效标记失败', 'error');
+                }
+            } catch (e) {
+                this.showToast('清空失效标记失败', 'error');
+            } finally {
+                this.isV2rayAInvalidMutating = false;
+            }
+        },
+        async dedupeV2rayANodes() {
+            this.isV2rayAInvalidMutating = true;
+            try {
+                const res = await this.authFetch('/api/proxy/v2raya/dedupe', { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'success' || data.status === 'warning') {
+                    this.applyV2rayANodesPayload(data.data || {});
+                    this.showToast(data.message || '重复节点处理完成', data.status === 'success' ? 'success' : 'warning');
+                } else {
+                    this.showToast(data.message || '重复节点处理失败', 'error');
+                }
+            } catch (e) {
+                this.showToast('重复节点处理失败', 'error');
+            } finally {
+                this.isV2rayAInvalidMutating = false;
             }
         },
 		async fetchAccounts(isManual = false) {

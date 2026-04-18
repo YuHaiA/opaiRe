@@ -2012,9 +2012,19 @@
                                                 <span v-else>📶</span>
                                                 刷新全部延迟
                                             </button>
+                                            <button @click="dedupeV2rayANodes" :disabled="isV2rayAInvalidMutating" class="bg-white border border-amber-200 text-amber-700 px-4 py-2.5 rounded-xl hover:bg-amber-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                <span v-if="isV2rayAInvalidMutating" class="animate-spin">⏳</span>
+                                                <span v-else>🧹</span>
+                                                移除重复
+                                            </button>
+                                            <button @click="clearV2rayAInvalidMarks" :disabled="isV2rayAInvalidMutating" class="bg-white border border-rose-200 text-rose-700 px-4 py-2.5 rounded-xl hover:bg-rose-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                <span v-if="isV2rayAInvalidMutating" class="animate-spin">⏳</span>
+                                                <span v-else>♻️</span>
+                                                清空失效标记
+                                            </button>
                                         </div>
 
-                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                                             <div class="bg-fuchsia-50/70 border border-fuchsia-200 rounded-2xl px-4 py-4 shadow-sm">
                                                 <label class="block text-[11px] text-fuchsia-700 font-black mb-2 uppercase tracking-wider">当前接管状态</label>
                                                 <div class="text-sm text-slate-700 font-bold">{{ config.clash_proxy_pool.enable && config.clash_proxy_pool.client_type === 'v2raya' ? '已启用 v2rayA 自动切点' : '当前未启用 v2rayA 自动切点' }}</div>
@@ -2024,6 +2034,11 @@
                                                 <label class="block text-[11px] text-slate-500 font-black mb-2 uppercase tracking-wider">节点缓存</label>
                                                 <div class="text-sm text-slate-700 font-bold">{{ v2rayANodes.length }} 个节点</div>
                                                 <div class="text-[11px] text-slate-500 mt-2">{{ v2rayAStatusMessage || '点击上面的按钮从 v2rayA 面板拉取节点信息。' }}</div>
+                                            </div>
+                                            <div class="bg-amber-50/70 border border-amber-200 rounded-2xl px-4 py-4 shadow-sm">
+                                                <label class="block text-[11px] text-amber-700 font-black mb-2 uppercase tracking-wider">节点整理状态</label>
+                                                <div class="text-sm text-slate-700 font-bold">失效 {{ v2rayAInvalidKeys.length }} 个 · 重复组 {{ v2rayADuplicateGroups.length }} 个</div>
+                                                <div class="text-[11px] text-slate-500 mt-2">“移除重复”会把重复节点标记为失效，自动切点时会跳过它们。</div>
                                             </div>
                                         </div>
                                     </div>
@@ -2105,7 +2120,7 @@
                                                                 <th class="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-500 min-w-[200px]">订阅</th>
                                                                 <th class="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-500 w-40">类型</th>
                                                                 <th class="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-500 w-32">延迟</th>
-                                                                <th class="px-4 py-3 text-right text-[11px] font-black uppercase tracking-wider text-slate-500 w-44">操作</th>
+                                                                <th class="px-4 py-3 text-right text-[11px] font-black uppercase tracking-wider text-slate-500 w-64">操作</th>
                                                             </tr>
                                                         </thead>
                                                         <tbody>
@@ -2120,8 +2135,8 @@
                                                                 </td>
                                                                 <td class="px-4 py-3 align-top">
                                                                     <span class="inline-flex px-2.5 py-1 rounded-lg text-[11px] font-black border"
-                                                                          :class="node.is_current ? 'bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200' : 'bg-slate-50 text-slate-600 border-slate-200'">
-                                                                        {{ node.is_current ? '当前节点' : '候选节点' }}
+                                                                          :class="getV2rayAStatusMeta(node).className">
+                                                                        {{ getV2rayAStatusMeta(node).text }}
                                                                     </span>
                                                                 </td>
                                                                 <td class="px-4 py-3 align-top">
@@ -2143,15 +2158,26 @@
                                                                     {{ formatV2rayALatency(node) }}
                                                                 </td>
                                                                 <td class="px-4 py-3 align-top text-right">
-                                                                    <button
-                                                                        @click="switchV2rayANode(node)"
-                                                                        :disabled="switchingV2rayANodeKey === getV2rayANodeKey(node) || node.is_current"
-                                                                        class="inline-flex min-w-[120px] items-center justify-center gap-2 px-3 py-2 rounded-xl bg-fuchsia-600 text-white text-xs font-black hover:bg-fuchsia-700 active:scale-95 transition-all shadow-md shadow-fuchsia-500/20 disabled:opacity-50"
-                                                                    >
-                                                                        <span v-if="switchingV2rayANodeKey === getV2rayANodeKey(node)" class="animate-spin">⏳</span>
-                                                                        <span v-else>{{ node.is_current ? '✅' : '🔀' }}</span>
-                                                                        <span>{{ node.is_current ? '当前已选' : '切换' }}</span>
-                                                                    </button>
+                                                                    <div class="flex items-center justify-end gap-2">
+                                                                        <button
+                                                                            @click="markV2rayANodeInvalid(node)"
+                                                                            :disabled="isV2rayAInvalidMutating || node.is_invalid"
+                                                                            class="inline-flex min-w-[104px] items-center justify-center gap-2 px-3 py-2 rounded-xl bg-white border border-rose-200 text-rose-700 text-xs font-black hover:bg-rose-50 transition-all disabled:opacity-50"
+                                                                        >
+                                                                            <span v-if="isV2rayAInvalidMutating && node.is_invalid" class="animate-spin">⏳</span>
+                                                                            <span v-else>🚫</span>
+                                                                            <span>{{ node.is_invalid ? '已失效' : '标记失效' }}</span>
+                                                                        </button>
+                                                                        <button
+                                                                            @click="switchV2rayANode(node)"
+                                                                            :disabled="switchingV2rayANodeKey === getV2rayANodeKey(node) || node.is_current || node.is_invalid"
+                                                                            class="inline-flex min-w-[120px] items-center justify-center gap-2 px-3 py-2 rounded-xl bg-fuchsia-600 text-white text-xs font-black hover:bg-fuchsia-700 active:scale-95 transition-all shadow-md shadow-fuchsia-500/20 disabled:opacity-50"
+                                                                        >
+                                                                            <span v-if="switchingV2rayANodeKey === getV2rayANodeKey(node)" class="animate-spin">⏳</span>
+                                                                            <span v-else>{{ node.is_current ? '✅' : '🔀' }}</span>
+                                                                            <span>{{ node.is_current ? '当前已选' : '切换' }}</span>
+                                                                        </button>
+                                                                    </div>
                                                                 </td>
                                                             </tr>
                                                         </tbody>
