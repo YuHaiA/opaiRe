@@ -937,7 +937,13 @@ def _build_v2raya_switch_payloads(node: dict) -> list[dict]:
     deduped = []
     seen = set()
     for item in payloads:
-        cleaned = {k: v for k, v in item.items() if v not in {None, ""}}
+        cleaned = {}
+        for k, v in item.items():
+            if v is None:
+                continue
+            if isinstance(v, str) and not v.strip():
+                continue
+            cleaned[k] = v
         signature = json.dumps(cleaned, sort_keys=True, ensure_ascii=False)
         if signature not in seen:
             seen.add(signature)

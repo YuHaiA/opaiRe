@@ -1983,69 +1983,82 @@
                                         </div>
                                     </div>
 
-                                    <div class="space-y-4">
-                                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                            <button @click="openV2rayAPanel" class="bg-white border border-fuchsia-200 text-fuchsia-700 px-4 py-2.5 rounded-xl hover:bg-fuchsia-50 active:scale-95 transition-all shadow-sm font-bold flex items-center justify-center gap-2">
-                                                <span>🧭</span>
-                                                打开 v2rayA 面板
-                                            </button>
-                                            <button @click="inspectV2rayAEnvironment(true)" :disabled="isV2rayAInspecting" class="bg-white border border-fuchsia-200 text-fuchsia-700 px-4 py-2.5 rounded-xl hover:bg-fuchsia-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
-                                                <span v-if="isV2rayAInspecting" class="animate-spin">⏳</span>
-                                                <span v-else>🛠️</span>
-                                                环境检查
-                                            </button>
-                                            <button @click="testV2rayACurrentProxy" :disabled="isV2rayATesting" class="bg-fuchsia-600 text-white px-4 py-2.5 rounded-xl hover:bg-fuchsia-700 active:scale-95 transition-all shadow-md shadow-fuchsia-500/20 font-bold disabled:opacity-50 flex items-center justify-center gap-2">
-                                                <span v-if="isV2rayATesting" class="animate-spin">⏳</span>
-                                                <span v-else>⚡</span>
-                                                检测当前链路
-                                            </button>
-                                            <button @click="fetchV2rayANodes(false, true)" :disabled="isV2rayANodesLoading" class="bg-white border border-fuchsia-200 text-fuchsia-700 px-4 py-2.5 rounded-xl hover:bg-fuchsia-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
-                                                <span v-if="isV2rayANodesLoading" class="animate-spin">⏳</span>
-                                                <span v-else>📋</span>
-                                                读取节点列表
-                                            </button>
-                                            <button @click="runV2rayAPrecheck()" :disabled="isProxyBatchChecking" class="bg-white border border-fuchsia-200 text-fuchsia-700 px-4 py-2.5 rounded-xl hover:bg-fuchsia-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
-                                                <span v-if="isProxyBatchChecking" class="animate-spin">⏳</span>
-                                                <span v-else>⚡</span>
-                                                重新筛选节点
-                                            </button>
-                                            <button @click="fetchV2rayANodes(true, true)" :disabled="isV2rayALatencyLoading" class="sm:col-span-2 bg-slate-900 text-white px-4 py-2.5 rounded-xl hover:bg-slate-800 active:scale-95 transition-all shadow-md shadow-slate-900/20 font-bold disabled:opacity-50 flex items-center justify-center gap-2">
-                                                <span v-if="isV2rayALatencyLoading" class="animate-spin">⏳</span>
-                                                <span v-else>📶</span>
-                                                刷新全部延迟
-                                            </button>
-                                            <button @click="markV2rayANodesWithoutLatencyInvalid" :disabled="isV2rayAInvalidMutating || isV2rayALatencyLoading" class="sm:col-span-2 bg-white border border-rose-200 text-rose-700 px-4 py-2.5 rounded-xl hover:bg-rose-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
-                                                <span v-if="isV2rayAInvalidMutating" class="animate-spin">⏳</span>
-                                                <span v-else>🚫</span>
-                                                标记所有无延迟节点失效
-                                            </button>
-                                            <button @click="dedupeV2rayANodes" :disabled="isV2rayAInvalidMutating" class="bg-white border border-amber-200 text-amber-700 px-4 py-2.5 rounded-xl hover:bg-amber-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
-                                                <span v-if="isV2rayAInvalidMutating" class="animate-spin">⏳</span>
-                                                <span v-else>🧹</span>
-                                                移除重复
-                                            </button>
-                                            <button @click="clearV2rayAInvalidMarks" :disabled="isV2rayAInvalidMutating" class="bg-white border border-rose-200 text-rose-700 px-4 py-2.5 rounded-xl hover:bg-rose-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
-                                                <span v-if="isV2rayAInvalidMutating" class="animate-spin">⏳</span>
-                                                <span v-else>♻️</span>
-                                                清空失效标记
-                                            </button>
+                                    <div class="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-4">
+                                        <div class="rounded-3xl border border-fuchsia-100 bg-gradient-to-br from-fuchsia-50/75 via-white to-white p-4 md:p-5 shadow-[0_18px_45px_-28px_rgba(192,38,211,0.35)]">
+                                            <div class="flex items-center justify-between gap-3 mb-4">
+                                                <div>
+                                                    <div class="text-[11px] font-black uppercase tracking-[0.24em] text-fuchsia-500">Quick Actions</div>
+                                                    <h4 class="mt-1 text-base md:text-lg font-black text-slate-900">v2rayA 节点工具区</h4>
+                                                </div>
+                                                <div class="hidden md:flex items-center gap-2 rounded-full border border-fuchsia-100 bg-white/80 px-3 py-1.5 text-[11px] font-bold text-slate-500 shadow-sm">
+                                                    <span class="w-2 h-2 rounded-full" :class="config.clash_proxy_pool.enable && config.clash_proxy_pool.client_type === 'v2raya' ? 'bg-emerald-500' : 'bg-slate-300'"></span>
+                                                    {{ config.clash_proxy_pool.enable && config.clash_proxy_pool.client_type === 'v2raya' ? '自动切点已接管' : '当前未接管' }}
+                                                </div>
+                                            </div>
+
+                                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                <button @click="fetchV2rayANodes(true, true)" :disabled="isV2rayALatencyLoading" class="sm:col-span-2 bg-slate-900 text-white px-4 py-3 rounded-2xl hover:bg-slate-800 active:scale-95 transition-all shadow-md shadow-slate-900/20 font-black disabled:opacity-50 flex items-center justify-center gap-2">
+                                                    <span v-if="isV2rayALatencyLoading" class="animate-spin">⏳</span>
+                                                    <span v-else>📶</span>
+                                                    刷新全部延迟
+                                                </button>
+                                                <button @click="markV2rayANodesWithoutLatencyInvalid" :disabled="isV2rayAInvalidMutating || isV2rayALatencyLoading" class="sm:col-span-2 bg-white border border-rose-200 text-rose-700 px-4 py-3 rounded-2xl hover:bg-rose-50 active:scale-95 transition-all shadow-sm font-black disabled:opacity-50 flex items-center justify-center gap-2">
+                                                    <span v-if="isV2rayAInvalidMutating" class="animate-spin">⏳</span>
+                                                    <span v-else>🚫</span>
+                                                    标记所有无延迟节点失效
+                                                </button>
+                                                <button @click="runV2rayAPrecheck()" :disabled="isProxyBatchChecking" class="bg-white border border-fuchsia-200 text-fuchsia-700 px-4 py-2.5 rounded-2xl hover:bg-fuchsia-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                    <span v-if="isProxyBatchChecking" class="animate-spin">⏳</span>
+                                                    <span v-else>⚡</span>
+                                                    重新筛选节点
+                                                </button>
+                                                <button @click="testV2rayACurrentProxy" :disabled="isV2rayATesting" class="bg-white border border-fuchsia-200 text-fuchsia-700 px-4 py-2.5 rounded-2xl hover:bg-fuchsia-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                    <span v-if="isV2rayATesting" class="animate-spin">⏳</span>
+                                                    <span v-else>⚡</span>
+                                                    检测当前链路
+                                                </button>
+                                                <button @click="dedupeV2rayANodes" :disabled="isV2rayAInvalidMutating" class="bg-amber-50/80 border border-amber-200 text-amber-700 px-4 py-2.5 rounded-2xl hover:bg-amber-100 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                    <span v-if="isV2rayAInvalidMutating" class="animate-spin">⏳</span>
+                                                    <span v-else>🧹</span>
+                                                    移除重复
+                                                </button>
+                                                <button @click="clearV2rayAInvalidMarks" :disabled="isV2rayAInvalidMutating" class="bg-white border border-rose-200 text-rose-700 px-4 py-2.5 rounded-2xl hover:bg-rose-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                    <span v-if="isV2rayAInvalidMutating" class="animate-spin">⏳</span>
+                                                    <span v-else>♻️</span>
+                                                    清空失效标记
+                                                </button>
+                                                <button @click="fetchV2rayANodes(false, true)" :disabled="isV2rayANodesLoading" class="bg-white border border-slate-200 text-slate-700 px-4 py-2.5 rounded-2xl hover:bg-slate-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                    <span v-if="isV2rayANodesLoading" class="animate-spin">⏳</span>
+                                                    <span v-else>📋</span>
+                                                    读取节点列表
+                                                </button>
+                                                <button @click="inspectV2rayAEnvironment(true)" :disabled="isV2rayAInspecting" class="bg-white border border-slate-200 text-slate-700 px-4 py-2.5 rounded-2xl hover:bg-slate-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                    <span v-if="isV2rayAInspecting" class="animate-spin">⏳</span>
+                                                    <span v-else>🛠️</span>
+                                                    环境检查
+                                                </button>
+                                                <button @click="openV2rayAPanel" class="sm:col-span-2 bg-fuchsia-50/80 border border-fuchsia-200 text-fuchsia-700 px-4 py-2.5 rounded-2xl hover:bg-fuchsia-100 active:scale-95 transition-all shadow-sm font-bold flex items-center justify-center gap-2">
+                                                    <span>🧭</span>
+                                                    打开 v2rayA 面板
+                                                </button>
+                                            </div>
                                         </div>
 
-                                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                            <div class="bg-fuchsia-50/70 border border-fuchsia-200 rounded-2xl px-4 py-4 shadow-sm">
+                                        <div class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-1 gap-3">
+                                            <div class="rounded-3xl border border-fuchsia-200 bg-gradient-to-br from-fuchsia-50 via-white to-white px-4 py-4 shadow-[0_18px_40px_-30px_rgba(192,38,211,0.3)]">
                                                 <label class="block text-[11px] text-fuchsia-700 font-black mb-2 uppercase tracking-wider">当前接管状态</label>
-                                                <div class="text-sm text-slate-700 font-bold">{{ config.clash_proxy_pool.enable && config.clash_proxy_pool.client_type === 'v2raya' ? '已启用 v2rayA 自动切点' : '当前未启用 v2rayA 自动切点' }}</div>
-                                                <div class="text-[11px] text-slate-500 mt-2">只要上方已开启 <code class="font-mono">智能切点</code> 且 <code class="font-mono">client_type=v2raya</code>，业务运行时就会自动切换；下方按钮只是手动指定覆盖。</div>
+                                                <div class="text-sm text-slate-700 font-bold leading-relaxed">{{ config.clash_proxy_pool.enable && config.clash_proxy_pool.client_type === 'v2raya' ? '已启用 v2rayA 自动切点' : '当前未启用 v2rayA 自动切点' }}</div>
+                                                <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">只要上方已开启 <code class="font-mono">智能切点</code> 且 <code class="font-mono">client_type=v2raya</code>，业务运行时就会自动切换；下方按钮只是手动指定覆盖。</div>
                                             </div>
-                                            <div class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
+                                            <div class="rounded-3xl border border-slate-200 bg-white px-4 py-4 shadow-[0_18px_40px_-30px_rgba(15,23,42,0.22)]">
                                                 <label class="block text-[11px] text-slate-500 font-black mb-2 uppercase tracking-wider">节点缓存</label>
-                                                <div class="text-sm text-slate-700 font-bold">{{ v2rayANodes.length }} 个节点</div>
-                                                <div class="text-[11px] text-slate-500 mt-2">{{ v2rayAStatusMessage || '点击上面的按钮从 v2rayA 面板拉取节点信息。' }}</div>
+                                                <div class="text-2xl font-black text-slate-900">{{ v2rayANodes.length }}</div>
+                                                <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">{{ v2rayAStatusMessage || 'v2rayA 节点列表已刷新。' }}</div>
                                             </div>
-                                            <div class="bg-amber-50/70 border border-amber-200 rounded-2xl px-4 py-4 shadow-sm">
+                                            <div class="rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-white px-4 py-4 shadow-[0_18px_40px_-30px_rgba(245,158,11,0.25)]">
                                                 <label class="block text-[11px] text-amber-700 font-black mb-2 uppercase tracking-wider">节点整理状态</label>
-                                                <div class="text-sm text-slate-700 font-bold">失效 {{ v2rayAInvalidKeys.length }} 个 · 重复组 {{ v2rayADuplicateGroups.length }} 个</div>
-                                                <div class="text-[11px] text-slate-500 mt-2">“移除重复”会把重复节点标记为失效，自动切点时会跳过它们。</div>
+                                                <div class="text-sm text-slate-700 font-bold leading-relaxed">失效 {{ v2rayAInvalidKeys.length }} 个 · 重复组 {{ v2rayADuplicateGroups.length }} 个</div>
+                                                <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">“移除重复”会把重复节点标记为失效，自动切点时会跳过它们。</div>
                                             </div>
                                         </div>
                                     </div>
