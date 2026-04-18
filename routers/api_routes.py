@@ -9,14 +9,16 @@ import traceback
 import threading
 import sys
 import subprocess
+import shutil
 import shlex
 import urllib.parse
+import zipfile
 import yaml
 import httpx
 from fastapi import APIRouter, Depends, Header, Query, Request, WebSocket, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from cloudflare import Cloudflare
 from utils import core_engine, db_manager
@@ -87,6 +89,28 @@ class ClusterControlReq(BaseModel): node_name: str; action: str
 
 
 class ClashPoolUpdateReq(BaseModel): sub_url: str
+
+
+class V2rayASwitchReq(BaseModel):
+    node_id: str
+    node_type: Optional[str] = "subscriptionServer"
+    subscription_id: Optional[str] = ""
+    node_name: Optional[str] = ""
+
+
+class ProjectUpdateReq(BaseModel):
+    restart_after_update: bool = False
+
+
+class DownloadUpdatePackageReq(BaseModel):
+    version: str
+    download_url: str
+
+
+class MigrateUpdatePackageReq(BaseModel):
+    version: str
+    cleanup_zip: bool = True
+    cleanup_other_versions: bool = False
 
 
 class ExtResultReq(BaseModel):
@@ -216,6 +240,202 @@ def _read_clash_pool_env() -> dict:
                 value = value[1:-1]
             env_map[key] = value
     return env_map
+
+
+def _run_git_command(args: list[str], timeout: int = 30) -> tuple[int, str]:
+    try:
+        proc = subprocess.run(
+            ["git"] + args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout,
+            cwd=BASE_DIR,
+        )
+        return proc.returncode, (proc.stdout or "").strip()
+    except FileNotFoundError:
+        return 127, "git_not_found"
+
+
+def _safe_extract_zip(zip_path: str, target_dir: str) -> None:
+    os.makedirs(target_dir, exist_ok=True)
+    target_real = os.path.realpath(target_dir)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for member in zf.infolist():
+            member_name = str(member.filename or "")
+            if not member_name or member_name.endswith("/"):
+                continue
+            destination = os.path.realpath(os.path.join(target_dir, member_name))
+            if not destination.startswith(target_real + os.sep) and destination != target_real:
+                raise ValueError(f"压缩包包含非法路径: {member_name}")
+        zf.extractall(target_dir)
+
+
+def _get_updates_root() -> str:
+    return os.path.join(BASE_DIR, "updates")
+
+
+def _sanitize_update_version(version: str) -> str:
+    return re.sub(r"[^0-9A-Za-z._-]", "_", str(version or "").strip())
+
+
+def _get_update_paths(version: str) -> dict:
+    safe_version = _sanitize_update_version(version)
+    updates_root = _get_updates_root()
+    version_root = os.path.join(updates_root, safe_version)
+    package_dir = os.path.join(version_root, "package")
+    extract_dir = os.path.join(version_root, "source")
+    zip_path = os.path.join(package_dir, f"{safe_version}.zip")
+    marker_path = os.path.join(version_root, ".download_complete")
+    return {
+        "version": str(version or "").strip(),
+        "safe_version": safe_version,
+        "updates_root": updates_root,
+        "version_root": version_root,
+        "package_dir": package_dir,
+        "extract_dir": extract_dir,
+        "zip_path": zip_path,
+        "marker_path": marker_path,
+    }
+
+
+def _list_downloaded_updates() -> list[dict]:
+    updates_root = _get_updates_root()
+    if not os.path.isdir(updates_root):
+        return []
+    result = []
+    for name in os.listdir(updates_root):
+        version_root = os.path.join(updates_root, name)
+        if not os.path.isdir(version_root):
+            continue
+        paths = _get_update_paths(name)
+        marker_exists = os.path.exists(paths["marker_path"])
+        extract_exists = os.path.isdir(paths["extract_dir"])
+        zip_exists = os.path.isfile(paths["zip_path"])
+        mtime = 0.0
+        try:
+            mtime = os.path.getmtime(version_root)
+        except Exception:
+            mtime = 0.0
+        result.append({
+            "version": name,
+            "version_root": version_root,
+            "package_dir": paths["package_dir"],
+            "extract_dir": paths["extract_dir"],
+            "zip_path": paths["zip_path"],
+            "marker_exists": marker_exists,
+            "extract_exists": extract_exists,
+            "zip_exists": zip_exists,
+            "mtime": mtime,
+        })
+    result.sort(key=lambda item: item.get("mtime", 0), reverse=True)
+    return result
+
+
+def _copy_directory_contents(src_dir: str, dest_dir: str, exclude_names: set[str] | None = None) -> tuple[int, int]:
+    exclude_names = exclude_names or set()
+    copied_files = 0
+    copied_dirs = 0
+    for root, dirs, files in os.walk(src_dir):
+        dirs[:] = [item for item in dirs if item not in exclude_names]
+        rel_root = os.path.relpath(root, src_dir)
+        target_root = dest_dir if rel_root == "." else os.path.join(dest_dir, rel_root)
+        os.makedirs(target_root, exist_ok=True)
+        copied_dirs += 1
+        for filename in files:
+            if filename in exclude_names:
+                continue
+            src_path = os.path.join(root, filename)
+            dest_path = os.path.join(target_root, filename)
+            shutil.copy2(src_path, dest_path)
+            copied_files += 1
+    return copied_files, copied_dirs
+
+
+def _build_project_update_status(fetch_remote: bool = True) -> dict:
+    status = {
+        "git_available": False,
+        "is_git_repo": False,
+        "branch": "",
+        "is_main_branch": False,
+        "dirty_files": [],
+        "dirty_count": 0,
+        "local_head": "",
+        "remote_head": "",
+        "merge_base": "",
+        "needs_update": False,
+        "fast_forward": False,
+        "can_update": False,
+        "message": "",
+    }
+
+    code, output = _run_git_command(["--version"])
+    if code != 0:
+        status["message"] = "当前环境未安装 Git，请使用左侧的普通用户更新流程。"
+        return status
+    status["git_available"] = True
+
+    code, output = _run_git_command(["rev-parse", "--is-inside-work-tree"])
+    if code != 0 or output.lower() != "true":
+        status["message"] = "当前目录不是 Git 工作区，无法执行项目内更新。"
+        return status
+    status["is_git_repo"] = True
+
+    code, branch = _run_git_command(["branch", "--show-current"])
+    if code == 0:
+        status["branch"] = branch.strip()
+    status["is_main_branch"] = status["branch"] == "main"
+
+    code, dirty_output = _run_git_command(["status", "--porcelain"])
+    dirty_lines = [line.rstrip() for line in dirty_output.splitlines() if line.strip()] if code == 0 else []
+    status["dirty_files"] = dirty_lines
+    status["dirty_count"] = len(dirty_lines)
+
+    if fetch_remote:
+        fetch_code, fetch_output = _run_git_command(["fetch", "origin"], timeout=120)
+        if fetch_code != 0:
+            status["message"] = f"无法同步远端信息：{fetch_output or 'git fetch origin 失败'}"
+            return status
+
+    code, local_head = _run_git_command(["rev-parse", "HEAD"])
+    if code == 0:
+        status["local_head"] = local_head.strip()
+    code, remote_head = _run_git_command(["rev-parse", "origin/main"])
+    if code != 0:
+        status["message"] = "未找到 origin/main，请先确认当前仓库已配置 origin 并完成首次拉取。"
+        return status
+    status["remote_head"] = remote_head.strip()
+    code, merge_base = _run_git_command(["merge-base", "HEAD", "origin/main"])
+    if code == 0:
+        status["merge_base"] = merge_base.strip()
+
+    local_head = status["local_head"]
+    remote_head = status["remote_head"]
+    merge_base = status["merge_base"]
+
+    if not status["is_main_branch"]:
+        status["message"] = f"当前分支是 {status['branch'] or '未知'}，仅支持在 main 分支上执行项目内更新。"
+        return status
+    if status["dirty_count"] > 0:
+        status["message"] = f"当前工作区有 {status['dirty_count']} 处未提交修改，请先提交或清理后再更新。"
+        return status
+    if local_head == remote_head:
+        status["message"] = "当前项目已经和 origin/main 同步，无需更新。"
+        status["can_update"] = False
+        status["needs_update"] = False
+        return status
+    if merge_base == local_head and remote_head and remote_head != local_head:
+        status["needs_update"] = True
+        status["fast_forward"] = True
+        status["can_update"] = True
+        status["message"] = "检测到 origin/main 有新提交，可执行 fast-forward 更新。"
+        return status
+    if merge_base == remote_head and local_head != remote_head:
+        status["message"] = "当前本地 main 领先于 origin/main，不适合执行自动更新。"
+        return status
+
+    status["message"] = "当前本地与 origin/main 已分叉，自动更新已拦截，请手动处理 Git 冲突。"
+    return status
 
 
 def _write_clash_pool_env(env_map: dict) -> None:
@@ -1074,6 +1294,640 @@ async def api_v2rayn_update_subscription(token: str = Depends(verify_token)):
     }
 
 
+@router.post("/api/proxy/v2raya/precheck")
+async def api_v2raya_precheck(token: str = Depends(verify_token)):
+    if engine.is_running():
+        return {"status": "warning", "message": "请先停止当前运行的任务，再执行 v2rayA 批量测活。"}
+    if proxy_manager.PROXY_CLIENT_TYPE != "v2raya":
+        return {"status": "error", "message": "当前代理客户端不是 v2rayA，无需执行该操作。"}
+
+    default_proxy = getattr(core_engine.cfg, "DEFAULT_PROXY", None)
+    summary = proxy_manager.refresh_v2raya_live_pool(
+        proxy_url=default_proxy if default_proxy else None,
+        force=True,
+        reason="manual",
+    )
+    live_nodes = summary.get("live_nodes", [])
+    live_names = [p.get("name", "") for p in live_nodes[:8] if p.get("name")]
+    if summary.get("live_count", 0) > 0:
+        return {
+            "status": "success",
+            "message": f"v2rayA 批量测活完成：存活 {summary['live_count']} / {summary['tested_count']}，后续只会在活节点池内切换。",
+            "tested_count": summary["tested_count"],
+            "live_count": summary["live_count"],
+            "dead_count": summary["dead_count"],
+            "live_names": live_names,
+        }
+    return {
+        "status": "warning",
+        "message": f"v2rayA 批量测活完成：0 / {summary['tested_count']} 存活，请检查面板登录态、节点出口或本地代理链路。",
+        "tested_count": summary["tested_count"],
+        "live_count": summary["live_count"],
+        "dead_count": summary["dead_count"],
+        "live_names": live_names,
+    }
+
+
+def _read_current_yaml_config() -> dict:
+    if not os.path.exists(CONFIG_PATH):
+        return {}
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+
+
+def _build_path_status(path: str, expected: str = "any") -> dict:
+    raw = str(path or "").strip()
+    exists = os.path.exists(raw) if raw else False
+    is_file = os.path.isfile(raw) if raw else False
+    is_dir = os.path.isdir(raw) if raw else False
+    executable = os.access(raw, os.X_OK) if raw and exists and not is_dir else False
+    matches = exists
+    if expected == "file":
+        matches = is_file
+    elif expected == "dir":
+        matches = is_dir
+    return {
+        "path": raw,
+        "exists": exists,
+        "is_file": is_file,
+        "is_dir": is_dir,
+        "executable": executable,
+        "matches": matches,
+    }
+
+
+def _read_simple_env_file(env_path: str) -> tuple[dict, str]:
+    raw = str(env_path or "").strip()
+    if not raw:
+        return {}, ""
+    if not os.path.exists(raw):
+        return {}, ""
+    try:
+        env_map = {}
+        with open(raw, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = str(raw_line or "").strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                value = value.strip().strip("'\"")
+                env_map[key.strip()] = value
+        return env_map, ""
+    except Exception as e:
+        return {}, str(e)
+
+
+def _build_v2raya_runtime_snapshot() -> dict:
+    config_data = _read_current_yaml_config()
+    clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
+
+    panel_url = str(clash_conf.get("v2raya_url", "") or "").strip()
+    username = str(clash_conf.get("v2raya_username", "") or "").strip()
+    password = str(clash_conf.get("v2raya_password", "") or "").strip()
+    xray_bin = str(clash_conf.get("v2raya_xray_bin", "") or "").strip()
+    assets_dir = str(clash_conf.get("v2raya_assets_dir", "") or "").strip()
+    env_file = str(
+        clash_conf.get("v2raya_env_file", "") or ("/etc/default/v2raya" if os.name != "nt" else "")
+    ).strip()
+    default_proxy = str(config_data.get("default_proxy", "") or "").strip()
+
+    xray_status = _build_path_status(xray_bin, expected="file")
+    assets_status = _build_path_status(assets_dir, expected="dir")
+    env_status = _build_path_status(env_file, expected="file")
+    env_map, env_error = _read_simple_env_file(env_file)
+
+    geoip_path = os.path.join(assets_dir, "geoip.dat") if assets_dir else ""
+    geosite_path = os.path.join(assets_dir, "geosite.dat") if assets_dir else ""
+    geoip_exists = os.path.exists(geoip_path) if geoip_path else False
+    geosite_exists = os.path.exists(geosite_path) if geosite_path else False
+
+    env_xray_bin = str(env_map.get("V2RAYA_V2RAY_BIN", "") or "").strip()
+    env_assets_dir = str(env_map.get("V2RAYA_V2RAY_ASSETSDIR", "") or "").strip()
+
+    issues = []
+    if not default_proxy:
+        issues.append("未配置 default_proxy")
+    if not panel_url:
+        issues.append("未配置 v2rayA 面板地址")
+    if (username and not password) or (password and not username):
+        issues.append("v2rayA API 登录名和密码需要同时填写")
+    if xray_bin and not xray_status["matches"]:
+        issues.append("v2rayA Xray 路径不存在或不是文件")
+    if assets_dir and not assets_status["matches"]:
+        issues.append("v2rayA geodata 目录不存在或不是目录")
+    if assets_dir and assets_status["matches"] and (not geoip_exists or not geosite_exists):
+        issues.append("geodata 目录缺少 geoip.dat 或 geosite.dat")
+    if env_file and not env_status["matches"]:
+        issues.append("v2rayA 环境文件不存在")
+    if env_error:
+        issues.append(f"读取 v2rayA 环境文件失败: {env_error}")
+
+    return {
+        "client_type": str(clash_conf.get("client_type", "") or "").strip(),
+        "panel_url": panel_url,
+        "default_proxy": default_proxy,
+        "os_name": os.name,
+        "api_auth": {
+            "username": username,
+            "password_configured": bool(password),
+        },
+        "xray_bin": xray_status,
+        "assets_dir": {
+            **assets_status,
+            "geoip_exists": geoip_exists,
+            "geosite_exists": geosite_exists,
+        },
+        "env_file": {
+            **env_status,
+            "error": env_error,
+            "values": {
+                "V2RAYA_V2RAY_BIN": env_xray_bin,
+                "V2RAYA_V2RAY_ASSETSDIR": env_assets_dir,
+                "V2RAYA_LOG_LEVEL": str(env_map.get("V2RAYA_LOG_LEVEL", "") or "").strip(),
+            },
+            "matches": {
+                "xray_bin": bool(xray_bin and env_xray_bin and xray_bin == env_xray_bin),
+                "assets_dir": bool(assets_dir and env_assets_dir and assets_dir == env_assets_dir),
+            },
+        },
+        "issues": issues,
+    }
+
+
+def _normalize_v2raya_panel_url(panel_url: str) -> str:
+    raw = str(panel_url or "").strip().rstrip("/")
+    if raw.endswith("/api"):
+        raw = raw[:-4]
+    return raw
+
+
+def _stringify_v2raya(value: Any) -> str:
+    if value is None or isinstance(value, bool):
+        return ""
+    text = str(value).strip()
+    return text
+
+
+def _first_v2raya_text(*values: Any) -> str:
+    for value in values:
+        text = _stringify_v2raya(value)
+        if text:
+            return text
+    return ""
+
+
+def _v2raya_unwrap_payload(payload: Any) -> Any:
+    if isinstance(payload, dict) and payload.get("data") is not None:
+        return payload.get("data")
+    return payload
+
+
+def _extract_v2raya_token(payload: Any) -> str:
+    candidates: list[Any] = []
+    if isinstance(payload, dict):
+        data = payload.get("data")
+        if isinstance(data, dict):
+            candidates.extend([
+                data.get("token"),
+                data.get("authorization"),
+                data.get("Authorization"),
+                data.get("access_token"),
+                data.get("accessToken"),
+                data.get("jwt"),
+            ])
+        candidates.extend([
+            payload.get("token"),
+            payload.get("authorization"),
+            payload.get("Authorization"),
+            payload.get("access_token"),
+            payload.get("accessToken"),
+            payload.get("jwt"),
+        ])
+    for item in candidates:
+        text = _stringify_v2raya(item)
+        if text:
+            return text
+    return ""
+
+
+def _v2raya_payload_ok(payload: Any, status_code: int) -> bool:
+    if status_code >= 400:
+        return False
+    if isinstance(payload, dict):
+        if payload.get("success") is False or payload.get("ok") is False:
+            return False
+        code = payload.get("code")
+        if isinstance(code, int) and code >= 400:
+            return False
+        message = _stringify_v2raya(payload.get("message")).lower()
+        if "unauthorized" in message or "forbidden" in message:
+            return False
+    return True
+
+
+def _build_v2raya_api_settings(config_data: dict | None = None) -> dict:
+    config_data = config_data or _read_current_yaml_config()
+    clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
+    return {
+        "panel_url": _normalize_v2raya_panel_url(clash_conf.get("v2raya_url", "")),
+        "username": str(clash_conf.get("v2raya_username", "") or "").strip(),
+        "password": str(clash_conf.get("v2raya_password", "") or "").strip(),
+    }
+
+
+async def _v2raya_request(
+    client: httpx.AsyncClient,
+    panel_url: str,
+    method: str,
+    path: str,
+    *,
+    auth_values: list[str] | None = None,
+    params: dict | None = None,
+    json_body: Any = None,
+) -> tuple[httpx.Response | None, Any, str]:
+    url = f"{panel_url}/api/{str(path or '').lstrip('/')}"
+    headers_base = {"Accept": "application/json, text/plain, */*"}
+    values = auth_values[:] if auth_values else [""]
+    if not values:
+        values = [""]
+    last_resp = None
+    last_payload = None
+    last_auth = ""
+    for auth_value in values:
+        headers = dict(headers_base)
+        if auth_value:
+            headers["Authorization"] = auth_value
+        try:
+            resp = await client.request(method, url, headers=headers, params=params, json=json_body)
+        except Exception as e:
+            last_resp = None
+            last_payload = {"error": str(e)}
+            last_auth = auth_value
+            continue
+        try:
+            payload = resp.json()
+        except Exception:
+            payload = {"raw": resp.text}
+        if resp.status_code != 401:
+            return resp, payload, auth_value
+        last_resp = resp
+        last_payload = payload
+        last_auth = auth_value
+    return last_resp, last_payload, last_auth
+
+
+async def _v2raya_login(
+    client: httpx.AsyncClient,
+    panel_url: str,
+    username: str,
+    password: str,
+) -> tuple[list[str], str]:
+    username = str(username or "").strip()
+    password = str(password or "").strip()
+    if not username and not password:
+        return [""], ""
+    if not username or not password:
+        raise RuntimeError("v2rayA API 登录名和密码需要同时填写。")
+    try:
+        resp = await client.post(
+            f"{panel_url}/api/login",
+            headers={"Accept": "application/json, text/plain, */*"},
+            json={"username": username, "password": password},
+        )
+    except Exception as e:
+        raise RuntimeError(f"登录 v2rayA API 失败: {e}") from e
+    try:
+        payload = resp.json()
+    except Exception:
+        payload = {"raw": resp.text}
+    if resp.status_code >= 400 or not _v2raya_payload_ok(payload, resp.status_code):
+        message = _first_v2raya_text(payload.get("message") if isinstance(payload, dict) else "", resp.text, f"HTTP {resp.status_code}")
+        raise RuntimeError(f"登录 v2rayA API 失败: {message}")
+    token = _extract_v2raya_token(payload)
+    values = [""]
+    if token:
+        values.append(token)
+        if not token.lower().startswith("bearer "):
+            values.append(f"Bearer {token}")
+    deduped: list[str] = []
+    for item in values:
+        if item not in deduped:
+            deduped.append(item)
+    return deduped, token
+
+
+def _append_v2raya_ref(refs: set[str], value: Any) -> None:
+    if value is None or isinstance(value, bool):
+        return
+    if isinstance(value, dict):
+        for key in ["id", "ID", "Id", "name", "remarks", "alias", "address", "server", "host"]:
+            if key in value:
+                _append_v2raya_ref(refs, value.get(key))
+        return
+    if isinstance(value, list):
+        for item in value:
+            _append_v2raya_ref(refs, item)
+        return
+    text = _stringify_v2raya(value)
+    if text:
+        refs.add(text)
+
+
+def _collect_v2raya_current_refs(value: Any, refs: set[str]) -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            lower_key = str(key or "").lower()
+            if any(token in lower_key for token in ["current", "selected", "connected", "running", "active", "now"]):
+                _append_v2raya_ref(refs, child)
+            _collect_v2raya_current_refs(child, refs)
+    elif isinstance(value, list):
+        for item in value:
+            _collect_v2raya_current_refs(item, refs)
+
+
+def _build_v2raya_node_candidate(obj: dict, ctx: dict) -> dict | None:
+    node_id = _first_v2raya_text(obj.get("id"), obj.get("ID"), obj.get("Id"), obj.get("index"), obj.get("idx"))
+    name = _first_v2raya_text(obj.get("name"), obj.get("remarks"), obj.get("ps"), obj.get("alias"), obj.get("title"))
+    address = _first_v2raya_text(obj.get("address"), obj.get("server"), obj.get("host"), obj.get("add"))
+    port = _first_v2raya_text(obj.get("port"))
+    has_children = any(isinstance(obj.get(key), list) and obj.get(key) for key in ["servers", "children", "items", "nodes", "serverList"])
+    if has_children and not address and not port:
+        return None
+    if not node_id and not name:
+        return None
+    if not name and not address:
+        return None
+
+    subscription_id = _first_v2raya_text(
+        obj.get("sub"),
+        obj.get("subId"),
+        obj.get("subid"),
+        obj.get("subscriptionId"),
+        ctx.get("subscription_id"),
+    )
+    subscription_name = _first_v2raya_text(
+        obj.get("subscriptionName"),
+        obj.get("subName"),
+        obj.get("group"),
+        ctx.get("subscription_name"),
+    )
+    node_type = _first_v2raya_text(obj.get("_type"), obj.get("type"))
+    if not node_type:
+        node_type = "subscriptionServer" if subscription_id else "server"
+    lower_type = node_type.lower()
+    if "sub" in lower_type and "server" in lower_type:
+        node_type = "subscriptionServer"
+    elif "server" in lower_type:
+        node_type = "server"
+
+    key = f"{node_type}:{subscription_id or '-'}:{node_id or name or address}"
+    current_hint = any(bool(obj.get(key_name)) for key_name in ["isCurrent", "current", "selected", "connected", "active"])
+    return {
+        "key": key,
+        "node_id": node_id or name or address,
+        "node_type": node_type,
+        "subscription_id": subscription_id,
+        "subscription_name": subscription_name,
+        "name": name or address or node_id,
+        "address": address,
+        "port": port,
+        "_current_hint": current_hint,
+        "latency_ms": None,
+        "latency_source": "",
+    }
+
+
+def _walk_v2raya_nodes(value: Any, nodes: dict[str, dict], current_refs: set[str], ctx: dict | None = None) -> None:
+    ctx = dict(ctx or {})
+    if isinstance(value, dict):
+        _collect_v2raya_current_refs(value, current_refs)
+        candidate = _build_v2raya_node_candidate(value, ctx)
+        if candidate:
+            existing = nodes.get(candidate["key"])
+            if existing:
+                if not existing.get("subscription_name") and candidate.get("subscription_name"):
+                    existing["subscription_name"] = candidate["subscription_name"]
+                existing["_current_hint"] = bool(existing.get("_current_hint") or candidate.get("_current_hint"))
+            else:
+                nodes[candidate["key"]] = candidate
+
+        next_ctx = dict(ctx)
+        container_name = _first_v2raya_text(value.get("name"), value.get("remarks"), value.get("title"))
+        container_sub_id = _first_v2raya_text(value.get("sub"), value.get("subId"), value.get("subid"), value.get("subscriptionId"))
+        if container_sub_id:
+            next_ctx["subscription_id"] = container_sub_id
+        if container_name and not candidate:
+            next_ctx["subscription_name"] = container_name
+
+        for key, child in value.items():
+            child_ctx = dict(next_ctx)
+            lower_key = str(key or "").lower()
+            if lower_key in {"servers", "serverlist", "nodes", "children", "items"} and container_name and not child_ctx.get("subscription_name"):
+                child_ctx["subscription_name"] = container_name
+            _walk_v2raya_nodes(child, nodes, current_refs, child_ctx)
+    elif isinstance(value, list):
+        for item in value:
+            _walk_v2raya_nodes(item, nodes, current_refs, ctx)
+
+
+def _extract_v2raya_nodes(*sources: Any) -> list[dict]:
+    nodes: dict[str, dict] = {}
+    current_refs: set[str] = set()
+    for source in sources:
+        _walk_v2raya_nodes(_v2raya_unwrap_payload(source), nodes, current_refs)
+
+    result: list[dict] = []
+    for item in nodes.values():
+        match_values = {
+            _stringify_v2raya(item.get("node_id")),
+            _stringify_v2raya(item.get("name")),
+            _stringify_v2raya(item.get("address")),
+        }
+        if item.get("subscription_id"):
+            match_values.add(f"{item['subscription_id']}:{item['node_id']}")
+        item["is_current"] = bool(item.pop("_current_hint", False) or any(value in current_refs for value in match_values if value))
+        result.append(item)
+    return result
+
+
+def _extract_v2raya_latency_ms(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        if value < 0:
+            return None
+        return round(float(value), 1)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        matched = re.search(r"(\d+(?:\.\d+)?)\s*ms", text, re.IGNORECASE)
+        if matched:
+            return round(float(matched.group(1)), 1)
+        if re.fullmatch(r"\d+(?:\.\d+)?", text):
+            return round(float(text), 1)
+        return None
+    if isinstance(value, dict):
+        for key in ["latency", "delay", "ping", "httpLatency", "value", "ms"]:
+            if key in value:
+                latency = _extract_v2raya_latency_ms(value.get(key))
+                if latency is not None:
+                    return latency
+        for child in value.values():
+            latency = _extract_v2raya_latency_ms(child)
+            if latency is not None:
+                return latency
+        return None
+    if isinstance(value, list):
+        for item in value:
+            latency = _extract_v2raya_latency_ms(item)
+            if latency is not None:
+                return latency
+    return None
+
+
+def _build_v2raya_latency_params(node: dict) -> list[dict]:
+    params_list: list[dict] = []
+    base = {"id": node.get("node_id")}
+    if node.get("subscription_id"):
+        base["sub"] = node.get("subscription_id")
+    for type_key in ["_type", "type"]:
+        params = dict(base)
+        params[type_key] = node.get("node_type")
+        params_list.append(params)
+    params_list.append(dict(base))
+    deduped: list[dict] = []
+    seen: set[str] = set()
+    for item in params_list:
+        cleaned = {k: v for k, v in item.items() if _stringify_v2raya(v)}
+        signature = json.dumps(cleaned, sort_keys=True, ensure_ascii=False)
+        if signature not in seen:
+            seen.add(signature)
+            deduped.append(cleaned)
+    return deduped
+
+
+async def _fetch_v2raya_node_latency(
+    client: httpx.AsyncClient,
+    panel_url: str,
+    auth_values: list[str],
+    node: dict,
+) -> dict:
+    result = dict(node)
+    for endpoint in ["httpLatency", "pingLatency"]:
+        for params in _build_v2raya_latency_params(node):
+            resp, payload, _ = await _v2raya_request(
+                client,
+                panel_url,
+                "GET",
+                endpoint,
+                auth_values=auth_values,
+                params=params,
+            )
+            if resp is None or not _v2raya_payload_ok(payload, resp.status_code):
+                continue
+            latency_ms = _extract_v2raya_latency_ms(_v2raya_unwrap_payload(payload))
+            if latency_ms is not None:
+                result["latency_ms"] = latency_ms
+                result["latency_source"] = endpoint
+                return result
+    return result
+
+
+def _sort_v2raya_nodes(nodes: list[dict]) -> list[dict]:
+    def _node_sort_key(item: dict):
+        latency = item.get("latency_ms")
+        latency_value = float(latency) if isinstance(latency, (int, float)) else 999999.0
+        return (
+            0 if item.get("is_current") else 1,
+            latency_value,
+            _first_v2raya_text(item.get("subscription_name"), ""),
+            _first_v2raya_text(item.get("name"), item.get("address"), item.get("node_id")),
+        )
+
+    return sorted(nodes, key=_node_sort_key)
+
+
+async def _load_v2raya_nodes_snapshot(with_latency: bool = False) -> dict:
+    config_data = _read_current_yaml_config()
+    runtime = _build_v2raya_runtime_snapshot()
+    settings = _build_v2raya_api_settings(config_data)
+    panel_url = settings.get("panel_url", "")
+    if not panel_url:
+        return {
+            "nodes": [],
+            "runtime": runtime,
+            "auth_configured": bool(settings.get("username") and settings.get("password")),
+            "message": "请先填写 v2rayA 面板地址。",
+        }
+
+    async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+        auth_values, token = await _v2raya_login(client, panel_url, settings.get("username", ""), settings.get("password", ""))
+        touch_resp, touch_payload, _ = await _v2raya_request(client, panel_url, "GET", "touch", auth_values=auth_values)
+        outbounds_resp, outbounds_payload, _ = await _v2raya_request(client, panel_url, "GET", "outbounds", auth_values=auth_values)
+        outbound_resp, outbound_payload, _ = await _v2raya_request(client, panel_url, "GET", "outbound", auth_values=auth_values, params={"outbound": "proxy"})
+
+        if touch_resp is None or touch_resp.status_code >= 400:
+            message = _first_v2raya_text(
+                touch_payload.get("message") if isinstance(touch_payload, dict) else "",
+                touch_payload.get("error") if isinstance(touch_payload, dict) else "",
+                "读取 v2rayA 节点列表失败。",
+            )
+            raise RuntimeError(message)
+
+        nodes = _extract_v2raya_nodes(touch_payload, outbounds_payload, outbound_payload)
+        if with_latency and nodes:
+            semaphore = asyncio.Semaphore(6)
+
+            async def _worker(item: dict) -> dict:
+                async with semaphore:
+                    return await _fetch_v2raya_node_latency(client, panel_url, auth_values, item)
+
+            nodes = list(await asyncio.gather(*[_worker(item) for item in nodes]))
+
+        return {
+            "nodes": _sort_v2raya_nodes(nodes),
+            "runtime": runtime,
+            "auth_configured": bool(settings.get("username") and settings.get("password")),
+            "auth_token_present": bool(token),
+            "message": "v2rayA 节点列表已刷新。",
+        }
+
+
+def _build_v2raya_switch_payloads(req: V2rayASwitchReq) -> list[dict]:
+    touch_payload = {
+        "id": str(req.node_id or "").strip(),
+        "_type": str(req.node_type or "subscriptionServer").strip(),
+    }
+    subscription_id = str(req.subscription_id or "").strip()
+    if subscription_id:
+        touch_payload["sub"] = subscription_id
+    payloads = [
+        dict(touch_payload),
+        {"touch": dict(touch_payload)},
+        {**touch_payload, "outbound": "proxy"},
+        {"touch": dict(touch_payload), "outbound": "proxy"},
+        {
+            "id": str(req.node_id or "").strip(),
+            "sub": subscription_id,
+            "type": str(req.node_type or "subscriptionServer").strip(),
+            "name": str(req.node_name or "").strip(),
+        },
+    ]
+    deduped: list[dict] = []
+    seen: set[str] = set()
+    for item in payloads:
+        cleaned = {k: v for k, v in item.items() if v not in {None, ""}}
+        signature = json.dumps(cleaned, sort_keys=True, ensure_ascii=False)
+        if signature not in seen:
+            seen.add(signature)
+            deduped.append(cleaned)
+    return deduped
+
+
 @router.post("/api/proxy/v2raya/test_current")
 async def api_v2raya_test_current(token: str = Depends(verify_token)):
     proxy_url = getattr(core_engine.cfg, "DEFAULT_PROXY", None)
@@ -1088,6 +1942,79 @@ async def api_v2raya_test_current(token: str = Depends(verify_token)):
             "client_type": proxy_manager.PROXY_CLIENT_TYPE,
         },
     }
+
+
+@router.post("/api/proxy/v2raya/inspect")
+async def api_v2raya_inspect(token: str = Depends(verify_token)):
+    try:
+        data = _build_v2raya_runtime_snapshot()
+        issues = data.get("issues", [])
+        return {
+            "status": "success" if not issues else "warning",
+            "message": "v2rayA 环境检测通过。" if not issues else "v2rayA 环境检测完成，但仍有待确认项。",
+            "data": data,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"v2rayA 环境检测失败: {e}"}
+
+
+@router.get("/api/proxy/v2raya/nodes")
+async def api_v2raya_nodes(with_latency: bool = Query(False), token: str = Depends(verify_token)):
+    try:
+        data = await _load_v2raya_nodes_snapshot(with_latency=with_latency)
+        runtime = data.get("runtime") or {}
+        issues = runtime.get("issues", []) if isinstance(runtime, dict) else []
+        status = "success" if not issues else "warning"
+        if not data.get("nodes"):
+            status = "warning"
+        message = "v2rayA 节点列表已刷新。" if not with_latency else "v2rayA 节点延迟已刷新。"
+        if not data.get("nodes"):
+            message = data.get("message") or "暂未读取到 v2rayA 节点。"
+        return {"status": status, "message": message, "data": data}
+    except Exception as e:
+        return {"status": "error", "message": f"读取 v2rayA 节点列表失败: {e}", "data": {"nodes": [], "runtime": _build_v2raya_runtime_snapshot()}}
+
+
+@router.post("/api/proxy/v2raya/switch")
+async def api_v2raya_switch(req: V2rayASwitchReq, token: str = Depends(verify_token)):
+    try:
+        settings = _build_v2raya_api_settings()
+        panel_url = settings.get("panel_url", "")
+        if not panel_url:
+            return {"status": "error", "message": "请先填写 v2rayA 面板地址。"}
+        async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+            auth_values, _ = await _v2raya_login(client, panel_url, settings.get("username", ""), settings.get("password", ""))
+            switch_ok = False
+            last_message = ""
+            for endpoint in ["connection", "outbound"]:
+                for payload in _build_v2raya_switch_payloads(req):
+                    resp, body, _ = await _v2raya_request(
+                        client,
+                        panel_url,
+                        "POST",
+                        endpoint,
+                        auth_values=auth_values,
+                        json_body=payload,
+                    )
+                    if resp is not None and _v2raya_payload_ok(body, resp.status_code):
+                        switch_ok = True
+                        break
+                    if isinstance(body, dict):
+                        last_message = _first_v2raya_text(body.get("message"), body.get("error"), last_message)
+                if switch_ok:
+                    break
+            if not switch_ok:
+                return {"status": "error", "message": last_message or "v2rayA 节点切换失败，请检查面板登录态或 API 兼容性。"}
+        await asyncio.sleep(0.8)
+        data = await _load_v2raya_nodes_snapshot(with_latency=False)
+        target_name = str(req.node_name or req.node_id or "").strip()
+        return {
+            "status": "success",
+            "message": f"已请求切换到节点：{target_name}",
+            "data": data,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"切换 v2rayA 节点失败: {e}"}
 
 
 @router.get("/api/ext/generate_task")
@@ -1239,6 +2166,205 @@ async def restart_system(token: str = Depends(verify_token)):
     except Exception as e:
         return {"status": "error", "message": f"重启异常: {str(e)}"}
 
+
+@router.get("/api/system/project_update_status")
+async def project_update_status(token: str = Depends(verify_token)):
+    try:
+        data = _build_project_update_status(fetch_remote=True)
+        level = "success" if data.get("can_update") else ("warning" if data.get("is_git_repo") else "error")
+        return {
+            "status": level,
+            "message": data.get("message") or "项目更新状态已读取。",
+            "data": data,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"读取项目更新状态失败: {e}"}
+
+
+@router.post("/api/system/update_project")
+async def update_project(req: ProjectUpdateReq, token: str = Depends(verify_token)):
+    if engine.is_running():
+        return {"status": "warning", "message": "当前有任务正在运行，请先停止任务后再更新当前项目。"}
+    try:
+        status = _build_project_update_status(fetch_remote=True)
+        if not status.get("can_update"):
+            return {
+                "status": "warning",
+                "message": status.get("message") or "当前不满足自动更新条件。",
+                "data": status,
+            }
+
+        code, output = _run_git_command(["pull", "--ff-only", "origin", "main"], timeout=180)
+        if code != 0:
+            return {
+                "status": "error",
+                "message": f"项目更新失败：{output or 'git pull --ff-only origin main 执行失败'}",
+                "data": status,
+            }
+
+        refreshed = _build_project_update_status(fetch_remote=False)
+        message = "当前项目代码已更新到最新 main。"
+        if req.restart_after_update:
+            def _do_restart_after_update():
+                time.sleep(1.2)
+                print(f"[{core_engine.ts()}] [系统] 🔄 项目更新完成，准备自动重启...")
+                try:
+                    sys.stdout.flush()
+                    sys.stderr.flush()
+                    subprocess.Popen([sys.executable] + sys.argv)
+                    os._exit(0)
+                except Exception as restart_error:
+                    print(f"[{core_engine.ts()}] [系统] ❌ 更新后重启失败: {restart_error}")
+                    os._exit(1)
+
+            threading.Thread(target=_do_restart_after_update, daemon=True).start()
+            message = "当前项目代码已更新，系统即将自动重启。"
+        return {
+            "status": "success",
+            "message": message,
+            "output": output,
+            "data": refreshed,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"更新当前项目失败: {e}"}
+
+
+@router.post("/api/system/download_update_package")
+async def download_update_package(req: DownloadUpdatePackageReq, token: str = Depends(verify_token)):
+    try:
+        version = str(req.version or "").strip()
+        download_url = str(req.download_url or "").strip()
+        if not version or not download_url:
+            return {"status": "error", "message": "缺少版本号或下载地址，无法下载更新包。"}
+
+        paths = _get_update_paths(version)
+        safe_version = paths["safe_version"]
+        version_root = paths["version_root"]
+        package_dir = paths["package_dir"]
+        extract_dir = paths["extract_dir"]
+        zip_path = paths["zip_path"]
+        marker_path = paths["marker_path"]
+
+        if os.path.exists(marker_path) and os.path.isdir(extract_dir):
+            return {
+                "status": "success",
+                "message": f"更新包已存在：{extract_dir}",
+                "data": {
+                    "version": version,
+                    "version_root": version_root,
+                    "package_dir": package_dir,
+                    "extract_dir": extract_dir,
+                    "zip_path": zip_path,
+                    "download_url": download_url,
+                    "already_exists": True,
+                },
+            }
+
+        os.makedirs(package_dir, exist_ok=True)
+        os.makedirs(extract_dir, exist_ok=True)
+
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+            async with client.stream("GET", download_url, headers={"User-Agent": f"opaiRe/{version}"}) as resp:
+                if resp.status_code != 200:
+                    return {
+                        "status": "error",
+                        "message": f"下载更新包失败 (HTTP {resp.status_code})",
+                        "data": {"download_url": download_url, "version": version},
+                    }
+                with open(zip_path, "wb") as f:
+                    async for chunk in resp.aiter_bytes():
+                        if chunk:
+                            f.write(chunk)
+
+        _safe_extract_zip(zip_path, extract_dir)
+        with open(marker_path, "w", encoding="utf-8") as f:
+            f.write(version + "\n")
+
+        return {
+            "status": "success",
+            "message": f"更新包已下载并解压到：{extract_dir}",
+            "data": {
+                "version": version,
+                "version_root": version_root,
+                "package_dir": package_dir,
+                "extract_dir": extract_dir,
+                "zip_path": zip_path,
+                "download_url": download_url,
+                "already_exists": False,
+            },
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"下载更新包失败: {e}"}
+
+
+@router.get("/api/system/update_packages")
+async def update_packages(token: str = Depends(verify_token)):
+    try:
+        return {
+            "status": "success",
+            "message": "本地更新包列表已读取。",
+            "data": {
+                "packages": _list_downloaded_updates(),
+                "updates_root": _get_updates_root(),
+            },
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"读取本地更新包列表失败: {e}"}
+
+
+@router.post("/api/system/migrate_update_package")
+async def migrate_update_package(req: MigrateUpdatePackageReq, token: str = Depends(verify_token)):
+    if engine.is_running():
+        return {"status": "warning", "message": "当前有任务正在运行，请先停止任务后再迁移配置。"}
+    try:
+        paths = _get_update_paths(req.version)
+        extract_dir = paths["extract_dir"]
+        if not os.path.isdir(extract_dir):
+            return {"status": "error", "message": "目标更新目录不存在，请先下载并解压该版本。"}
+
+        src_data_dir = os.path.join(BASE_DIR, "data")
+        if not os.path.isdir(src_data_dir):
+            return {"status": "error", "message": "当前项目没有 data 目录，无法迁移配置。"}
+
+        dest_data_dir = os.path.join(extract_dir, "data")
+        os.makedirs(dest_data_dir, exist_ok=True)
+        copied_files, copied_dirs = _copy_directory_contents(src_data_dir, dest_data_dir, exclude_names={"web_console.pid"})
+
+        removed_paths = []
+        if req.cleanup_zip and os.path.isfile(paths["zip_path"]):
+            os.remove(paths["zip_path"])
+            removed_paths.append(paths["zip_path"])
+            if os.path.isdir(paths["package_dir"]) and not os.listdir(paths["package_dir"]):
+                os.rmdir(paths["package_dir"])
+                removed_paths.append(paths["package_dir"])
+
+        if req.cleanup_other_versions:
+            current_root = os.path.realpath(paths["version_root"])
+            updates_root = os.path.realpath(paths["updates_root"])
+            for item in _list_downloaded_updates():
+                other_root = os.path.realpath(str(item.get("version_root") or ""))
+                if not other_root or other_root == current_root:
+                    continue
+                if not other_root.startswith(updates_root + os.sep):
+                    continue
+                shutil.rmtree(other_root, ignore_errors=False)
+                removed_paths.append(other_root)
+
+        return {
+            "status": "success",
+            "message": f"已把当前 data 目录迁移到：{dest_data_dir}",
+            "data": {
+                "version": req.version,
+                "extract_dir": extract_dir,
+                "dest_data_dir": dest_data_dir,
+                "copied_files": copied_files,
+                "copied_dirs": copied_dirs,
+                "removed_paths": removed_paths,
+            },
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"迁移更新包配置失败: {e}"}
+
 @router.get("/api/config")
 async def get_config(token: str = Depends(verify_token)):
     config_data = {}
@@ -1275,6 +2401,22 @@ async def save_config(new_config: dict, token: str = Depends(verify_token)):
             new_config["sub2api_mode"].pop("min_remaining_weekly_percent", None)
         if "default_proxy" in new_config:
             new_config["default_proxy"] = _normalize_proxy_input_for_save(new_config.get("default_proxy", ""))
+        clash_proxy_pool = new_config.get("clash_proxy_pool")
+        if isinstance(clash_proxy_pool, dict):
+            clash_proxy_pool["client_type"] = str(clash_proxy_pool.get("client_type", "clash") or "clash").strip().lower()
+            if clash_proxy_pool["client_type"] not in {"clash", "v2rayn", "v2raya"}:
+                clash_proxy_pool["client_type"] = "clash"
+            for field in [
+                "v2raya_url",
+                "v2raya_username",
+                "v2raya_password",
+                "v2raya_xray_bin",
+                "v2raya_assets_dir",
+                "v2raya_env_file",
+                "v2rayn_base_dir",
+            ]:
+                if field in clash_proxy_pool:
+                    clash_proxy_pool[field] = str(clash_proxy_pool.get(field, "") or "").strip()
         http_dynamic_proxy = new_config.get("http_dynamic_proxy")
         if isinstance(http_dynamic_proxy, dict):
             try:
@@ -1285,7 +2427,6 @@ async def save_config(new_config: dict, token: str = Depends(verify_token)):
             http_dynamic_proxy["proxy_list"] = normalized_dynamic_list
             if bool(http_dynamic_proxy.get("enable", False)) and not normalized_dynamic_list and not str(new_config.get("default_proxy", "") or "").strip():
                 return {"status": "error", "message": "HTTP 动态代理池已开启，但动态代理列表为空且全局默认代理也为空，请至少填写一项。"}
-        clash_proxy_pool = new_config.get("clash_proxy_pool")
         http_dynamic_proxy = new_config.get("http_dynamic_proxy")
         auto_notes = []
         if isinstance(clash_proxy_pool, dict) and isinstance(http_dynamic_proxy, dict):
@@ -1857,26 +2998,67 @@ def get_sub2api_groups(token: str = Depends(verify_token)):
 
 @router.get("/api/system/check_update")
 async def check_update(current_version: str, token: str = Depends(verify_token)):
+    version_page_url = f"https://github.com/{GITHUB_UPDATE_REPO}/tags"
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(f"https://api.github.com/repos/{GITHUB_UPDATE_REPO}/releases/latest",
-                                    headers={"Accept": "application/vnd.github.v3+json"})
-            if resp.status_code != 200: return {"status": "error",
-                                                "message": f"无法获取更新数据 (GitHub API 返回 HTTP {resp.status_code})"}
-        data = resp.json()
-        remote_version = data.get("tag_name", "")
+            resp = await client.get(
+                f"https://api.github.com/repos/{GITHUB_UPDATE_REPO}/tags?per_page=100",
+                headers={
+                    "Accept": "application/vnd.github.v3+json",
+                    "User-Agent": f"opaiRe/{current_version or 'unknown'}"
+                }
+            )
+            if resp.status_code != 200:
+                return {
+                    "status": "error",
+                    "message": f"无法获取版本标签数据 (GitHub API 返回 HTTP {resp.status_code})",
+                    "version_page_url": version_page_url,
+                }
+        tags = resp.json() or []
 
         def _parse(v):
             return [int(x) for x in re.findall(r'\d+', str(v))]
 
+        latest_tag = ""
+        latest_item = None
+        latest_parsed = []
+        for item in tags:
+            tag_name = str(item.get("name", "") or "").strip()
+            parsed = _parse(tag_name)
+            if not parsed:
+                continue
+            if not latest_parsed or parsed > latest_parsed:
+                latest_parsed = parsed
+                latest_tag = tag_name
+                latest_item = item
+
+        remote_version = latest_tag
         has_update = _parse(remote_version) > _parse(current_version) if remote_version else False
-        assets = data.get("assets")
-        download_url = assets[0].get("browser_download_url", "") if assets else data.get("zipball_url", "")
-        return {"status": "success", "has_update": has_update, "remote_version": remote_version,
-                "changelog": data.get("body", "无更新日志"), "download_url": download_url,
-                "html_url": data.get("html_url", "")}
+        if not remote_version:
+            return {
+                "status": "error",
+                "message": "未读取到可用版本标签，请先在 GitHub 仓库创建规范的版本 tag。",
+                "version_page_url": version_page_url,
+            }
+
+        download_url = f"https://github.com/{GITHUB_UPDATE_REPO}/archive/refs/tags/{remote_version}.zip"
+        html_url = f"https://github.com/{GITHUB_UPDATE_REPO}/tree/{remote_version}"
+        commit_sha = str(((latest_item or {}).get("commit") or {}).get("sha") or "").strip()
+        return {
+            "status": "success",
+            "has_update": has_update,
+            "remote_version": remote_version,
+            "changelog": f"当前使用 Git tag 检查更新。最新版本标签：{remote_version}{'，提交：' + commit_sha[:7] if commit_sha else ''}",
+            "download_url": download_url,
+            "html_url": html_url,
+            "version_page_url": version_page_url,
+        }
     except Exception as e:
-        return {"status": "error", "message": f"检查更新发生未知异常: {str(e)}"}
+        return {
+            "status": "error",
+            "message": f"检查更新发生未知异常: {str(e)}",
+            "version_page_url": version_page_url,
+        }
 
 @router.post("/api/logs/clear")
 async def clear_backend_logs(token: str = Depends(verify_token)):

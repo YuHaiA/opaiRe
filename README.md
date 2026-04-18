@@ -121,6 +121,8 @@
 
 详见：[`CHANGELOG.md`](./CHANGELOG.md)
 
+发版与 GitHub tag 更新流程见：[`RELEASE.md`](./RELEASE.md)
+
 ---
 
 ## 4. 目录说明

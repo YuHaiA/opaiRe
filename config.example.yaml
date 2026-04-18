@@ -143,6 +143,15 @@ clash_proxy_pool:
   client_type: "clash"
   # v2rayA Web 面板地址（当 client_type=v2raya 时建议填写，方便面板跳转）
   v2raya_url: ""
+  # 如果 v2rayA 面板开启了登录保护，可填写下列账号供本项目读取节点与切换
+  v2raya_username: ""
+  v2raya_password: ""
+  # v2rayA 使用的 Xray 可执行文件路径（Linux 例如 /usr/local/bin/xray）
+  v2raya_xray_bin: ""
+  # v2rayA 使用的 geodata 目录（Linux 例如 /usr/share/xray）
+  v2raya_assets_dir: ""
+  # v2rayA 环境变量文件路径（Linux 默认一般是 /etc/default/v2raya）
+  v2raya_env_file: ""
   # v2rayN 根目录（当 client_type=v2rayn 时必填）
   v2rayn_base_dir: ""
   # v2rayN 切换节点后等待核心重启生效的秒数

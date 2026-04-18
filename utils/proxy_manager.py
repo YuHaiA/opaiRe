@@ -18,6 +18,9 @@ CLASH_API_URL = ""
 LOCAL_PROXY_URL = ""
 ENABLE_NODE_SWITCH = False
 PROXY_CLIENT_TYPE = "clash"
+V2RAYA_PANEL_URL = ""
+V2RAYA_USERNAME = ""
+V2RAYA_PASSWORD = ""
 V2RAYN_BASE_DIR = ""
 V2RAYN_GUI_CONFIG_PATH = ""
 V2RAYN_DB_PATH = ""
@@ -39,6 +42,13 @@ _v2rayn_precheck_lock = threading.Lock()
 _v2rayn_last_precheck_at = 0.0
 _v2rayn_last_subscription_update_at = 0.0
 _v2rayn_runtime_signature = None
+_v2raya_invalid_node_keys = set()
+_v2raya_invalid_lock = threading.Lock()
+_v2raya_live_nodes = []
+_v2raya_live_lock = threading.Lock()
+_v2raya_precheck_lock = threading.Lock()
+_v2raya_last_precheck_at = 0.0
+_v2raya_runtime_signature = None
 POOL_MODE = False
 FASTEST_MODE = False
 PROXY_GROUP_NAME = "节点选择"
@@ -76,12 +86,13 @@ def format_docker_url(url: str) -> str:
 
 def reload_proxy_config():
     global CLASH_API_URL, LOCAL_PROXY_URL, ENABLE_NODE_SWITCH, PROXY_CLIENT_TYPE
+    global V2RAYA_PANEL_URL, V2RAYA_USERNAME, V2RAYA_PASSWORD
     global V2RAYN_BASE_DIR, V2RAYN_GUI_CONFIG_PATH, V2RAYN_DB_PATH, V2RAYN_EXE_PATH
     global V2RAYN_RESTART_WAIT_SEC, V2RAYN_HIDE_WINDOW_ON_RESTART, V2RAYN_PRECHECK_ON_START
     global V2RAYN_PRECHECK_CACHE_MINUTES, V2RAYN_PRECHECK_MAX_NODES, V2RAYN_LIVE_POOL_LIMIT
     global V2RAYN_SUBSCRIPTION_UPDATE_ENABLED, V2RAYN_SUBSCRIPTION_UPDATE_INTERVAL_MINUTES
     global V2RAYN_SUBSCRIPTION_UPDATE_COMMAND, POOL_MODE, FASTEST_MODE, PROXY_GROUP_NAME
-    global CLASH_SECRET, NODE_BLACKLIST, _v2rayn_runtime_signature
+    global CLASH_SECRET, NODE_BLACKLIST, _v2rayn_runtime_signature, _v2raya_runtime_signature
 
     config_path = os.path.join(BASE_DIR, "data", "config.yaml")
     if not os.path.exists(config_path):
@@ -96,6 +107,11 @@ def reload_proxy_config():
     PROXY_CLIENT_TYPE = str(clash_conf.get("client_type", "clash") or "clash").strip().lower()
     if PROXY_CLIENT_TYPE not in {"clash", "v2rayn", "v2raya"}:
         PROXY_CLIENT_TYPE = "clash"
+    V2RAYA_PANEL_URL = str(clash_conf.get("v2raya_url", "") or "").strip().rstrip("/")
+    if V2RAYA_PANEL_URL.endswith("/api"):
+        V2RAYA_PANEL_URL = V2RAYA_PANEL_URL[:-4]
+    V2RAYA_USERNAME = str(clash_conf.get("v2raya_username", "") or "").strip()
+    V2RAYA_PASSWORD = str(clash_conf.get("v2raya_password", "") or "").strip()
     V2RAYN_BASE_DIR = str(clash_conf.get("v2rayn_base_dir", "") or "").strip()
     if V2RAYN_BASE_DIR:
         V2RAYN_GUI_CONFIG_PATH = os.path.join(V2RAYN_BASE_DIR, "guiConfigs", "guiNConfig.json")
@@ -151,6 +167,20 @@ def reload_proxy_config():
     if _v2rayn_runtime_signature != new_v2rayn_runtime_signature:
         _reset_v2rayn_runtime_state()
         _v2rayn_runtime_signature = new_v2rayn_runtime_signature
+    new_v2raya_runtime_signature = (
+        PROXY_CLIENT_TYPE,
+        V2RAYA_PANEL_URL,
+        V2RAYA_USERNAME,
+        V2RAYA_PASSWORD,
+        V2RAYN_PRECHECK_ON_START,
+        V2RAYN_PRECHECK_CACHE_MINUTES,
+        V2RAYN_PRECHECK_MAX_NODES,
+        V2RAYN_LIVE_POOL_LIMIT,
+        tuple(str(x) for x in NODE_BLACKLIST),
+    )
+    if _v2raya_runtime_signature != new_v2raya_runtime_signature:
+        _reset_v2raya_runtime_state()
+        _v2raya_runtime_signature = new_v2raya_runtime_signature
     print(f"[{ts()}] [系统] 代理管理模块配置已同步更新。当前模式: {PROXY_CLIENT_TYPE}")
 
 
@@ -429,6 +459,653 @@ def test_proxy_liveness(proxy_url=None, silent: bool = False):
     return True
 
 
+def _v2raya_text(value) -> str:
+    if value is None or isinstance(value, bool):
+        return ""
+    return str(value).strip()
+
+
+def _first_v2raya_text(*values) -> str:
+    for value in values:
+        text = _v2raya_text(value)
+        if text:
+            return text
+    return ""
+
+
+def _v2raya_unwrap_payload(payload):
+    if isinstance(payload, dict) and payload.get("data") is not None:
+        return payload.get("data")
+    return payload
+
+
+def _extract_v2raya_token(payload) -> str:
+    candidates = []
+    if isinstance(payload, dict):
+        data = payload.get("data")
+        if isinstance(data, dict):
+            candidates.extend([
+                data.get("token"),
+                data.get("authorization"),
+                data.get("Authorization"),
+                data.get("access_token"),
+                data.get("accessToken"),
+                data.get("jwt"),
+            ])
+        candidates.extend([
+            payload.get("token"),
+            payload.get("authorization"),
+            payload.get("Authorization"),
+            payload.get("access_token"),
+            payload.get("accessToken"),
+            payload.get("jwt"),
+        ])
+    for item in candidates:
+        text = _v2raya_text(item)
+        if text:
+            return text
+    return ""
+
+
+def _v2raya_payload_ok(payload, status_code: int) -> bool:
+    if status_code >= 400:
+        return False
+    if isinstance(payload, dict):
+        if payload.get("success") is False or payload.get("ok") is False:
+            return False
+        code = payload.get("code")
+        if isinstance(code, int) and code >= 400:
+            return False
+        message = _v2raya_text(payload.get("message")).lower()
+        if "unauthorized" in message or "forbidden" in message:
+            return False
+    return True
+
+
+def _v2raya_login(session: std_requests.Session) -> list[str]:
+    if not V2RAYA_PANEL_URL:
+        raise RuntimeError("未配置 v2rayA 面板地址")
+    if not V2RAYA_USERNAME and not V2RAYA_PASSWORD:
+        return [""]
+    if not V2RAYA_USERNAME or not V2RAYA_PASSWORD:
+        raise RuntimeError("v2rayA API 登录名和密码需要同时填写")
+    resp = session.post(
+        f"{V2RAYA_PANEL_URL}/api/login",
+        headers={"Accept": "application/json, text/plain, */*"},
+        json={"username": V2RAYA_USERNAME, "password": V2RAYA_PASSWORD},
+        timeout=10,
+    )
+    try:
+        payload = resp.json()
+    except Exception:
+        payload = {"raw": resp.text}
+    if not _v2raya_payload_ok(payload, resp.status_code):
+        message = _first_v2raya_text(payload.get("message") if isinstance(payload, dict) else "", resp.text, f"HTTP {resp.status_code}")
+        raise RuntimeError(f"登录 v2rayA API 失败: {message}")
+    token = _extract_v2raya_token(payload)
+    auth_values = [""]
+    if token:
+        auth_values.append(token)
+        if not token.lower().startswith("bearer "):
+            auth_values.append(f"Bearer {token}")
+    deduped = []
+    for item in auth_values:
+        if item not in deduped:
+            deduped.append(item)
+    return deduped
+
+
+def _v2raya_request(session: std_requests.Session, method: str, path: str, auth_values=None, params=None, json_body=None):
+    url = f"{V2RAYA_PANEL_URL}/api/{str(path or '').lstrip('/')}"
+    auth_values = auth_values[:] if auth_values else [""]
+    last_resp = None
+    last_payload = None
+    last_auth = ""
+    for auth_value in auth_values:
+        headers = {"Accept": "application/json, text/plain, */*"}
+        if auth_value:
+            headers["Authorization"] = auth_value
+        resp = session.request(method, url, headers=headers, params=params, json=json_body, timeout=12)
+        try:
+            payload = resp.json()
+        except Exception:
+            payload = {"raw": resp.text}
+        if resp.status_code != 401:
+            return resp, payload, auth_value
+        last_resp = resp
+        last_payload = payload
+        last_auth = auth_value
+    return last_resp, last_payload, last_auth
+
+
+def _append_v2raya_ref(refs: set[str], value) -> None:
+    if value is None or isinstance(value, bool):
+        return
+    if isinstance(value, dict):
+        for key in ["id", "ID", "Id", "name", "remarks", "alias", "address", "server", "host"]:
+            if key in value:
+                _append_v2raya_ref(refs, value.get(key))
+        return
+    if isinstance(value, list):
+        for item in value:
+            _append_v2raya_ref(refs, item)
+        return
+    text = _v2raya_text(value)
+    if text:
+        refs.add(text)
+
+
+def _collect_v2raya_current_refs(value, refs: set[str]) -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            lower_key = str(key or "").lower()
+            if any(token in lower_key for token in ["current", "selected", "connected", "running", "active", "now"]):
+                _append_v2raya_ref(refs, child)
+            _collect_v2raya_current_refs(child, refs)
+    elif isinstance(value, list):
+        for item in value:
+            _collect_v2raya_current_refs(item, refs)
+
+
+def _build_v2raya_node_candidate(obj: dict, ctx: dict):
+    node_id = _first_v2raya_text(obj.get("id"), obj.get("ID"), obj.get("Id"), obj.get("index"), obj.get("idx"))
+    name = _first_v2raya_text(obj.get("name"), obj.get("remarks"), obj.get("ps"), obj.get("alias"), obj.get("title"))
+    address = _first_v2raya_text(obj.get("address"), obj.get("server"), obj.get("host"), obj.get("add"))
+    port = _first_v2raya_text(obj.get("port"))
+    has_children = any(isinstance(obj.get(key), list) and obj.get(key) for key in ["servers", "children", "items", "nodes", "serverList"])
+    if has_children and not address and not port:
+        return None
+    if not node_id and not name:
+        return None
+    if not name and not address:
+        return None
+    subscription_id = _first_v2raya_text(
+        obj.get("sub"),
+        obj.get("subId"),
+        obj.get("subid"),
+        obj.get("subscriptionId"),
+        ctx.get("subscription_id"),
+    )
+    subscription_name = _first_v2raya_text(
+        obj.get("subscriptionName"),
+        obj.get("subName"),
+        obj.get("group"),
+        ctx.get("subscription_name"),
+    )
+    node_type = _first_v2raya_text(obj.get("_type"), obj.get("type"))
+    if not node_type:
+        node_type = "subscriptionServer" if subscription_id else "server"
+    lower_type = node_type.lower()
+    if "sub" in lower_type and "server" in lower_type:
+        node_type = "subscriptionServer"
+    elif "server" in lower_type:
+        node_type = "server"
+    key = f"{node_type}:{subscription_id or '-'}:{node_id or name or address}"
+    return {
+        "key": key,
+        "node_id": node_id or name or address,
+        "node_type": node_type,
+        "subscription_id": subscription_id,
+        "subscription_name": subscription_name,
+        "name": name or address or node_id,
+        "address": address,
+        "port": port,
+        "_current_hint": any(bool(obj.get(field)) for field in ["isCurrent", "current", "selected", "connected", "active"]),
+        "latency_ms": None,
+        "latency_source": "",
+    }
+
+
+def _walk_v2raya_nodes(value, nodes: dict[str, dict], current_refs: set[str], ctx=None) -> None:
+    ctx = dict(ctx or {})
+    if isinstance(value, dict):
+        _collect_v2raya_current_refs(value, current_refs)
+        candidate = _build_v2raya_node_candidate(value, ctx)
+        if candidate:
+            existing = nodes.get(candidate["key"])
+            if existing:
+                if not existing.get("subscription_name") and candidate.get("subscription_name"):
+                    existing["subscription_name"] = candidate["subscription_name"]
+                existing["_current_hint"] = bool(existing.get("_current_hint") or candidate.get("_current_hint"))
+            else:
+                nodes[candidate["key"]] = candidate
+        next_ctx = dict(ctx)
+        container_name = _first_v2raya_text(value.get("name"), value.get("remarks"), value.get("title"))
+        container_sub_id = _first_v2raya_text(value.get("sub"), value.get("subId"), value.get("subid"), value.get("subscriptionId"))
+        if container_sub_id:
+            next_ctx["subscription_id"] = container_sub_id
+        if container_name and not candidate:
+            next_ctx["subscription_name"] = container_name
+        for key, child in value.items():
+            child_ctx = dict(next_ctx)
+            lower_key = str(key or "").lower()
+            if lower_key in {"servers", "serverlist", "nodes", "children", "items"} and container_name and not child_ctx.get("subscription_name"):
+                child_ctx["subscription_name"] = container_name
+            _walk_v2raya_nodes(child, nodes, current_refs, child_ctx)
+    elif isinstance(value, list):
+        for item in value:
+            _walk_v2raya_nodes(item, nodes, current_refs, ctx)
+
+
+def _extract_v2raya_nodes(*sources) -> list[dict]:
+    nodes = {}
+    current_refs = set()
+    for source in sources:
+        _walk_v2raya_nodes(_v2raya_unwrap_payload(source), nodes, current_refs)
+    result = []
+    for item in nodes.values():
+        match_values = {
+            _v2raya_text(item.get("node_id")),
+            _v2raya_text(item.get("name")),
+            _v2raya_text(item.get("address")),
+        }
+        if item.get("subscription_id"):
+            match_values.add(f"{item['subscription_id']}:{item['node_id']}")
+        item["is_current"] = bool(item.pop("_current_hint", False) or any(value in current_refs for value in match_values if value))
+        result.append(item)
+    return result
+
+
+def _extract_v2raya_latency_ms(value):
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return round(float(value), 1) if value >= 0 else None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        matched = re.search(r"(\d+(?:\.\d+)?)\s*ms", text, re.IGNORECASE)
+        if matched:
+            return round(float(matched.group(1)), 1)
+        if re.fullmatch(r"\d+(?:\.\d+)?", text):
+            return round(float(text), 1)
+        return None
+    if isinstance(value, dict):
+        for key in ["latency", "delay", "ping", "httpLatency", "value", "ms"]:
+            if key in value:
+                latency = _extract_v2raya_latency_ms(value.get(key))
+                if latency is not None:
+                    return latency
+        for child in value.values():
+            latency = _extract_v2raya_latency_ms(child)
+            if latency is not None:
+                return latency
+    if isinstance(value, list):
+        for item in value:
+            latency = _extract_v2raya_latency_ms(item)
+            if latency is not None:
+                return latency
+    return None
+
+
+def _build_v2raya_latency_params(node: dict) -> list[dict]:
+    params_list = []
+    base = {"id": node.get("node_id")}
+    if node.get("subscription_id"):
+        base["sub"] = node.get("subscription_id")
+    for type_key in ["_type", "type"]:
+        params = dict(base)
+        params[type_key] = node.get("node_type")
+        params_list.append(params)
+    params_list.append(dict(base))
+    deduped = []
+    seen = set()
+    for item in params_list:
+        cleaned = {k: v for k, v in item.items() if _v2raya_text(v)}
+        signature = json.dumps(cleaned, sort_keys=True, ensure_ascii=False)
+        if signature not in seen:
+            seen.add(signature)
+            deduped.append(cleaned)
+    return deduped
+
+
+def _fetch_v2raya_node_latency(session: std_requests.Session, auth_values: list[str], node: dict):
+    result = dict(node)
+    for endpoint in ["httpLatency", "pingLatency"]:
+        for params in _build_v2raya_latency_params(node):
+            resp, payload, _ = _v2raya_request(session, "GET", endpoint, auth_values=auth_values, params=params)
+            if resp is None or not _v2raya_payload_ok(payload, resp.status_code):
+                continue
+            latency_ms = _extract_v2raya_latency_ms(_v2raya_unwrap_payload(payload))
+            if latency_ms is not None:
+                result["latency_ms"] = latency_ms
+                result["latency_source"] = endpoint
+                return result
+    return result
+
+
+def _sort_v2raya_nodes(nodes: list[dict]) -> list[dict]:
+    return sorted(
+        nodes,
+        key=lambda item: (
+            0 if item.get("is_current") else 1,
+            float(item.get("latency_ms")) if isinstance(item.get("latency_ms"), (int, float)) else float("inf"),
+            _first_v2raya_text(item.get("subscription_name"), ""),
+            _first_v2raya_text(item.get("name"), item.get("address"), item.get("node_id")),
+        ),
+    )
+
+
+def _load_v2raya_nodes_snapshot(with_latency: bool = False) -> dict:
+    if not V2RAYA_PANEL_URL:
+        return {"nodes": [], "message": "请先填写 v2rayA 面板地址。"}
+    session = std_requests.Session()
+    try:
+        auth_values = _v2raya_login(session)
+        touch_resp, touch_payload, _ = _v2raya_request(session, "GET", "touch", auth_values=auth_values)
+        outbounds_resp, outbounds_payload, _ = _v2raya_request(session, "GET", "outbounds", auth_values=auth_values)
+        outbound_resp, outbound_payload, _ = _v2raya_request(session, "GET", "outbound", auth_values=auth_values, params={"outbound": "proxy"})
+        if touch_resp is None or touch_resp.status_code >= 400:
+            message = _first_v2raya_text(
+                touch_payload.get("message") if isinstance(touch_payload, dict) else "",
+                touch_payload.get("error") if isinstance(touch_payload, dict) else "",
+                "读取 v2rayA 节点列表失败。",
+            )
+            raise RuntimeError(message)
+        nodes = _extract_v2raya_nodes(touch_payload, outbounds_payload, outbound_payload)
+        if with_latency and nodes:
+            nodes = [_fetch_v2raya_node_latency(session, auth_values, item) for item in nodes]
+        return {"nodes": _sort_v2raya_nodes(nodes), "message": "v2rayA 节点列表已刷新。"}
+    finally:
+        session.close()
+
+
+def _reset_v2raya_runtime_state():
+    global _v2raya_last_precheck_at
+    with _v2raya_invalid_lock:
+        _v2raya_invalid_node_keys.clear()
+    with _v2raya_live_lock:
+        _v2raya_live_nodes.clear()
+    _v2raya_last_precheck_at = 0.0
+
+
+def _set_v2raya_live_nodes(nodes):
+    global _v2raya_last_precheck_at
+    with _v2raya_live_lock:
+        _v2raya_live_nodes.clear()
+        _v2raya_live_nodes.extend([dict(item) for item in nodes])
+    _v2raya_last_precheck_at = time.time()
+
+
+def _get_v2raya_live_nodes():
+    with _v2raya_live_lock:
+        return [dict(item) for item in _v2raya_live_nodes]
+
+
+def _remove_v2raya_live_node(node_key: str):
+    if not node_key:
+        return
+    with _v2raya_live_lock:
+        _v2raya_live_nodes[:] = [item for item in _v2raya_live_nodes if item.get("key") != str(node_key)]
+
+
+def _mark_v2raya_node_invalid(node_key: str):
+    if not node_key:
+        return
+    with _v2raya_invalid_lock:
+        _v2raya_invalid_node_keys.add(str(node_key))
+    _remove_v2raya_live_node(node_key)
+
+
+def _mark_v2raya_node_valid(node_key: str):
+    if not node_key:
+        return
+    with _v2raya_invalid_lock:
+        _v2raya_invalid_node_keys.discard(str(node_key))
+
+
+def _list_v2raya_nodes(ignore_runtime_invalid: bool = False, with_latency: bool = False):
+    snapshot = _load_v2raya_nodes_snapshot(with_latency=with_latency)
+    nodes = snapshot.get("nodes") or []
+    with _v2raya_invalid_lock:
+        invalid_keys = set(_v2raya_invalid_node_keys)
+    filtered = []
+    for node in nodes:
+        name = _v2raya_text(node.get("name"))
+        if any(kw.upper() in name.upper() for kw in NODE_BLACKLIST):
+            continue
+        if not ignore_runtime_invalid and str(node.get("key") or "") in invalid_keys:
+            continue
+        filtered.append(dict(node))
+    if not filtered and invalid_keys:
+        with _v2raya_invalid_lock:
+            _v2raya_invalid_node_keys.clear()
+        return _list_v2raya_nodes(ignore_runtime_invalid=ignore_runtime_invalid, with_latency=with_latency)
+    return filtered
+
+
+def _should_run_v2raya_precheck(force: bool = False) -> bool:
+    if force:
+        return True
+    if not V2RAYN_PRECHECK_ON_START:
+        return False
+    live_nodes = _get_v2raya_live_nodes()
+    if not live_nodes:
+        return True
+    if V2RAYN_PRECHECK_CACHE_MINUTES <= 0:
+        return False
+    return (time.time() - _v2raya_last_precheck_at) >= (V2RAYN_PRECHECK_CACHE_MINUTES * 60)
+
+
+def _build_v2raya_switch_payloads(node: dict) -> list[dict]:
+    touch_payload = {
+        "id": str(node.get("node_id") or "").strip(),
+        "_type": str(node.get("node_type") or "subscriptionServer").strip(),
+    }
+    subscription_id = str(node.get("subscription_id") or "").strip()
+    if subscription_id:
+        touch_payload["sub"] = subscription_id
+    payloads = [
+        dict(touch_payload),
+        {"touch": dict(touch_payload)},
+        {**touch_payload, "outbound": "proxy"},
+        {"touch": dict(touch_payload), "outbound": "proxy"},
+        {
+            "id": str(node.get("node_id") or "").strip(),
+            "sub": subscription_id,
+            "type": str(node.get("node_type") or "subscriptionServer").strip(),
+            "name": str(node.get("name") or "").strip(),
+        },
+    ]
+    deduped = []
+    seen = set()
+    for item in payloads:
+        cleaned = {k: v for k, v in item.items() if v not in {None, ""}}
+        signature = json.dumps(cleaned, sort_keys=True, ensure_ascii=False)
+        if signature not in seen:
+            seen.add(signature)
+            deduped.append(cleaned)
+    return deduped
+
+
+def _switch_v2raya_via_api(node: dict) -> bool:
+    if not V2RAYA_PANEL_URL:
+        print(f"[{ts()}] [WARNING] v2rayA 模式未配置面板地址，改为仅校验当前代理链路。")
+        return False
+    session = std_requests.Session()
+    try:
+        auth_values = _v2raya_login(session)
+        last_message = ""
+        for endpoint in ["connection", "outbound"]:
+            for payload in _build_v2raya_switch_payloads(node):
+                resp, body, _ = _v2raya_request(session, "POST", endpoint, auth_values=auth_values, json_body=payload)
+                if resp is not None and _v2raya_payload_ok(body, resp.status_code):
+                    return True
+                if isinstance(body, dict):
+                    last_message = _first_v2raya_text(body.get("message"), body.get("error"), last_message)
+        if last_message:
+            print(f"[{ts()}] [代理池] v2rayA 节点切换失败: {last_message}")
+        return False
+    except Exception as e:
+        print(f"[{ts()}] [代理池] v2rayA 节点切换异常: {e}")
+        return False
+    finally:
+        session.close()
+
+
+def _activate_v2raya_node(node: dict, proxy_url=None):
+    if not _switch_v2raya_via_api(node):
+        return False, None
+    time.sleep(1.2)
+    if not test_proxy_liveness(proxy_url):
+        return False, None
+    try:
+        session = std_requests.Session()
+        auth_values = _v2raya_login(session)
+        with_latency = _fetch_v2raya_node_latency(session, auth_values, node)
+        return True, with_latency.get("latency_ms")
+    except Exception:
+        return True, None
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
+def _activate_v2raya_node_runtime(node: dict, proxy_url=None):
+    if not _switch_v2raya_via_api(node):
+        return False
+    time.sleep(1.0)
+    return True
+
+
+def refresh_v2raya_live_pool(proxy_url=None, force: bool = False, reason: str = "startup"):
+    summary = {"tested_count": 0, "live_count": 0, "dead_count": 0, "live_nodes": [], "reason": reason}
+    if PROXY_CLIENT_TYPE != "v2raya":
+        return summary
+    if not V2RAYA_PANEL_URL:
+        print(f"[{ts()}] [WARNING] v2rayA 模式未配置面板地址，无法执行批量测活。")
+        return summary
+    try:
+        with _v2raya_precheck_lock:
+            cached_live = _get_v2raya_live_nodes()
+            if not _should_run_v2raya_precheck(force=force):
+                summary["tested_count"] = len(cached_live)
+                summary["live_count"] = len(cached_live)
+                summary["live_nodes"] = cached_live
+                return summary
+            candidates = _list_v2raya_nodes(ignore_runtime_invalid=True, with_latency=False)
+            if not candidates:
+                print(f"[{ts()}] [ERROR] v2rayA 批量测活前未找到可用节点。")
+                _set_v2raya_live_nodes([])
+                return summary
+            current_node = next((item for item in candidates if item.get("is_current")), None)
+            remaining = [item for item in candidates if item.get("key") != (current_node or {}).get("key")]
+            random.shuffle(remaining)
+            max_nodes = V2RAYN_PRECHECK_MAX_NODES
+            if max_nodes > 0:
+                slots = max(0, max_nodes - (1 if current_node else 0))
+                targets = ([current_node] if current_node else []) + remaining[:slots]
+            else:
+                targets = ([current_node] if current_node else []) + remaining
+            print(f"[{ts()}] [代理池] v2rayA 启动预检: 准备批量测活 {len(targets)} 个候选节点...")
+            live_nodes = []
+            current_key = str((current_node or {}).get("key") or "")
+            for idx, node in enumerate(targets, 1):
+                summary["tested_count"] += 1
+                print(f"\n[{ts()}] [代理池] v2rayA 批量测活节点: [{clean_for_log(node.get('name') or node.get('address') or node.get('node_id') or 'UNKNOWN')}] ({idx}/{len(targets)})")
+                print(f"[{ts()}] [代理池] 节点切换详情: old={current_key or 'UNKNOWN'} -> new={node.get('key')}")
+                is_ok, latency_ms = _activate_v2raya_node(node, proxy_url)
+                if is_ok:
+                    node_with_latency = dict(node)
+                    node_with_latency["latency_ms"] = latency_ms if latency_ms is not None else float("inf")
+                    live_nodes.append(node_with_latency)
+                    _mark_v2raya_node_valid(node.get("key"))
+                    current_key = str(node.get("key") or "")
+                    print(f"[{ts()}] [代理池] v2rayA 预检通过: [{clean_for_log(node.get('name') or node.get('address') or node.get('node_id') or 'UNKNOWN')}] | 延迟={latency_ms if latency_ms is not None else '?'}ms | 已纳入活节点池")
+                else:
+                    summary["dead_count"] += 1
+                    _mark_v2raya_node_invalid(node.get("key"))
+                    print(f"[{ts()}] [代理池] v2rayA 预检淘汰: [{clean_for_log(node.get('name') or node.get('address') or node.get('node_id') or 'UNKNOWN')}] | 链路不可用")
+            live_nodes.sort(key=lambda item: (float(item.get("latency_ms", float("inf"))), str(item.get("name") or "")))
+            if V2RAYN_LIVE_POOL_LIMIT > 0 and len(live_nodes) > V2RAYN_LIVE_POOL_LIMIT:
+                print(f"[{ts()}] [代理池] v2rayA 活节点池按延迟排序后裁剪为前 {V2RAYN_LIVE_POOL_LIMIT} 个节点。")
+                live_nodes = live_nodes[:V2RAYN_LIVE_POOL_LIMIT]
+            _set_v2raya_live_nodes(live_nodes)
+            summary["live_nodes"] = _get_v2raya_live_nodes()
+            summary["live_count"] = len(summary["live_nodes"])
+            summary["dead_count"] = max(summary["dead_count"], summary["tested_count"] - summary["live_count"])
+            if summary["live_count"] > 0:
+                print(f"\n[{ts()}] [SUCCESS] v2rayA 批量测活完成：存活 {summary['live_count']} / {summary['tested_count']}，后续仅在活节点池内切换。")
+            else:
+                print(f"\n[{ts()}] [ERROR] v2rayA 批量测活完成：0 / {summary['tested_count']} 存活。")
+            return summary
+    except Exception as e:
+        print(f"[{ts()}] [ERROR] v2rayA 批量测活异常: {e}")
+        return summary
+
+
+def _switch_v2raya_node(proxy_url=None):
+    target_proxy = proxy_url if proxy_url else LOCAL_PROXY_URL
+    display_name = get_display_name(target_proxy)
+    if not V2RAYA_PANEL_URL:
+        print(f"[{ts()}] [WARNING] v2rayA 模式未配置面板地址，改为仅校验当前代理链路: {display_name}")
+        return test_proxy_liveness(proxy_url)
+    if POOL_MODE:
+        print(f"[{ts()}] [WARNING] v2rayA 模式暂不支持独享池模式，已忽略 pool_mode 配置。")
+    try:
+        current_nodes = _list_v2raya_nodes(ignore_runtime_invalid=True, with_latency=False)
+        current_node = next((item for item in current_nodes if item.get("is_current")), None)
+        current_key = str((current_node or {}).get("key") or "")
+        if current_node:
+            print(f"[{ts()}] [代理池] v2rayA 当前节点: [{clean_for_log(current_node.get('name') or current_node.get('address') or current_node.get('node_id') or 'UNKNOWN')}]")
+        if V2RAYN_PRECHECK_ON_START:
+            candidates = refresh_v2raya_live_pool(proxy_url, force=False, reason="switch").get("live_nodes") or _list_v2raya_nodes()
+        else:
+            candidates = _list_v2raya_nodes()
+        if not candidates:
+            if V2RAYN_PRECHECK_ON_START:
+                print(f"[{ts()}] [WARNING] v2rayA 当前活节点池为空，尝试强制重建节点池...")
+                rebuilt = refresh_v2raya_live_pool(proxy_url, force=True, reason="rebuild_after_pool_empty")
+                candidates = rebuilt.get("live_nodes") or _list_v2raya_nodes()
+                if not candidates:
+                    print(f"[{ts()}] [ERROR] v2rayA 重建节点池后仍无可用节点。")
+                    return False
+            else:
+                print(f"[{ts()}] [ERROR] v2rayA 过滤后无可用节点。")
+                return False
+        candidates = [dict(item) for item in candidates]
+        random.shuffle(candidates)
+        ordered = [item for item in candidates if item.get("key") != current_key] or candidates
+        if len(ordered) == 1 and str((ordered[0] or {}).get("key") or "") == current_key:
+            if V2RAYN_PRECHECK_ON_START:
+                print(f"[{ts()}] [代理池] v2rayA 活节点池已轮空，准备重建节点池...")
+                rebuilt = refresh_v2raya_live_pool(proxy_url, force=True, reason="rebuild_after_pool_exhausted")
+                rebuilt_candidates = [dict(item) for item in (rebuilt.get("live_nodes") or _list_v2raya_nodes())]
+                random.shuffle(rebuilt_candidates)
+                ordered = [item for item in rebuilt_candidates if item.get("key") != current_key] or rebuilt_candidates
+                if not ordered:
+                    print(f"[{ts()}] [ERROR] v2rayA 重建节点池后仍无可切换节点。")
+                    return False
+            else:
+                ordered = candidates
+        max_retries = min(8, len(ordered))
+        for idx, node in enumerate(ordered[:max_retries], 1):
+            node_name = clean_for_log(node.get("name") or node.get("address") or node.get("node_id") or "UNKNOWN")
+            print(f"\n[{ts()}] [代理池] v2rayA 尝试切换节点: [{node_name}] ({idx}/{max_retries})")
+            print(f"[{ts()}] [代理池] 节点切换详情: old={current_key or 'UNKNOWN'} -> new={node.get('key')}")
+            if _activate_v2raya_node_runtime(node, proxy_url):
+                if V2RAYN_PRECHECK_ON_START:
+                    _mark_v2raya_node_valid(node.get("key"))
+                    print(f"[{ts()}] [代理池] v2rayA 切换确认: 节点=[{node_name}] | 已从活节点池切换成功")
+                    return True
+                if test_proxy_liveness(proxy_url):
+                    print(f"[{ts()}] [代理池] v2rayA 切换确认: 节点=[{node_name}] | 链路验证通过")
+                    return True
+                _mark_v2raya_node_invalid(node.get("key"))
+                print(f"[{ts()}] [代理池] v2rayA 当前抽中节点验证失败，继续抽取下一节点...")
+                continue
+            _mark_v2raya_node_invalid(node.get("key"))
+            print(f"[{ts()}] [代理池] v2rayA 节点切换失败，继续尝试下一节点...")
+        print(f"\n[{ts()}] [ERROR] v2rayA 连续切换 {max_retries} 个节点后仍不可用。")
+        return False
+    except Exception as e:
+        print(f"[{ts()}] [ERROR] v2rayA 自动切换异常: {e}")
+        return False
+
+
 def smart_switch_node(proxy_url=None):
     global _last_switch_time
     if not ENABLE_NODE_SWITCH:
@@ -436,8 +1113,7 @@ def smart_switch_node(proxy_url=None):
     if PROXY_CLIENT_TYPE == "v2rayn":
         return _switch_v2rayn_node(proxy_url)
     if PROXY_CLIENT_TYPE == "v2raya":
-        print(f"[{ts()}] [代理池] 当前为 v2rayA 模式：节点切换与订阅更新请在 v2rayA 面板中操作，本项目仅检测当前代理链路。")
-        return test_proxy_liveness(proxy_url)
+        return _switch_v2raya_node(proxy_url)
     if POOL_MODE and proxy_url:
         return _do_smart_switch(proxy_url)
     with _global_switch_lock:
@@ -915,6 +1591,8 @@ def refresh_v2rayn_live_pool(proxy_url=None, force: bool = False, reason: str = 
 def prepare_proxy_runtime(proxy_url=None, reason: str = "startup"):
     if ENABLE_NODE_SWITCH and PROXY_CLIENT_TYPE == "v2rayn" and V2RAYN_PRECHECK_ON_START:
         return refresh_v2rayn_live_pool(proxy_url, force=False, reason=reason)
+    if ENABLE_NODE_SWITCH and PROXY_CLIENT_TYPE == "v2raya" and V2RAYN_PRECHECK_ON_START:
+        return refresh_v2raya_live_pool(proxy_url, force=False, reason=reason)
     return {"tested_count": 0, "live_count": 0, "dead_count": 0, "live_profiles": [], "subscription_updated": False, "reason": reason}
 
 

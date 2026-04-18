@@ -97,7 +97,7 @@
             <aside class="w-full md:w-64 h-auto md:h-full bg-slate-100/70 backdrop-blur-3xl text-slate-600 flex flex-col shadow-[inset_-1px_0_0_rgba(0,0,0,0.06)] z-20 shrink-0 border-r border-slate-200/50">
                 <div class="p-4 md:p-6 flex items-center justify-between md:justify-center border-b border-slate-200/60 shrink-0 bg-transparent">
                     <span class="font-black text-base md:text-xl tracking-tight text-slate-800 drop-shadow-sm">Wenfxl <span class="text-indigo-500">Manager</span></span>
-                    <button v-if="updateInfo.hasUpdate" @click="promptUpdate" class="relative group flex items-center justify-center focus:outline-none transition-transform hover:scale-105 shrink-0 cursor-pointer" title="点击查看更新">
+                    <button v-if="updateInfo.hasUpdate" @click="openProjectVersionPage()" class="relative group flex items-center justify-center focus:outline-none transition-transform hover:scale-105 shrink-0 cursor-pointer" title="点击查看在线版本页">
                         <span class="absolute -top-1 -right-1 flex h-2.5 w-2.5 z-10">
                             <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
                             <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
@@ -106,9 +106,9 @@
                             🚀 {{ updateInfo.version }}
                         </span>
                     </button>
-                    <span v-else class="px-2.5 py-1 rounded-md bg-white border border-slate-200 text-[10px] text-slate-500 font-mono font-bold leading-none shrink-0 shadow-sm">
+                    <button v-else @click="openProjectVersionPage()" class="px-2.5 py-1 rounded-md bg-white border border-slate-200 text-[10px] text-slate-500 font-mono font-bold leading-none shrink-0 shadow-sm hover:border-slate-300 hover:text-slate-700 transition-colors" title="点击查看在线版本页">
                         {{ appVersion }}
-                    </span>
+                    </button>
                 </div>
                 <nav class="flex flex-row md:flex-col overflow-x-auto md:overflow-y-auto px-3 py-3 md:px-4 md:py-6 gap-2 md:gap-1.5 md:space-y-1 hide-scrollbar flex-1 min-h-0">
                     <button v-for="tab in tabs" :key="tab.id" @click="switchTab(tab.id)"
@@ -121,9 +121,6 @@
                 <div class="hidden md:block p-4 border-t border-slate-200/60 shrink-0 mt-auto bg-transparent">
                     <button @click="restartSystem" class="w-full flex items-center justify-center gap-2 text-xs font-bold text-amber-600 hover:text-amber-700 py-3 mb-2.5 rounded-xl hover:bg-amber-100/50 transition-colors border border-amber-200/60 bg-amber-50/50 shadow-sm">
                         <span>⚡</span>重启项目
-                    </button>
-                    <button @click="checkUpdate(true)" class="w-full flex items-center justify-center gap-2 text-xs font-bold text-blue-600 hover:text-blue-700 py-3 mb-2.5 rounded-xl hover:bg-blue-100/50 transition-colors border border-blue-200/60 bg-blue-50/50 shadow-sm">
-                        <span>🔄</span>检查系统更新
                     </button>
                     <button @click="logout" class="w-full flex items-center justify-center gap-2 text-xs font-bold text-slate-500 hover:text-rose-500 py-3 rounded-xl hover:bg-rose-50/80 transition-colors border border-transparent hover:border-rose-200/50 hover:shadow-sm">
                         <span>🚪</span>退出登录
@@ -1501,7 +1498,22 @@
 
 
                         <div v-show="currentTab === 'proxy'" v-if="config" class="space-y-5 md:space-y-8">
-                            <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-200/60 lg:max-w-3xl">
+                            <div class="bg-white p-4 md:p-5 rounded-2xl shadow-sm border border-slate-200/60">
+                                <div class="flex flex-wrap gap-3">
+                                    <button
+                                        v-for="item in proxySubTabs"
+                                        :key="item.id"
+                                        @click="switchProxySubTab(item.id)"
+                                        class="px-4 py-2.5 rounded-xl border text-sm font-black transition-all flex items-center gap-2"
+                                        :class="proxySubTab === item.id ? 'bg-slate-900 text-white border-slate-900 shadow-lg shadow-slate-900/10' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'"
+                                    >
+                                        <span>{{ item.icon }}</span>
+                                        <span>{{ item.name }}</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div v-show="proxySubTab === 'general'" class="bg-white p-6 md:p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-200/60 lg:max-w-3xl">
                                 <h3 class="text-lg md:text-xl font-black text-emerald-600 mb-5 flex items-center gap-2 tracking-tight"><span>🌐</span> 基础代理设置</h3>
                                 <label class="block text-slate-700 text-sm font-extrabold mb-1">全局默认代理</label>
                                 <span class="block text-xs text-slate-400 mb-3 font-medium">基础请求代理地址，如 socks5://127.0.0.1:10808</span>
@@ -1516,7 +1528,49 @@
                                 </div>
                             </div>
 
-                            <div v-if="config.clash_proxy_pool && config.clash_proxy_pool.client_type !== 'v2rayn'" class="bg-white p-6 md:p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-200/60 border-l-4 border-l-cyan-500 bg-gradient-to-br from-cyan-50/30 to-white">
+                            <div v-show="proxySubTab === 'general' && config.clash_proxy_pool" class="bg-white p-6 md:p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-200/60 border-l-4 border-l-slate-500 bg-gradient-to-br from-slate-50 to-white">
+                                <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+                                    <div class="space-y-2">
+                                        <h3 class="text-xl md:text-2xl font-black text-slate-800 tracking-tight flex items-center gap-2"><span>🧠</span> 智能切点总控</h3>
+                                        <p class="text-xs text-slate-500 font-medium">先在这里决定当前使用哪种代理客户端，再进入对应子页做细项管理。</p>
+                                    </div>
+                                    <label class="relative inline-flex bg-white px-4 py-2.5 md:px-5 md:py-3 rounded-xl cursor-pointer hover:bg-slate-50 transition-colors shadow-sm border border-slate-200 w-full sm:w-auto items-center justify-center group">
+                                        <input type="checkbox" v-model="config.clash_proxy_pool.enable" @change="handleClashEnableToggle" class="sr-only peer">
+                                        <div class="relative w-11 h-6 shrink-0 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all after:shadow-sm peer-checked:bg-slate-900 shadow-inner transition-colors duration-300 group-hover:shadow-md"></div>
+                                        <span class="font-black text-slate-900 text-sm md:text-base ml-3 tracking-wide">开启智能切点</span>
+                                    </label>
+                                </div>
+                                <div class="grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-5 mt-6">
+                                    <div class="space-y-4">
+                                        <div>
+                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">代理客户端类型</label>
+                                            <select v-model="config.clash_proxy_pool.client_type" @change="handleProxyClientTypeChange" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-slate-500/20 focus:border-slate-500 transition-colors shadow-sm text-sm">
+                                                <option value="clash">Clash（控制 API 切点）</option>
+                                                <option value="v2raya">v2rayA（面板读取 + 手动切点）</option>
+                                                <option value="v2rayn">v2rayN（全局节点池切换）</option>
+                                            </select>
+                                        </div>
+                                        <div class="text-xs text-slate-600 font-medium bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 leading-relaxed">
+                                            <span class="font-black">当前模式：</span>
+                                            <code class="font-mono">{{ config.clash_proxy_pool.client_type || 'clash' }}</code>
+                                            。切换后会自动跳到对应子页；保存配置后运行时会按该客户端类型执行。
+                                        </div>
+                                    </div>
+                                    <div class="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-1 gap-3">
+                                        <button @click="switchProxySubTab('clash')" class="px-4 py-3 rounded-xl border border-cyan-200 bg-cyan-50 text-cyan-700 hover:bg-cyan-100 transition-colors text-sm font-black text-left">
+                                            🛰️ Clash 子页
+                                        </button>
+                                        <button @click="switchProxySubTab('v2rayn')" class="px-4 py-3 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors text-sm font-black text-left">
+                                            🪟 v2rayN 子页
+                                        </button>
+                                        <button @click="switchProxySubTab('v2raya')" class="px-4 py-3 rounded-xl border border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 hover:bg-fuchsia-100 transition-colors text-sm font-black text-left">
+                                            🧩 v2rayA 子页
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div v-if="proxySubTab === 'clash' && config.clash_proxy_pool && config.clash_proxy_pool.client_type !== 'v2rayn'" class="bg-white p-6 md:p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-200/60 border-l-4 border-l-cyan-500 bg-gradient-to-br from-cyan-50/30 to-white">
                                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 border-b border-cyan-100 pb-5">
                                     <div>
                                         <h3 class="text-xl md:text-2xl font-black text-cyan-700 tracking-tight flex items-center gap-2"><span>🛰️</span> Clash 订阅自助更新</h3>
@@ -1675,7 +1729,7 @@
                                 </div>
                             </div>
 
-                            <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-200/60 border-l-4 border-l-indigo-500 bg-gradient-to-br from-indigo-50/30 to-white" v-if="config.clash_proxy_pool">
+                            <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-200/60 border-l-4 border-l-indigo-500 bg-gradient-to-br from-indigo-50/30 to-white" v-if="config.clash_proxy_pool && (proxySubTab === 'clash' || proxySubTab === 'v2rayn')">
                                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 md:mb-8 border-b border-indigo-100 pb-5 gap-4">
                                     <h3 class="text-xl md:text-2xl font-black text-indigo-700 tracking-tight flex items-center gap-2"><span>🌍</span> Clash 节点智能池</h3>
                                     <label class="relative inline-flex bg-white px-4 py-2.5 md:px-5 md:py-3 rounded-xl cursor-pointer hover:bg-indigo-50 transition-colors shadow-sm border border-indigo-200 w-full sm:w-auto items-center justify-center group">
@@ -1693,7 +1747,7 @@
                                         </div>
                                         <div>
                                             <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">代理客户端类型</label>
-                                            <select v-model="config.clash_proxy_pool.client_type" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors shadow-sm text-sm">
+                                            <select v-model="config.clash_proxy_pool.client_type" @change="handleProxyClientTypeChange" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors shadow-sm text-sm">
                                                 <option value="clash">Clash（控制 API 切点）</option>
                                                 <option value="v2raya">v2rayA（面板托管）</option>
                                                 <option value="v2rayn">v2rayN（全局节点池切换）</option>
@@ -1881,7 +1935,188 @@
                                 </div>
                             </div>
 
-                            <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-200/60 border-l-4 border-l-emerald-500 bg-gradient-to-br from-emerald-50/30 to-white" v-if="config.http_dynamic_proxy">
+                            <div v-if="config.clash_proxy_pool && proxySubTab === 'v2raya'" class="bg-white p-6 md:p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-200/60 border-l-4 border-l-fuchsia-500 bg-gradient-to-br from-fuchsia-50/30 to-white">
+                                <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-fuchsia-100 pb-5 mb-6">
+                                    <div>
+                                        <h3 class="text-xl md:text-2xl font-black text-fuchsia-700 tracking-tight flex items-center gap-2"><span>🧩</span> v2rayA 面板接管</h3>
+                                        <p class="text-xs text-slate-500 mt-2 font-medium">这里直接对接 v2rayA Web API，支持读取节点、拉取延迟、当前节点高亮和手动切换。</p>
+                                    </div>
+                                    <div v-if="config.clash_proxy_pool.client_type !== 'v2raya'" class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 font-bold">
+                                        当前客户端类型不是 <code class="font-mono">v2raya</code>。先切到 v2rayA 模式，下面的读取与切换能力才会生效。
+                                    </div>
+                                </div>
+
+                                <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                                    <div class="space-y-4">
+                                        <div>
+                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">v2rayA 面板地址</label>
+                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_url" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 http://127.0.0.1:2017">
+                                        </div>
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">API 用户名</label>
+                                                <input type="text" v-model="config.clash_proxy_pool.v2raya_username" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm text-sm" placeholder="如启用登录保护可填写">
+                                            </div>
+                                            <div>
+                                                <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">API 密码</label>
+                                                <div class="relative">
+                                                    <input :type="showPwd.v2raya_password ? 'text' : 'password'" v-model="config.clash_proxy_pool.v2raya_password" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 pr-10 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm text-sm">
+                                                    <button @click="showPwd.v2raya_password = !showPwd.v2raya_password" class="absolute right-3 top-1/2 -translate-y-1/2 text-lg text-slate-400 hover:text-fuchsia-600">
+                                                        {{ showPwd.v2raya_password ? '👁️' : '🙈' }}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">Xray 可执行文件</label>
+                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_xray_bin" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 /usr/local/bin/xray">
+                                        </div>
+                                        <div>
+                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">geodata 目录</label>
+                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_assets_dir" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 /usr/share/xray">
+                                        </div>
+                                        <div>
+                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">环境变量文件</label>
+                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_env_file" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 /etc/default/v2raya">
+                                        </div>
+                                    </div>
+
+                                    <div class="space-y-4">
+                                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                            <button @click="openV2rayAPanel" class="bg-white border border-fuchsia-200 text-fuchsia-700 px-4 py-2.5 rounded-xl hover:bg-fuchsia-50 active:scale-95 transition-all shadow-sm font-bold flex items-center justify-center gap-2">
+                                                <span>🧭</span>
+                                                打开 v2rayA 面板
+                                            </button>
+                                            <button @click="inspectV2rayAEnvironment(true)" :disabled="isV2rayAInspecting" class="bg-white border border-fuchsia-200 text-fuchsia-700 px-4 py-2.5 rounded-xl hover:bg-fuchsia-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                <span v-if="isV2rayAInspecting" class="animate-spin">⏳</span>
+                                                <span v-else>🛠️</span>
+                                                环境检查
+                                            </button>
+                                            <button @click="testV2rayACurrentProxy" :disabled="isV2rayATesting" class="bg-fuchsia-600 text-white px-4 py-2.5 rounded-xl hover:bg-fuchsia-700 active:scale-95 transition-all shadow-md shadow-fuchsia-500/20 font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                <span v-if="isV2rayATesting" class="animate-spin">⏳</span>
+                                                <span v-else>⚡</span>
+                                                检测当前链路
+                                            </button>
+                                            <button @click="fetchV2rayANodes(false, true)" :disabled="isV2rayANodesLoading" class="bg-white border border-fuchsia-200 text-fuchsia-700 px-4 py-2.5 rounded-xl hover:bg-fuchsia-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                <span v-if="isV2rayANodesLoading" class="animate-spin">⏳</span>
+                                                <span v-else>📋</span>
+                                                读取节点列表
+                                            </button>
+                                            <button @click="runV2rayAPrecheck()" :disabled="isProxyBatchChecking" class="bg-white border border-fuchsia-200 text-fuchsia-700 px-4 py-2.5 rounded-xl hover:bg-fuchsia-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                <span v-if="isProxyBatchChecking" class="animate-spin">⏳</span>
+                                                <span v-else>⚡</span>
+                                                重新筛选节点
+                                            </button>
+                                            <button @click="fetchV2rayANodes(true, true)" :disabled="isV2rayALatencyLoading" class="sm:col-span-2 bg-slate-900 text-white px-4 py-2.5 rounded-xl hover:bg-slate-800 active:scale-95 transition-all shadow-md shadow-slate-900/20 font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                <span v-if="isV2rayALatencyLoading" class="animate-spin">⏳</span>
+                                                <span v-else>📶</span>
+                                                刷新全部延迟
+                                            </button>
+                                        </div>
+
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div class="bg-fuchsia-50/70 border border-fuchsia-200 rounded-2xl px-4 py-4 shadow-sm">
+                                                <label class="block text-[11px] text-fuchsia-700 font-black mb-2 uppercase tracking-wider">当前接管状态</label>
+                                                <div class="text-sm text-slate-700 font-bold">{{ config.clash_proxy_pool.client_type === 'v2raya' ? '已切到 v2rayA 模式' : '未切到 v2rayA 模式' }}</div>
+                                                <div class="text-[11px] text-slate-500 mt-2">当前高亮与切换能力会按 <code class="font-mono">client_type=v2raya</code> 生效。</div>
+                                            </div>
+                                            <div class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
+                                                <label class="block text-[11px] text-slate-500 font-black mb-2 uppercase tracking-wider">节点缓存</label>
+                                                <div class="text-sm text-slate-700 font-bold">{{ v2rayANodes.length }} 个节点</div>
+                                                <div class="text-[11px] text-slate-500 mt-2">{{ v2rayAStatusMessage || '点击上面的按钮从 v2rayA 面板拉取节点信息。' }}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div v-if="v2rayARuntime" class="mt-6 space-y-4">
+                                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                                        <div class="bg-white border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
+                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">面板地址</div>
+                                            <div class="text-xs font-mono text-slate-700 break-all mt-2">{{ v2rayARuntime.panel_url || '未填写' }}</div>
+                                        </div>
+                                        <div class="bg-white border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
+                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">API 登录</div>
+                                            <div class="text-sm font-bold text-slate-700 mt-2">{{ v2rayARuntime.api_auth?.username ? v2rayARuntime.api_auth.username : '未配置' }}</div>
+                                            <div class="text-[11px] text-slate-500 mt-2">{{ v2rayARuntime.api_auth?.password_configured ? '密码已配置' : '密码未配置' }}</div>
+                                        </div>
+                                        <div class="bg-white border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
+                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">Xray 路径</div>
+                                            <div class="text-xs font-mono text-slate-700 break-all mt-2">{{ v2rayARuntime.xray_bin?.path || '未填写' }}</div>
+                                        </div>
+                                        <div class="bg-white border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
+                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">默认代理</div>
+                                            <div class="text-xs font-mono text-slate-700 break-all mt-2">{{ v2rayARuntime.default_proxy || '未填写' }}</div>
+                                        </div>
+                                    </div>
+                                    <div v-if="v2rayARuntime.issues && v2rayARuntime.issues.length" class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-4 font-medium">
+                                        <div class="font-black mb-2">待确认项</div>
+                                        <div v-for="issue in v2rayARuntime.issues" :key="issue">{{ issue }}</div>
+                                    </div>
+                                </div>
+
+                                <div class="mt-6">
+                                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                                        <div>
+                                            <h4 class="text-lg font-black text-slate-800">节点列表</h4>
+                                            <p class="text-xs text-slate-500 mt-1">当前节点会高亮，点击右侧按钮即可手动切换。</p>
+                                        </div>
+                                        <div class="text-[11px] text-slate-500 font-medium">
+                                            延迟数据来自 v2rayA API，若面板版本不兼容会保持为空。
+                                        </div>
+                                    </div>
+
+                                    <div v-if="v2rayANodes.length > 0" class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                                        <div
+                                            v-for="node in v2rayANodes"
+                                            :key="getV2rayANodeKey(node)"
+                                            class="bg-white border rounded-2xl px-4 py-4 shadow-sm transition-all"
+                                            :class="node.is_current ? 'border-fuchsia-300 shadow-fuchsia-100 bg-fuchsia-50/50' : 'border-slate-200'"
+                                        >
+                                            <div class="flex items-start justify-between gap-3">
+                                                <div class="min-w-0">
+                                                    <div class="font-black text-slate-800 break-all">{{ node.name || node.address || node.node_id }}</div>
+                                                    <div class="text-[11px] text-slate-400 font-mono mt-1 break-all">{{ node.address || '地址未知' }}<span v-if="node.port">:{{ node.port }}</span></div>
+                                                </div>
+                                                <span class="px-2.5 py-1 rounded-lg text-[11px] font-black border"
+                                                      :class="node.is_current ? 'bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200' : 'bg-slate-50 text-slate-600 border-slate-200'">
+                                                    {{ node.is_current ? '当前节点' : '候选节点' }}
+                                                </span>
+                                            </div>
+                                            <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-600 font-medium">
+                                                <div>
+                                                    订阅：<code class="font-mono">{{ node.subscription_name || node.subscription_id || '-' }}</code>
+                                                </div>
+                                                <div>
+                                                    类型：<code class="font-mono">{{ node.node_type || '-' }}</code>
+                                                </div>
+                                                <div>
+                                                    节点 ID：<code class="font-mono">{{ node.node_id || '-' }}</code>
+                                                </div>
+                                                <div>
+                                                    延迟：<code class="font-mono">{{ formatV2rayALatency(node) }}</code>
+                                                </div>
+                                            </div>
+                                            <div class="mt-4">
+                                                <button
+                                                    @click="switchV2rayANode(node)"
+                                                    :disabled="switchingV2rayANodeKey === getV2rayANodeKey(node) || node.is_current"
+                                                    class="w-full bg-fuchsia-600 text-white px-4 py-2.5 rounded-xl hover:bg-fuchsia-700 active:scale-95 transition-all shadow-md shadow-fuchsia-500/20 font-bold disabled:opacity-50 flex items-center justify-center gap-2"
+                                                >
+                                                    <span v-if="switchingV2rayANodeKey === getV2rayANodeKey(node)" class="animate-spin">⏳</span>
+                                                    <span v-else>{{ node.is_current ? '✅' : '🔀' }}</span>
+                                                    <span>{{ node.is_current ? '当前已选' : '切换到这个节点' }}</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div v-else class="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-6 font-medium">
+                                        还没有读取到 v2rayA 节点。先确认面板地址与登录信息，再点击“读取节点列表”。
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-200/60 border-l-4 border-l-emerald-500 bg-gradient-to-br from-emerald-50/30 to-white" v-if="config.http_dynamic_proxy && proxySubTab === 'httpDynamic'">
                                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 border-b border-emerald-100 pb-5">
                                     <h3 class="text-xl md:text-2xl font-black text-emerald-700 tracking-tight flex items-center gap-2"><span>🚪</span> HTTP 动态代理池</h3>
                                     <label class="relative inline-flex bg-white px-4 py-2.5 md:px-5 md:py-3 rounded-xl cursor-pointer hover:bg-emerald-50 transition-colors shadow-sm border border-emerald-200 w-full sm:w-auto items-center justify-center group">
@@ -2481,6 +2716,146 @@
                                             </div>
                                         </div>
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div v-show="currentTab === 'update'" class="space-y-5 md:space-y-8">
+                            <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200/60 border-l-4 border-l-sky-500 bg-gradient-to-br from-sky-50/40 to-white">
+                                <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-5">
+                                    <div class="space-y-2">
+                                        <h3 class="text-xl md:text-2xl font-black text-sky-700 tracking-tight flex items-center gap-2"><span>🧩</span> 更新中心</h3>
+                                        <p class="text-xs text-slate-500 font-medium">左边是普通用户更新路径，右边是开发者 Git 更新路径。两条线分开，避免误操作。</p>
+                                    </div>
+                                    <div class="flex flex-wrap gap-3">
+                                        <button @click="loadUpdateCenterData(true)" :disabled="isUpdatePackagesLoading || isProjectUpdateChecking" class="px-4 py-2.5 rounded-xl border border-sky-200 bg-white text-sky-700 hover:bg-sky-50 transition-colors shadow-sm text-sm font-black disabled:opacity-50 flex items-center gap-2">
+                                            <span v-if="isUpdatePackagesLoading || isProjectUpdateChecking" class="animate-spin">⏳</span>
+                                            <span v-else>🔄</span>
+                                            刷新状态
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                                <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200/60 border-l-4 border-l-indigo-500">
+                                    <div class="flex items-center justify-between gap-3 mb-5">
+                                        <div>
+                                            <h4 class="text-lg font-black text-slate-800">普通用户更新</h4>
+                                            <p class="text-xs text-slate-500 mt-1">适合没有 Git 的使用者：检查版本、下载到 `updates/`、迁移当前配置。</p>
+                                        </div>
+                                        <button @click="openProjectVersionPage()" class="px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 transition-colors text-xs font-black">
+                                            打开标签页
+                                        </button>
+                                    </div>
+                                    <div class="mb-5">
+                                        <button @click="checkUpdate(true)" :disabled="isUpdatePackageDownloading" class="px-4 py-2.5 rounded-xl border border-indigo-200 bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-sm text-sm font-black disabled:opacity-50 flex items-center gap-2">
+                                            <span v-if="isUpdatePackageDownloading" class="animate-spin">⏳</span>
+                                            <span v-else>⬇️</span>
+                                            检查并下载更新包
+                                        </button>
+                                    </div>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4">
+                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">当前运行版本</div>
+                                            <div class="text-lg font-black text-slate-800 mt-2">{{ appVersion }}</div>
+                                        </div>
+                                        <div class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4">
+                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">最新在线版本</div>
+                                            <div class="text-lg font-black mt-2" :class="updateInfo.hasUpdate ? 'text-sky-700' : 'text-slate-800'">{{ updateInfo.hasUpdate ? updateInfo.version : '当前已是最新或尚未发现更新' }}</div>
+                                        </div>
+                                    </div>
+                                    <div class="mt-4 text-sm text-slate-600 bg-sky-50 border border-sky-200 rounded-2xl px-4 py-4 font-medium leading-relaxed">
+                                        {{ updateInfo.hasUpdate ? (updateInfo.changelog || '已检测到新版本，可直接下载到当前目录下的 updates 文件夹。') : '更新检查现在基于 Git tag，不依赖 GitHub Release。' }}
+                                    </div>
+                                </div>
+
+                                <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200/60 border-l-4 border-l-emerald-500">
+                                    <div class="flex items-center justify-between gap-3 mb-5">
+                                        <div>
+                                            <h4 class="text-lg font-black text-slate-800">开发者更新</h4>
+                                            <p class="text-xs text-slate-500 mt-1">只针对当前 Git 工作区，要求 `main` 分支、工作区干净，并且只能 fast-forward。</p>
+                                        </div>
+                                        <button @click="inspectProjectUpdate(true)" :disabled="isProjectUpdateChecking" class="px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 transition-colors text-xs font-black disabled:opacity-50">
+                                            检查可更新性
+                                        </button>
+                                    </div>
+                                    <div class="mb-5">
+                                        <button @click="updateCurrentProject" :disabled="isProjectUpdating || isProjectUpdateChecking" class="px-4 py-2.5 rounded-xl border border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-sm text-sm font-black disabled:opacity-50 flex items-center gap-2">
+                                            <span v-if="isProjectUpdating || isProjectUpdateChecking" class="animate-spin">⏳</span>
+                                            <span v-else>⬆️</span>
+                                            更新当前项目（Git）
+                                        </button>
+                                    </div>
+                                    <div class="space-y-4" v-if="projectUpdateStatus">
+                                        <div v-if="projectUpdateStatus.git_available === false" class="text-sm font-medium leading-relaxed rounded-2xl px-4 py-4 border border-amber-200 text-amber-800 bg-amber-50">
+                                            当前环境未检测到 Git。这个区域只适合源码用户；如果你是普通用户，请使用左侧“普通用户更新”里的下载与迁移流程。
+                                        </div>
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4">
+                                                <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">当前分支</div>
+                                                <div class="text-lg font-black text-slate-800 mt-2">{{ projectUpdateStatus.branch || '未知' }}</div>
+                                            </div>
+                                            <div class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4">
+                                                <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">工作区状态</div>
+                                                <div class="text-lg font-black mt-2" :class="projectUpdateStatus.dirty_count > 0 ? 'text-amber-700' : 'text-emerald-700'">{{ projectUpdateStatus.dirty_count > 0 ? `有 ${projectUpdateStatus.dirty_count} 处未提交修改` : '干净' }}</div>
+                                            </div>
+                                        </div>
+                                        <div class="text-sm font-medium leading-relaxed rounded-2xl px-4 py-4 border"
+                                             :class="projectUpdateStatus.can_update ? 'border-emerald-200 text-emerald-800 bg-emerald-50' : 'border-amber-200 text-amber-800 bg-amber-50'">
+                                            {{ projectUpdateStatus.message || '尚未读取 Git 更新状态。' }}
+                                        </div>
+                                        <div class="text-xs text-slate-500 font-mono leading-relaxed break-all">
+                                            本地：{{ projectUpdateStatus.local_head || '-' }}<br>
+                                            远端：{{ projectUpdateStatus.remote_head || '-' }}
+                                        </div>
+                                    </div>
+                                    <div v-else class="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-6 font-medium">
+                                        还没有读取 Git 工作区更新状态。
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200/60">
+                                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
+                                    <div>
+                                        <h4 class="text-lg font-black text-slate-800">本地更新包</h4>
+                                        <p class="text-xs text-slate-500 mt-1">下载的新版本会解压到当前软件目录下的 <code class="font-mono">updates/&lt;版本&gt;/source</code>。</p>
+                                    </div>
+                                    <button @click="fetchUpdatePackages(true)" :disabled="isUpdatePackagesLoading" class="px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 transition-colors text-xs font-black disabled:opacity-50">
+                                        刷新本地包列表
+                                    </button>
+                                </div>
+
+                                <div v-if="updatePackages.length > 0" class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                                    <div v-for="pkg in updatePackages" :key="pkg.version" class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4 shadow-sm space-y-3">
+                                        <div class="flex items-start justify-between gap-3">
+                                            <div>
+                                                <div class="font-black text-slate-800">{{ pkg.version }}</div>
+                                                <div class="text-[11px] text-slate-400 font-mono mt-1 break-all">{{ pkg.extract_dir || '未解压' }}</div>
+                                            </div>
+                                            <span class="px-2.5 py-1 rounded-lg text-[11px] font-black border"
+                                                  :class="pkg.extract_exists ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'">
+                                                {{ pkg.extract_exists ? '已解压' : '未就绪' }}
+                                            </span>
+                                        </div>
+                                        <div class="text-xs text-slate-600 font-medium leading-relaxed">
+                                            zip：<code class="font-mono">{{ pkg.zip_exists ? '已保留' : '已清理' }}</code>
+                                            · 标记：<code class="font-mono">{{ pkg.marker_exists ? '完成' : '无' }}</code>
+                                        </div>
+                                        <div class="flex flex-wrap gap-3">
+                                            <button @click="migrateUpdatePackage(pkg)" :disabled="migratingUpdateVersion === pkg.version || !pkg.extract_exists" class="px-4 py-2.5 rounded-xl border border-sky-200 bg-sky-600 text-white hover:bg-sky-700 transition-colors text-sm font-black disabled:opacity-50 flex items-center gap-2">
+                                                <span v-if="migratingUpdateVersion === pkg.version" class="animate-spin">⏳</span>
+                                                <span v-else>📦</span>
+                                                迁移当前配置
+                                            </button>
+                                            <button @click="copyText(pkg.extract_dir || '', '更新目录已复制')" :disabled="!pkg.extract_dir" class="px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 transition-colors text-sm font-black disabled:opacity-50">
+                                                复制目录
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div v-else class="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-6 font-medium">
+                                    当前还没有本地更新包。先点击上面的“检查并下载更新包”。
                                 </div>
                             </div>
                         </div>

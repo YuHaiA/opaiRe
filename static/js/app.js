@@ -4,9 +4,11 @@ createApp({
     data() {
         return {
             appVersion: 'v10.1.1-bfansye-hotfix1',
+            versionPageUrl: 'https://github.com/YuHaiA/opaiRe/tags',
             isLoggedIn: !!localStorage.getItem('auth_token'),
             loginPassword: '',
             currentTab: window.location.hash.replace('#', '') || 'console',
+            proxySubTab: 'general',
 			showAccountsPlaintext: false,
             isRunning: false,
             tabs: [
@@ -20,7 +22,15 @@ createApp({
                 { id: 'proxy', name: '网络代理', icon: '🌐' },
                 { id: 'relay', name: '中转管仓', icon: '☁️' },
                 { id: 'notify', name: '消息通知', icon: '📢' },
+                { id: 'update', name: '更新中心', icon: '🧩' },
                 { id: 'concurrency', name: '并发与系统', icon: '⚙️' }
+            ],
+            proxySubTabs: [
+                { id: 'general', name: '通用', icon: '🧭' },
+                { id: 'clash', name: 'Clash', icon: '🛰️' },
+                { id: 'v2rayn', name: 'v2rayN', icon: '🪟' },
+                { id: 'v2raya', name: 'v2rayA', icon: '🧩' },
+                { id: 'httpDynamic', name: 'HTTP 动态', icon: '🚪' }
             ],
 			cfGlobalStatus: null,
 			isLoadingSync: false,
@@ -65,6 +75,20 @@ createApp({
             isProxyBatchChecking: false,
             isV2raynSubscriptionUpdating: false,
             isV2rayATesting: false,
+            isUpdatePackageDownloading: false,
+            isUpdatePackagesLoading: false,
+            migratingUpdateVersion: '',
+            isProjectUpdateChecking: false,
+            isProjectUpdating: false,
+            isV2rayAInspecting: false,
+            isV2rayANodesLoading: false,
+            isV2rayALatencyLoading: false,
+            switchingV2rayANodeKey: '',
+            v2rayARuntime: null,
+            v2rayANodes: [],
+            v2rayAStatusMessage: '',
+            projectUpdateStatus: null,
+            updatePackages: [],
             accounts: [],
             selectedAccounts: [],
 			currentPage: 1,
@@ -94,7 +118,8 @@ createApp({
                 tmailor_token: false,
                 fvia_token: false,
                 master_rt: false,
-                clash_sub: false
+                clash_sub: false,
+                v2raya_password: false
             },
 
             toasts: [],
@@ -231,8 +256,11 @@ createApp({
             if (this.config && this.config.reg_mode === 'extension') {
                 this.listenToExtension();
             }
-            if (this.currentTab === 'proxy' && this.config?.clash_proxy_pool?.client_type === 'clash') {
-                this.fetchClashPoolInfo();
+            if (this.currentTab === 'proxy') {
+                this.loadProxyTabData();
+            }
+            if (this.currentTab === 'update') {
+                this.loadUpdateCenterData(false);
             }
         },
         async fetchWebProcessInfo() {
@@ -260,6 +288,42 @@ createApp({
                 this.showToast(successMessage, 'success');
             } catch (e) {
                 this.showToast('复制失败，请手动复制', 'error');
+            }
+        },
+        openProjectVersionPage(url = '') {
+            window.open(url || this.versionPageUrl, '_blank');
+        },
+        async triggerUpdateDownload(url = '', version = '') {
+            const finalUrl = url || this.updateInfo.url;
+            const finalVersion = version || this.updateInfo.version;
+            if (!finalUrl || !finalVersion) {
+                this.showToast('当前没有可下载的更新包', 'warning');
+                return;
+            }
+            this.isUpdatePackageDownloading = true;
+            try {
+                const res = await this.authFetch('/api/system/download_update_package', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        version: finalVersion,
+                        download_url: finalUrl
+                    })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    const extractDir = data.data?.extract_dir || '';
+                    const suffix = extractDir ? `\n\n解压目录：${extractDir}` : '';
+                    const confirmed = await this.customConfirm(`${data.message || '更新包已下载完成。'}${suffix}`);
+                    if (confirmed && extractDir) {
+                        await this.copyText(extractDir, '更新目录已复制');
+                    }
+                } else {
+                    this.showToast(data.message || '下载更新包失败', 'error');
+                }
+            } catch (e) {
+                this.showToast('下载更新包失败，请检查后端日志', 'error');
+            } finally {
+                this.isUpdatePackageDownloading = false;
             }
         },
         startStatsPolling() {
@@ -392,6 +456,11 @@ createApp({
                 }
                 if (this.config.clash_proxy_pool.client_type === undefined) this.config.clash_proxy_pool.client_type = 'clash';
                 if (this.config.clash_proxy_pool.v2raya_url === undefined) this.config.clash_proxy_pool.v2raya_url = '';
+                if (this.config.clash_proxy_pool.v2raya_username === undefined) this.config.clash_proxy_pool.v2raya_username = '';
+                if (this.config.clash_proxy_pool.v2raya_password === undefined) this.config.clash_proxy_pool.v2raya_password = '';
+                if (this.config.clash_proxy_pool.v2raya_xray_bin === undefined) this.config.clash_proxy_pool.v2raya_xray_bin = '';
+                if (this.config.clash_proxy_pool.v2raya_assets_dir === undefined) this.config.clash_proxy_pool.v2raya_assets_dir = '';
+                if (this.config.clash_proxy_pool.v2raya_env_file === undefined) this.config.clash_proxy_pool.v2raya_env_file = '';
                 if (this.config.clash_proxy_pool.v2rayn_base_dir === undefined) this.config.clash_proxy_pool.v2rayn_base_dir = '';
                 if (this.config.clash_proxy_pool.v2rayn_restart_wait_sec === undefined) this.config.clash_proxy_pool.v2rayn_restart_wait_sec = 15;
                 if (this.config.clash_proxy_pool.v2rayn_hide_window_on_restart === undefined) this.config.clash_proxy_pool.v2rayn_hide_window_on_restart = true;
@@ -413,6 +482,9 @@ createApp({
                 if (this.config.cluster_node_name === undefined) this.config.cluster_node_name = '';
                 if (this.config.cluster_master_url === undefined) this.config.cluster_master_url = '';
                 if (this.config.cluster_secret === undefined) this.config.cluster_secret = 'change-me-cluster-secret';
+                if (!this.proxySubTabs.some(item => item.id === this.proxySubTab)) {
+                    this.proxySubTab = 'general';
+                }
             } catch (e) {}
         },
         async fetchClashPoolInfo() {
@@ -500,7 +572,38 @@ createApp({
                 this.showToast('已自动关闭 Clash 智能切点，避免与 HTTP 动态代理池同时开启', 'warning');
             }
         },
-        async saveConfig() {
+        getProxyClientTab(clientType) {
+            const key = String(clientType || '').trim().toLowerCase();
+            if (key === 'v2rayn') return 'v2rayn';
+            if (key === 'v2raya') return 'v2raya';
+            return 'clash';
+        },
+        switchProxySubTab(tabId) {
+            this.proxySubTab = tabId;
+            if (tabId === 'clash') {
+                this.fetchClashPoolInfo();
+            }
+            if (tabId === 'v2raya') {
+                this.inspectV2rayAEnvironment(false);
+                this.fetchV2rayANodes(false, false);
+            }
+        },
+        loadProxyTabData() {
+            if (!this.config?.clash_proxy_pool) return;
+            if (this.proxySubTab === 'clash' || this.config.clash_proxy_pool.client_type === 'clash') {
+                this.fetchClashPoolInfo();
+            }
+            if (this.proxySubTab === 'v2raya') {
+                this.inspectV2rayAEnvironment(false);
+                this.fetchV2rayANodes(false, false);
+            }
+        },
+        handleProxyClientTypeChange() {
+            if (!this.config?.clash_proxy_pool) return;
+            this.proxySubTab = this.getProxyClientTab(this.config.clash_proxy_pool.client_type);
+            this.loadProxyTabData();
+        },
+        async saveConfig(showSuccess = true) {
             try {
                 if(this.config.clash_proxy_pool) {
                     this.config.clash_proxy_pool.blacklist = this.blacklistStr.split('\n').map(s => s.trim()).filter(s => s);
@@ -515,7 +618,9 @@ createApp({
                 });
                 const data = await res.json();
                 if(data.status === 'success') {
-                    this.showToast(data.message, "success");
+                    if (showSuccess) {
+                        this.showToast(data.message, "success");
+                    }
                     await this.fetchConfig();
                     this.pollStats();
                 } else { this.showToast("保存失败：" + data.message, "error"); }
@@ -534,7 +639,7 @@ createApp({
             this.currentTab = 'console';
             this.showToast(refreshSubscription ? '正在更新订阅并重新筛选可用节点...' : '正在重新筛选可用节点...', 'info');
             try {
-                await this.saveConfig();
+                await this.saveConfig(false);
                 const suffix = refreshSubscription ? '?refresh_subscription=true' : '';
                 const res = await this.authFetch(`/api/proxy/v2rayn/precheck${suffix}`, { method: 'POST' });
                 const data = await res.json();
@@ -554,7 +659,7 @@ createApp({
             this.isV2raynSubscriptionUpdating = true;
             this.showToast('正在更新 v2rayN 订阅...', 'info');
             try {
-                await this.saveConfig();
+                await this.saveConfig(false);
                 const res = await this.authFetch('/api/proxy/v2rayn/update_subscription', { method: 'POST' });
                 const data = await res.json();
                 const level = data.status === 'success' ? 'success' : (data.status === 'warning' ? 'warning' : 'error');
@@ -563,6 +668,31 @@ createApp({
                 this.showToast('v2rayN 订阅更新请求失败', 'error');
             } finally {
                 this.isV2raynSubscriptionUpdating = false;
+            }
+        },
+        async runV2rayAPrecheck() {
+            if (this.isRunning) {
+                this.showToast('请先停止当前运行的任务', 'warning');
+                return;
+            }
+            if (!this.config?.clash_proxy_pool || this.config.clash_proxy_pool.client_type !== 'v2raya') {
+                this.showToast('当前不是 v2rayA 模式', 'warning');
+                return;
+            }
+            this.isProxyBatchChecking = true;
+            this.currentTab = 'console';
+            this.showToast('正在重新筛选 v2rayA 可用节点...', 'info');
+            try {
+                await this.saveConfig(false);
+                const res = await this.authFetch('/api/proxy/v2raya/precheck', { method: 'POST' });
+                const data = await res.json();
+                const level = data.status === 'success' ? 'success' : (data.status === 'warning' ? 'warning' : 'error');
+                this.showToast(data.message || 'v2rayA 可用节点筛选已完成', level);
+                await this.fetchV2rayANodes(false, false);
+            } catch (e) {
+                this.showToast('v2rayA 节点筛选请求失败', 'error');
+            } finally {
+                this.isProxyBatchChecking = false;
             }
         },
         openV2rayAPanel() {
@@ -580,7 +710,7 @@ createApp({
             }
             this.isV2rayATesting = true;
             try {
-                await this.saveConfig();
+                await this.saveConfig(false);
                 const res = await this.authFetch('/api/proxy/v2raya/test_current', { method: 'POST' });
                 const data = await res.json();
                 const level = data.status === 'success' ? 'success' : (data.status === 'warning' ? 'warning' : 'error');
@@ -589,6 +719,134 @@ createApp({
                 this.showToast('v2rayA 当前链路检测失败', 'error');
             } finally {
                 this.isV2rayATesting = false;
+            }
+        },
+        async inspectV2rayAEnvironment(showToast = true) {
+            if (!this.config?.clash_proxy_pool || this.config.clash_proxy_pool.client_type !== 'v2raya') {
+                if (showToast) {
+                    this.showToast('当前不是 v2rayA 模式', 'warning');
+                }
+                return;
+            }
+            this.isV2rayAInspecting = true;
+            try {
+                await this.saveConfig(false);
+                const res = await this.authFetch('/api/proxy/v2raya/inspect', { method: 'POST' });
+                const data = await res.json();
+                this.v2rayARuntime = data.data || null;
+                if (showToast) {
+                    const level = data.status === 'success' ? 'success' : (data.status === 'warning' ? 'warning' : 'error');
+                    this.showToast(data.message || 'v2rayA 环境检测已完成', level);
+                }
+            } catch (e) {
+                if (showToast) {
+                    this.showToast('v2rayA 环境检测失败', 'error');
+                }
+            } finally {
+                this.isV2rayAInspecting = false;
+            }
+        },
+        getV2rayANodeKey(node) {
+            if (!node) return '';
+            return [node.node_type || 'server', node.subscription_id || '-', node.node_id || node.name || 'unknown'].join(':');
+        },
+        formatV2rayALatency(node) {
+            if (!node || node.latency_ms === null || node.latency_ms === undefined || node.latency_ms === '') {
+                return '--';
+            }
+            const value = Number(node.latency_ms);
+            if (Number.isNaN(value)) {
+                return String(node.latency_ms);
+            }
+            return `${value.toFixed(value >= 100 ? 0 : 1)} ms`;
+        },
+        sortV2rayANodes(nodes) {
+            return [...(nodes || [])].sort((a, b) => {
+                if (!!a.is_current !== !!b.is_current) return a.is_current ? -1 : 1;
+                const aLatency = Number.isFinite(Number(a.latency_ms)) ? Number(a.latency_ms) : Number.POSITIVE_INFINITY;
+                const bLatency = Number.isFinite(Number(b.latency_ms)) ? Number(b.latency_ms) : Number.POSITIVE_INFINITY;
+                if (aLatency !== bLatency) return aLatency - bLatency;
+                const aSub = String(a.subscription_name || '');
+                const bSub = String(b.subscription_name || '');
+                if (aSub !== bSub) return aSub.localeCompare(bSub, 'zh-CN');
+                return String(a.name || a.address || a.node_id || '').localeCompare(String(b.name || b.address || b.node_id || ''), 'zh-CN');
+            });
+        },
+        async fetchV2rayANodes(withLatency = false, showToast = true) {
+            if (!this.config?.clash_proxy_pool || this.config.clash_proxy_pool.client_type !== 'v2raya') {
+                if (showToast) {
+                    this.showToast('当前不是 v2rayA 模式', 'warning');
+                }
+                return;
+            }
+            this.isV2rayANodesLoading = !withLatency;
+            if (withLatency) {
+                this.isV2rayALatencyLoading = true;
+            }
+            try {
+                await this.saveConfig(false);
+                const suffix = withLatency ? '?with_latency=true' : '';
+                const res = await this.authFetch(`/api/proxy/v2raya/nodes${suffix}`);
+                const data = await res.json();
+                if (data.status === 'success' || data.status === 'warning') {
+                    const payload = data.data || {};
+                    this.v2rayANodes = this.sortV2rayANodes(Array.isArray(payload.nodes) ? payload.nodes : []);
+                    this.v2rayAStatusMessage = payload.message || '';
+                    if (payload.runtime) {
+                        this.v2rayARuntime = payload.runtime;
+                    }
+                    if (showToast) {
+                        const level = data.status === 'success' ? 'success' : 'warning';
+                        this.showToast(data.message || (withLatency ? 'v2rayA 节点延迟已刷新' : 'v2rayA 节点列表已刷新'), level);
+                    }
+                } else if (showToast) {
+                    this.showToast(data.message || '读取 v2rayA 节点列表失败', 'error');
+                }
+            } catch (e) {
+                if (showToast) {
+                    this.showToast(withLatency ? '读取 v2rayA 节点延迟失败' : '读取 v2rayA 节点列表失败', 'error');
+                }
+            } finally {
+                this.isV2rayANodesLoading = false;
+                this.isV2rayALatencyLoading = false;
+            }
+        },
+        async switchV2rayANode(node) {
+            if (!node) return;
+            if (!this.config?.clash_proxy_pool || this.config.clash_proxy_pool.client_type !== 'v2raya') {
+                this.showToast('当前不是 v2rayA 模式', 'warning');
+                return;
+            }
+            const nodeKey = this.getV2rayANodeKey(node);
+            this.switchingV2rayANodeKey = nodeKey;
+            try {
+                await this.saveConfig(false);
+                const res = await this.authFetch('/api/proxy/v2raya/switch', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        node_id: node.node_id || '',
+                        node_type: node.node_type || 'subscriptionServer',
+                        subscription_id: node.subscription_id || '',
+                        node_name: node.name || ''
+                    })
+                });
+                const data = await res.json();
+                if (data.status === 'success' || data.status === 'warning') {
+                    const payload = data.data || {};
+                    this.v2rayANodes = this.sortV2rayANodes(Array.isArray(payload.nodes) ? payload.nodes : this.v2rayANodes);
+                    this.v2rayAStatusMessage = payload.message || this.v2rayAStatusMessage;
+                    if (payload.runtime) {
+                        this.v2rayARuntime = payload.runtime;
+                    }
+                    const level = data.status === 'success' ? 'success' : 'warning';
+                    this.showToast(data.message || 'v2rayA 节点切换已提交', level);
+                } else {
+                    this.showToast(data.message || 'v2rayA 节点切换失败', 'error');
+                }
+            } catch (e) {
+                this.showToast('v2rayA 节点切换失败', 'error');
+            } finally {
+                this.switchingV2rayANodeKey = '';
             }
         },
 		async fetchAccounts(isManual = false) {
@@ -635,11 +893,14 @@ createApp({
             if (tabId === 'accounts') {
                 this.fetchAccounts();
             }
-			if (tabId === 'email') {
+            if (tabId === 'email') {
 				this.fetchConfig();
 			}
-            if (tabId === 'proxy' && this.config?.clash_proxy_pool?.client_type === 'clash') {
-                this.fetchClashPoolInfo();
+            if (tabId === 'proxy') {
+                this.loadProxyTabData();
+            }
+            if (tabId === 'update') {
+                this.loadUpdateCenterData(false);
             }
 			if (tabId === 'cloud') {
 			    this.fetchCloudAccounts();
@@ -1643,34 +1904,177 @@ createApp({
             try {
                 const res = await this.authFetch(`/api/system/check_update?current_version=${this.appVersion}`);
                 const data = await res.json();
+                const downloadUrl = data.download_url || '';
+                const versionPageUrl = data.version_page_url || data.html_url || this.versionPageUrl;
 
                 if (data.status === 'success') {
+                    this.versionPageUrl = versionPageUrl;
                     if (data.has_update) {
                         this.updateInfo = {
                             hasUpdate: true,
                             version: data.remote_version,
-                            url: data.html_url || data.download_url || 'https://github.com/wenfxl/openai-cpa/releases/latest',
+                            url: downloadUrl,
                             changelog: data.changelog
                         };
                         if (isManual) {
-                            this.promptUpdate();
+                            await this.promptUpdate();
                         }
                     } else if (isManual) {
-                        this.showToast("当前已是最新版本！", "success");
+                        this.updateInfo = { hasUpdate: false, version: '', url: '', changelog: '' };
+                        this.showToast(`当前已是最新版本：${this.appVersion}`, 'success');
                     }
                 } else {
-                    if (isManual) this.showToast(data.message || "检查更新失败", "error");
+                    if (isManual) this.showToast(`${data.message || "检查更新失败"}。可点击左上角版本号查看线上版本页。`, "error");
+                    this.versionPageUrl = versionPageUrl;
                 }
             } catch (e) {
-                if (isManual) this.showToast("检查更新请求失败，请检查网络", "error");
+                if (isManual) this.showToast("检查更新请求失败，请检查网络。可点击左上角版本号查看线上版本页。", "error");
             }
         },
         async promptUpdate() {
             if (!this.updateInfo.hasUpdate) return;
-            const msg = `🚀 发现新版本: ${this.updateInfo.version}\n\n📝 更新内容:\n${this.updateInfo.changelog}\n\n是否前往 GitHub 查看并下载更新？`;
+            const msg = `🚀 发现新版本: ${this.updateInfo.version}\n\n📝 更新信息:\n${this.updateInfo.changelog}\n\n是否下载到当前软件目录下的 updates/${this.updateInfo.version} 并自动解压？`;
             const confirmed = await this.customConfirm(msg);
             if (confirmed) {
-                window.open(this.updateInfo.url, '_blank');
+                await this.triggerUpdateDownload(this.updateInfo.url, this.updateInfo.version);
+                await this.fetchUpdatePackages(false);
+            }
+        },
+        async fetchUpdatePackages(showSuccess = false) {
+            this.isUpdatePackagesLoading = true;
+            try {
+                const res = await this.authFetch('/api/system/update_packages');
+                const data = await res.json();
+                if (data.status === 'success') {
+                    this.updatePackages = Array.isArray(data.data?.packages) ? data.data.packages : [];
+                    if (showSuccess) {
+                        this.showToast(data.message || '本地更新包列表已刷新', 'success');
+                    }
+                } else if (showSuccess) {
+                    this.showToast(data.message || '读取本地更新包列表失败', 'error');
+                }
+                return data;
+            } catch (e) {
+                if (showSuccess) {
+                    this.showToast('读取本地更新包列表失败', 'error');
+                }
+                return { status: 'error', message: '读取本地更新包列表失败' };
+            } finally {
+                this.isUpdatePackagesLoading = false;
+            }
+        },
+        async loadUpdateCenterData(showSuccess = false) {
+            await this.checkUpdate(false);
+            await this.inspectProjectUpdate(false);
+            await this.fetchUpdatePackages(showSuccess);
+        },
+        async inspectProjectUpdate(showSuccess = false) {
+            this.isProjectUpdateChecking = true;
+            try {
+                const res = await this.authFetch('/api/system/project_update_status');
+                const data = await res.json();
+                this.projectUpdateStatus = data.data || null;
+                if (showSuccess) {
+                    const level = data.status === 'success' ? 'success' : (data.status === 'warning' ? 'warning' : 'error');
+                    this.showToast(data.message || '项目更新状态已读取', level);
+                }
+                return data;
+            } catch (e) {
+                if (showSuccess) {
+                    this.showToast('读取项目更新状态失败', 'error');
+                }
+                return { status: 'error', message: '读取项目更新状态失败' };
+            } finally {
+                this.isProjectUpdateChecking = false;
+            }
+        },
+        async updateCurrentProject() {
+            if (this.isRunning) {
+                this.showToast('请先停止当前运行的任务', 'warning');
+                return;
+            }
+            const inspect = await this.inspectProjectUpdate(false);
+            if (inspect.status !== 'success') {
+                this.showToast(inspect.message || '当前不满足项目内更新条件', inspect.status === 'warning' ? 'warning' : 'error');
+                return;
+            }
+            const current = inspect.data || {};
+            const summary = [
+                `当前分支：${current.branch || '未知'}`,
+                `本地提交：${(current.local_head || '').slice(0, 7) || '未知'}`,
+                `远端提交：${(current.remote_head || '').slice(0, 7) || '未知'}`,
+                '',
+                '满足 fast-forward 更新条件，是否立即更新当前项目并自动重启？'
+            ].join('\n');
+            const confirmed = await this.customConfirm(summary);
+            if (!confirmed) return;
+
+            this.isProjectUpdating = true;
+            try {
+                this.showToast('正在执行 git fast-forward 更新...', 'info');
+                const res = await this.authFetch('/api/system/update_project', {
+                    method: 'POST',
+                    body: JSON.stringify({ restart_after_update: true })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    this.showToast(data.message || '当前项目已更新，系统即将重启...', 'success');
+                    if (this.statsTimer) clearInterval(this.statsTimer);
+                    if (this.evtSource) this.evtSource.close();
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 8000);
+                } else {
+                    const level = data.status === 'warning' ? 'warning' : 'error';
+                    this.showToast(data.message || '当前项目更新失败', level);
+                }
+            } catch (e) {
+                this.showToast('当前项目更新失败，请检查后端日志', 'error');
+            } finally {
+                this.isProjectUpdating = false;
+            }
+        },
+        async migrateUpdatePackage(pkg) {
+            if (!pkg?.version) return;
+            if (this.isRunning) {
+                this.showToast('请先停止当前运行的任务', 'warning');
+                return;
+            }
+            const summary = [
+                `目标版本：${pkg.version}`,
+                `解压目录：${pkg.extract_dir || '未知'}`,
+                '',
+                '将把当前项目的 data 目录复制到该版本目录下。',
+                '会自动删除当前版本 zip 包，并清理其他旧 updates 缓存。',
+                '',
+                '确定继续吗？'
+            ].join('\n');
+            const confirmed = await this.customConfirm(summary);
+            if (!confirmed) return;
+
+            this.migratingUpdateVersion = pkg.version;
+            try {
+                const res = await this.authFetch('/api/system/migrate_update_package', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        version: pkg.version,
+                        cleanup_zip: true,
+                        cleanup_other_versions: true
+                    })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    const copiedFiles = data.data?.copied_files ?? 0;
+                    const removedCount = Array.isArray(data.data?.removed_paths) ? data.data.removed_paths.length : 0;
+                    this.showToast(`迁移完成：复制 ${copiedFiles} 个文件，清理 ${removedCount} 个缓存路径`, 'success');
+                    await this.fetchUpdatePackages(false);
+                } else {
+                    this.showToast(data.message || '迁移更新包配置失败', data.status === 'warning' ? 'warning' : 'error');
+                }
+            } catch (e) {
+                this.showToast('迁移更新包配置失败，请检查后端日志', 'error');
+            } finally {
+                this.migratingUpdateVersion = '';
             }
         },
         async getGmailAuthUrl() {
