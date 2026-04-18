@@ -16,6 +16,16 @@
 .\release.ps1 -Version v10.1.6 -UpstreamVersion v10.1.1 -CreateCommit -CreateTag -Push
 ```
 
+## 自动 Release
+
+仓库现在已内置 GitHub Actions 工作流：
+
+- 工作流文件：`.github/workflows/release.yml`
+- 触发条件：推送符合 `v*` 的 tag
+- 行为：自动创建对应版本的 GitHub Release，并生成基础发布说明
+
+也就是说，以后只要把新 tag 推到远程，GitHub 就会自动补出 Release 页面。
+
 ## 脚本会做什么
 
 - 校验当前分支必须是 `main`
@@ -29,7 +39,7 @@
 - 本仓库独立版本：`VERSION`
 - 上游对齐基线：`UPSTREAM_VERSION`
 
-网页“检查更新”现在读取 GitHub 上最新的 `tag`，并直接下载该 tag 对应的源码压缩包。
+网页“检查更新”现在会优先读取 GitHub 上最新的 Release；如果 Release 不可用，再回退读取最新 tag，并下载对应源码压缩包。
 
 ## 注意
 

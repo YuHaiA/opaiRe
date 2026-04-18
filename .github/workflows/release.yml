@@ -1,0 +1,47 @@
+name: Auto Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          make_latest: true
+          append_body: true
+          body: |
+            ## 自动发布说明
+
+            该 Release 由 GitHub Actions 在检测到版本 tag 推送后自动创建。
+
+            ### 版本信息
+
+            - 版本标签：`${{ github.ref_name }}`
+            - 发布时间：由 GitHub 自动记录
+
+            ### 更新方式
+
+            - 普通用户：可在项目“更新中心”中检查版本，并把更新包下载到本地 `updates/` 目录后再迁移配置
+            - 开发者：可继续使用 Git 工作区更新；更新中心会优先读取 Release，失败时再回退到 tag
+
+            ### 下载说明
+
+            - 本页面默认提供 GitHub 自动生成的源码压缩包
+            - 如果后续仓库增加独立附件，亦会展示在该 Release 页面
+
+            ### 备注
+
+            - 本 Release 基于 tag 自动生成
+            - 如果需要补充人工整理的更新摘要，可在 Release 页面后续手动编辑

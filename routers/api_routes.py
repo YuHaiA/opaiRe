@@ -2998,9 +2998,44 @@ def get_sub2api_groups(token: str = Depends(verify_token)):
 
 @router.get("/api/system/check_update")
 async def check_update(current_version: str, token: str = Depends(verify_token)):
-    version_page_url = f"https://github.com/{GITHUB_UPDATE_REPO}/tags"
+    release_page_url = f"https://github.com/{GITHUB_UPDATE_REPO}/releases/latest"
+    tags_page_url = f"https://github.com/{GITHUB_UPDATE_REPO}/tags"
+
+    def _parse(v):
+        return [int(x) for x in re.findall(r'\d+', str(v))]
+
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
+            common_headers = {
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": f"opaiRe/{current_version or 'unknown'}"
+            }
+
+            release_resp = await client.get(
+                f"https://api.github.com/repos/{GITHUB_UPDATE_REPO}/releases/latest",
+                headers=common_headers,
+            )
+            if release_resp.status_code == 200:
+                release_data = release_resp.json() or {}
+                release_version = str(release_data.get("tag_name", "") or "").strip()
+                if release_version:
+                    has_update = _parse(release_version) > _parse(current_version) if release_version else False
+                    assets = release_data.get("assets") or []
+                    asset_url = ""
+                    if assets and isinstance(assets, list):
+                        asset_url = str((assets[0] or {}).get("browser_download_url", "") or "").strip()
+                    download_url = asset_url or f"https://github.com/{GITHUB_UPDATE_REPO}/archive/refs/tags/{release_version}.zip"
+                    return {
+                        "status": "success",
+                        "has_update": has_update,
+                        "remote_version": release_version,
+                        "changelog": str(release_data.get("body", "") or "当前使用 GitHub Release 检查更新。"),
+                        "download_url": download_url,
+                        "html_url": str(release_data.get("html_url", "") or release_page_url).strip(),
+                        "version_page_url": str(release_data.get("html_url", "") or release_page_url).strip(),
+                        "source": "release",
+                    }
+
             resp = await client.get(
                 f"https://api.github.com/repos/{GITHUB_UPDATE_REPO}/tags?per_page=100",
                 headers={
@@ -3011,13 +3046,10 @@ async def check_update(current_version: str, token: str = Depends(verify_token))
             if resp.status_code != 200:
                 return {
                     "status": "error",
-                    "message": f"无法获取版本标签数据 (GitHub API 返回 HTTP {resp.status_code})",
-                    "version_page_url": version_page_url,
+                    "message": f"无法获取版本数据 (Release HTTP {release_resp.status_code}，Tag HTTP {resp.status_code})",
+                    "version_page_url": tags_page_url,
                 }
         tags = resp.json() or []
-
-        def _parse(v):
-            return [int(x) for x in re.findall(r'\d+', str(v))]
 
         latest_tag = ""
         latest_item = None
@@ -3038,7 +3070,7 @@ async def check_update(current_version: str, token: str = Depends(verify_token))
             return {
                 "status": "error",
                 "message": "未读取到可用版本标签，请先在 GitHub 仓库创建规范的版本 tag。",
-                "version_page_url": version_page_url,
+                "version_page_url": tags_page_url,
             }
 
         download_url = f"https://github.com/{GITHUB_UPDATE_REPO}/archive/refs/tags/{remote_version}.zip"
@@ -3048,16 +3080,17 @@ async def check_update(current_version: str, token: str = Depends(verify_token))
             "status": "success",
             "has_update": has_update,
             "remote_version": remote_version,
-            "changelog": f"当前使用 Git tag 检查更新。最新版本标签：{remote_version}{'，提交：' + commit_sha[:7] if commit_sha else ''}",
+            "changelog": f"当前使用 Git tag 回退检查更新。最新版本标签：{remote_version}{'，提交：' + commit_sha[:7] if commit_sha else ''}",
             "download_url": download_url,
             "html_url": html_url,
-            "version_page_url": version_page_url,
+            "version_page_url": tags_page_url,
+            "source": "tag",
         }
     except Exception as e:
         return {
             "status": "error",
             "message": f"检查更新发生未知异常: {str(e)}",
-            "version_page_url": version_page_url,
+            "version_page_url": tags_page_url,
         }
 
 @router.post("/api/logs/clear")
