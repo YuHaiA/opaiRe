@@ -1,9 +1,9 @@
-﻿const { createApp } = Vue;
+const { createApp } = Vue;
 
 createApp({
     data() {
         return {
-            appVersion: 'v10.1.1-opaiRe',
+            appVersion: 'v10.1.2',
             versionPageUrl: 'https://github.com/YuHaiA/opaiRe/releases/latest',
             isLoggedIn: !!localStorage.getItem('auth_token'),
             loginPassword: '',
@@ -2539,5 +2539,6 @@ createApp({
         },
     }
 }).mount('#app');
+
 
 
