@@ -282,6 +282,8 @@ sub2api_mode:
   account_rate_multiplier: 1.0
   account_group_ids: ""
   enable_ws_mode: true
+  account_page_size: 20
+  account_fetch_timeout: 45
 
 hero_sms:
   enabled: false

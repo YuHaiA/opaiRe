@@ -2,7 +2,7 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from utils import config as cfg
 
 from curl_cffi import requests as cffi_requests
@@ -21,6 +21,51 @@ class Sub2APIClient:
             "timeout": 15,
             "impersonate": "chrome110",
         }
+        proxy_url = str(getattr(cfg, "DEFAULT_PROXY", "") or "").strip()
+        if proxy_url:
+            self.request_kwargs["proxies"] = {
+                "http": proxy_url,
+                "https": proxy_url,
+            }
+
+    @staticmethod
+    def _as_int(value: Any, default: int, minimum: int) -> int:
+        try:
+            return max(minimum, int(value))
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _is_timeout_like_error(error: Any) -> bool:
+        text = str(error or "").lower()
+        return any(
+            token in text
+            for token in (
+                "timeout",
+                "timed out",
+                "connection timed out",
+                "recv failure",
+                "connection reset",
+                "proxyconnect tcp",
+            )
+        )
+
+    def _get_account_page_size(self) -> int:
+        raw = getattr(cfg, "SUB2API_ACCOUNT_PAGE_SIZE", 20)
+        return self._as_int(raw, 20, 1)
+
+    def _get_account_fetch_timeout(self) -> int:
+        raw = getattr(cfg, "SUB2API_ACCOUNT_FETCH_TIMEOUT", 45)
+        return self._as_int(raw, 45, 5)
+
+    def _build_request_kwargs(self, timeout: Optional[int] = None) -> Dict[str, Any]:
+        kwargs = self.request_kwargs.copy()
+        kwargs["timeout"] = self._as_int(
+            timeout if timeout is not None else self._get_account_fetch_timeout(),
+            self._get_account_fetch_timeout(),
+            5,
+        )
+        return kwargs
 
     def _handle_response(
         self,
@@ -172,14 +217,29 @@ class Sub2APIClient:
         except Exception as exc:
             return False, f"Network request failed: {exc}"
 
-    def get_accounts(self, page: int = 1, page_size: int = 50) -> Tuple[bool, Any]:
+    def get_accounts(
+        self,
+        page: int = 1,
+        page_size: Optional[int] = None,
+        timeout: Optional[int] = None,
+    ) -> Tuple[bool, Any]:
         url = f"{self.api_url}/api/v1/admin/accounts"
+        resolved_page_size = self._as_int(
+            page_size if page_size is not None else self._get_account_page_size(),
+            self._get_account_page_size(),
+            1,
+        )
         params = {
             "page": page,
-            "page_size": page_size,
+            "page_size": resolved_page_size,
         }
         try:
-            response = cffi_requests.get(url, headers=self.headers, params=params, **self.request_kwargs)
+            response = cffi_requests.get(
+                url,
+                headers=self.headers,
+                params=params,
+                **self._build_request_kwargs(timeout),
+            )
             return self._handle_response(response)
         except cffi_requests.exceptions.Timeout as exc:
             logger.error("Get Sub2API accounts timed out: %s", exc)
@@ -191,12 +251,46 @@ class Sub2APIClient:
             logger.error("Get Sub2API accounts failed: %s", exc)
             return False, str(exc)
 
-    def get_all_accounts(self, page_size: int = 100) -> Tuple[bool, Any]:
+    def get_all_accounts(self, page_size: Optional[int] = None) -> Tuple[bool, Any]:
         all_items: List[dict] = []
         page = 1
+        resolved_page_size = self._as_int(
+            page_size if page_size is not None else self._get_account_page_size(),
+            self._get_account_page_size(),
+            1,
+        )
+        resolved_timeout = self._get_account_fetch_timeout()
+        fallback_page_sizes = [
+            size for size in (resolved_page_size, 20, 10, 5)
+            if size <= resolved_page_size and size >= 1
+        ]
+        fallback_page_sizes = list(dict.fromkeys(fallback_page_sizes))
 
         while True:
-            ok, data = self.get_accounts(page=page, page_size=page_size)
+            ok, data = self.get_accounts(
+                page=page,
+                page_size=resolved_page_size,
+                timeout=resolved_timeout,
+            )
+            if not ok and page == 1 and self._is_timeout_like_error(data):
+                for fallback_size in fallback_page_sizes[1:]:
+                    fallback_timeout = min(90, max(resolved_timeout + 15, 30))
+                    logger.warning(
+                        "Sub2API accounts page 1 timed out with page_size=%s timeout=%ss; retrying with page_size=%s timeout=%ss",
+                        resolved_page_size,
+                        resolved_timeout,
+                        fallback_size,
+                        fallback_timeout,
+                    )
+                    ok, data = self.get_accounts(
+                        page=1,
+                        page_size=fallback_size,
+                        timeout=fallback_timeout,
+                    )
+                    if ok:
+                        resolved_page_size = fallback_size
+                        resolved_timeout = fallback_timeout
+                        break
             if not ok:
                 if page == 1:
                     return False, data
@@ -215,7 +309,9 @@ class Sub2APIClient:
             all_items.extend(items)
 
             total = inner.get("total", 0)
-            if len(all_items) >= total:
+            if total and len(all_items) >= total:
+                break
+            if not total and len(items) < resolved_page_size:
                 break
 
             page += 1
