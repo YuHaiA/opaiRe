@@ -3,7 +3,7 @@ const { createApp } = Vue;
 createApp({
     data() {
         return {
-            appVersion: 'v10.1.6',
+            appVersion: 'v10.1.7',
             versionPageUrl: 'https://github.com/YuHaiA/opaiRe/releases/latest',
             isLoggedIn: !!localStorage.getItem('auth_token'),
             loginPassword: '',
@@ -159,6 +159,10 @@ createApp({
             currentCloudDetail: null,
             nowTimestamp: Math.floor(Date.now() / 1000),
             clusterNodes: {},
+            selectedClusterNodeName: '',
+            clusterVisibilityMap: {},
+            clusterSearchKeyword: '',
+            clusterShowOnlineOnly: false,
             isExtConnected: false,
         };
     },
@@ -185,6 +189,51 @@ createApp({
         },
         cloudTotalPages() {
             return Math.ceil(this.cloudTotal / this.cloudPageSize) || 1;
+        },
+        clusterNodeEntries() {
+            const keyword = String(this.clusterSearchKeyword || '').trim().toLowerCase();
+            return Object.entries(this.clusterNodes || {}).filter(([name, node]) => {
+                const online = this.isClusterNodeOnline(node || {});
+                if (this.clusterShowOnlineOnly && !online) return false;
+                if (!keyword) return true;
+                const mode = String((node?.stats?.mode) || '').toLowerCase();
+                return String(name || '').toLowerCase().includes(keyword) || mode.includes(keyword);
+            }).sort((a, b) => {
+                const aNode = a[1] || {};
+                const bNode = b[1] || {};
+                const aOnline = this.isClusterNodeOnline(aNode);
+                const bOnline = this.isClusterNodeOnline(bNode);
+                if (aOnline !== bOnline) return aOnline ? -1 : 1;
+                return String(a[0] || '').localeCompare(String(b[0] || ''), 'zh-CN');
+            });
+        },
+        clusterTotalCount() {
+            return Object.keys(this.clusterNodes || {}).length;
+        },
+        clusterOnlineCount() {
+            return Object.values(this.clusterNodes || {}).filter(node => this.isClusterNodeOnline(node || {})).length;
+        },
+        clusterVisibleDetailCount() {
+            return this.clusterNodeEntries.filter(([name]) => this.isClusterNodeVisible(name)).length;
+        },
+        selectedClusterNodeIndex() {
+            return this.clusterNodeEntries.findIndex(([name]) => name === this.selectedClusterNodeName);
+        },
+        previousClusterNodeName() {
+            const idx = this.selectedClusterNodeIndex;
+            if (idx <= 0) return '';
+            return this.clusterNodeEntries[idx - 1]?.[0] || '';
+        },
+        nextClusterNodeName() {
+            const idx = this.selectedClusterNodeIndex;
+            if (idx < 0 || idx >= this.clusterNodeEntries.length - 1) return '';
+            return this.clusterNodeEntries[idx + 1]?.[0] || '';
+        },
+        selectedClusterNode() {
+            const name = this.selectedClusterNodeName;
+            if (!name || !this.clusterNodes || !this.clusterNodes[name]) return null;
+            if (!this.isClusterNodeVisible(name)) return null;
+            return this.clusterNodes[name];
         },
         v2rayASubscriptionTabs() {
             const groups = new Map();
@@ -325,6 +374,7 @@ createApp({
         },
         async initApp() {
             await this.fetchConfig();
+            this.loadClusterUiPrefs();
             this.fetchWebProcessInfo();
             this.fetchAccounts();
             this.initSSE();
@@ -407,6 +457,91 @@ createApp({
             if(this.statsTimer) clearTimeout(this.statsTimer);
             this.pollStats();
         },
+        isClusterNodeVisible(nodeName) {
+            return this.clusterVisibilityMap[nodeName] !== false;
+        },
+        loadClusterUiPrefs() {
+            try {
+                const raw = localStorage.getItem('cluster_ui_prefs');
+                if (!raw) return;
+                const data = JSON.parse(raw);
+                if (data && typeof data === 'object') {
+                    this.clusterVisibilityMap = data.visibility_map && typeof data.visibility_map === 'object' ? data.visibility_map : {};
+                    this.clusterSearchKeyword = typeof data.search_keyword === 'string' ? data.search_keyword : '';
+                    this.clusterShowOnlineOnly = !!data.show_online_only;
+                }
+            } catch (e) {}
+        },
+        persistClusterUiPrefs() {
+            try {
+                localStorage.setItem('cluster_ui_prefs', JSON.stringify({
+                    visibility_map: this.clusterVisibilityMap || {},
+                    search_keyword: this.clusterSearchKeyword || '',
+                    show_online_only: !!this.clusterShowOnlineOnly,
+                }));
+            } catch (e) {}
+        },
+        isClusterNodeOnline(node) {
+            if (!node || !node.last_seen) return false;
+            return (this.nowTimestamp - Math.floor(node.last_seen)) < 20;
+        },
+        syncClusterNodeSelection() {
+            const entries = this.clusterNodeEntries || [];
+            const validNames = new Set(entries.map(([name]) => name));
+            Object.keys(this.clusterVisibilityMap || {}).forEach((name) => {
+                if (!validNames.has(name)) {
+                    delete this.clusterVisibilityMap[name];
+                }
+            });
+            if (this.selectedClusterNodeName && validNames.has(this.selectedClusterNodeName) && this.isClusterNodeVisible(this.selectedClusterNodeName)) {
+                return;
+            }
+            const fallback = entries.find(([name]) => this.isClusterNodeVisible(name));
+            this.selectedClusterNodeName = fallback ? fallback[0] : '';
+        },
+        selectClusterNode(nodeName) {
+            if (!nodeName || !this.clusterNodes[nodeName]) return;
+            if (!this.isClusterNodeVisible(nodeName)) {
+                this.clusterVisibilityMap[nodeName] = true;
+                this.persistClusterUiPrefs();
+            }
+            this.selectedClusterNodeName = nodeName;
+        },
+        toggleClusterNodeVisibility(nodeName) {
+            const nextVisible = !this.isClusterNodeVisible(nodeName);
+            this.clusterVisibilityMap[nodeName] = nextVisible;
+            this.persistClusterUiPrefs();
+            if (!nextVisible && this.selectedClusterNodeName === nodeName) {
+                this.syncClusterNodeSelection();
+            }
+            if (nextVisible && !this.selectedClusterNodeName) {
+                this.selectedClusterNodeName = nodeName;
+            }
+        },
+        goToPreviousClusterNode() {
+            if (this.previousClusterNodeName) {
+                this.selectClusterNode(this.previousClusterNodeName);
+            }
+        },
+        goToNextClusterNode() {
+            if (this.nextClusterNodeName) {
+                this.selectClusterNode(this.nextClusterNodeName);
+            }
+        },
+        showAllClusterNodeDetails() {
+            for (const [name] of this.clusterNodeEntries) {
+                this.clusterVisibilityMap[name] = true;
+            }
+            this.persistClusterUiPrefs();
+            this.syncClusterNodeSelection();
+        },
+        hideAllClusterNodeDetails() {
+            for (const [name] of this.clusterNodeEntries) {
+                this.clusterVisibilityMap[name] = false;
+            }
+            this.persistClusterUiPrefs();
+            this.syncClusterNodeSelection();
+        },
         async pollStats() {
             if(!this.isLoggedIn) return;
             try {
@@ -419,6 +554,7 @@ createApp({
                     const cData = await cRes.json();
                     if (cData.status === 'success') {
                         this.clusterNodes = cData.nodes;
+                        this.syncClusterNodeSelection();
                     }
                 }
             } catch(e) {
@@ -1108,6 +1244,7 @@ createApp({
 			}
             if (tabId === 'cluster') {
                 this.initClusterWebSocket();
+                this.syncClusterNodeSelection();
             } else {
                 if (this.clusterWs) this.clusterWs.close();
             }
@@ -2625,6 +2762,7 @@ createApp({
                 const res = JSON.parse(event.data);
                 if (res.status === 'success') {
                     this.clusterNodes = res.nodes;
+                    this.syncClusterNodeSelection();
                 }
             };
 

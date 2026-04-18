@@ -319,98 +319,194 @@
                                 <span class="text-slate-500 font-bold text-sm">等待远程节点接入... (请确保子机已配置上方的主控台地址)</span>
                             </div>
 
-                            <div v-for="(node, nodeName) in clusterNodes" :key="nodeName" class="flex flex-col mb-8 animate-fade-in">
-                                <div class="bg-white/70 backdrop-blur-md border border-slate-200/60 p-3 md:p-4 rounded-t-2xl shadow-sm z-10">
-                                    <div class="flex justify-between items-center mb-3 border-b border-slate-100 pb-2">
-                                        <div class="flex items-center gap-3">
-                                            <span class="text-sm font-black text-indigo-700 bg-indigo-50 px-3 py-1 rounded-lg border border-indigo-100 shadow-sm flex items-center gap-2">
-                                                <span class="w-2 h-2 rounded-full" :class="node.stats.is_running ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'"></span>
-                                                {{ nodeName }}
-                                            </span>
-                                            <span class="text-[11px] font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200/50 shadow-sm flex items-center gap-1.5">
-                                                模式: {{ node.stats.mode }}
-                                                <span class="opacity-30">|</span>
-                                                <span class="text-slate-500">成功</span> <span class="font-black text-indigo-600">{{node.stats.success}}/{{node.stats.target}}</span>
-                                                <span class="opacity-30">|</span>
-                                                <span class="text-slate-500">总</span> <span class="font-black text-slate-700">{{node.stats.total}}</span>
-                                            </span>
-                                            <span class="text-[11px] font-bold text-sky-600 bg-sky-50 px-2 py-1 rounded border border-sky-100">
-                                                🕒 在线时常: {{ getOnlineDuration(node.join_time) }}
-                                            </span>
+                            <div v-if="clusterNodeEntries.length > 0" class="grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)] gap-6">
+                                <div class="bg-white/80 backdrop-blur-xl border border-slate-200/60 rounded-2xl shadow-sm overflow-hidden">
+                                    <div class="px-5 py-4 border-b border-slate-100 bg-slate-50/70">
+                                        <div class="flex items-center justify-between gap-3">
+                                            <div>
+                                                <h3 class="text-lg font-black text-slate-800">子控列表</h3>
+                                                <p class="text-xs text-slate-500 mt-1">先从列表选择要查看的大面板，也可以单独隐藏某个子控详情。</p>
+                                            </div>
+                                            <div class="flex flex-wrap items-center gap-2">
+                                                <span class="inline-flex px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-black border border-indigo-100">
+                                                    总数 {{ clusterTotalCount }}
+                                                </span>
+                                                <span class="inline-flex px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-black border border-emerald-100">
+                                                    在线 {{ clusterOnlineCount }}
+                                                </span>
+                                                <span class="inline-flex px-3 py-1 rounded-full bg-slate-50 text-slate-700 text-xs font-black border border-slate-200">
+                                                    显示详情 {{ clusterVisibleDetailCount }}
+                                                </span>
+                                            </div>
                                         </div>
-                                        <div class="flex items-center gap-2">
-                                            <button v-if="!node.stats.is_running"
-                                                    @click="remoteControlNode(nodeName, 'start')"
-                                                    class="bg-emerald-500 hover:bg-emerald-600 text-white px-2.5 py-1 rounded-lg text-[12px] font-bold transition-all shadow-sm">
-                                                ▶ 启动
-                                            </button>
-                                            <button v-else
-                                                    @click="remoteControlNode(nodeName, 'stop')"
-                                                    class="bg-amber-500 hover:bg-amber-600 text-white px-2.5 py-1 rounded-lg text-[12px] font-bold transition-all shadow-sm">
-                                                🛑 停止运行
-                                            </button>
-                                            <button @click="remoteControlNode(nodeName, 'restart')"
-                                                    class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-2.5 py-1 rounded-lg text-[12px] font-bold transition-all shadow-sm border border-slate-300/50">
-                                                🔄 重启项目
-                                            </button>
-                                            <button @click="remoteControlNode(nodeName, 'export_accounts')"
-                                                    class="bg-purple-600 hover:bg-purple-700 text-white text-[12px] px-2 py-1 rounded shadow-sm font-bold flex items-center gap-1 transition-all">
-                                                <span>📦</span> 提取库存
-                                            </button>
-                                        </div>
-                                        <div class="flex items-center gap-3">
-                                            <div class="text-sky-500 font-black text-xs">{{node.stats.progress_pct}}</div>
-                                            <div class="w-32 h-2 bg-slate-200/50 rounded-full overflow-hidden shadow-inner">
-                                                <div class="h-full bg-gradient-to-r from-sky-400 to-indigo-400 transition-all duration-500" :style="{ width: node.stats.progress_pct }"></div>
+                                        <div class="mt-4 flex flex-col sm:flex-row gap-3">
+                                            <div class="flex-1">
+                                                <input type="text" v-model="clusterSearchKeyword" @input="persistClusterUiPrefs" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-xl py-2.5 px-4 focus:ring-2 focus:ring-indigo-500/20 font-mono text-sm" placeholder="搜索节点名或模式">
+                                            </div>
+                                            <label class="relative inline-flex bg-white px-4 py-2.5 rounded-xl cursor-pointer hover:bg-slate-50 transition-colors shadow-sm border border-slate-200 items-center justify-center group shrink-0">
+                                                <input type="checkbox" v-model="clusterShowOnlineOnly" @change="persistClusterUiPrefs" class="sr-only peer">
+                                                <div class="relative w-11 h-6 shrink-0 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all after:shadow-sm peer-checked:bg-emerald-600 shadow-inner transition-colors duration-300 group-hover:shadow-md"></div>
+                                                <span class="font-black text-slate-700 text-sm ml-3 tracking-wide">只看在线</span>
+                                            </label>
+                                            <div class="flex items-center gap-2 shrink-0">
+                                                <button @click="showAllClusterNodeDetails" class="px-3 py-2.5 rounded-xl bg-white border border-indigo-200 text-indigo-700 text-sm font-black hover:bg-indigo-50 transition-all shadow-sm">
+                                                    全部展开
+                                                </button>
+                                                <button @click="hideAllClusterNodeDetails" class="px-3 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-700 text-sm font-black hover:bg-slate-50 transition-all shadow-sm">
+                                                    全部隐藏
+                                                </button>
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="text-[10px] md:text-[11px] font-mono tracking-wide flex flex-wrap items-center gap-2 text-slate-500 font-bold">
-                                        <span>成功率 <span class="text-sky-500 font-black ml-0.5">{{node.stats.success_rate}}</span></span><span>•</span>
-                                        <span>成功 <span class="text-emerald-500 font-black ml-0.5">{{node.stats.success}}/{{node.stats.target}}</span></span><span>•</span>
-                                        <span>失败 <span class="text-rose-500 font-black ml-0.5">{{node.stats.failed}}</span></span><span>•</span>
-                                        <span>风控拦截 <span class="text-amber-500 font-black ml-0.5">{{node.stats.retries}}</span></span><span>•</span>
-                                        <span>密码受阻 <span class="text-orange-500 font-black ml-0.5">{{node.stats.pwd_blocked}}</span></span><span>•</span>
-                                        <span>出现手机 <span class="text-purple-500 font-black ml-0.5">{{node.stats.phone_verify}}</span></span><span>•</span>
-                                        <span>耗时 <span class="text-slate-800 font-black ml-0.5">{{node.stats.elapsed}}</span></span><span>•</span>
-                                        <span>平均 <span class="text-slate-800 font-black ml-0.5">{{node.stats.avg_time}}</span></span>
+                                    <div class="max-h-[720px] overflow-y-auto divide-y divide-slate-100">
+                                        <div v-for="[nodeName, node] in clusterNodeEntries" :key="nodeName" class="p-4 transition-colors"
+                                             :class="selectedClusterNodeName === nodeName ? 'bg-indigo-50/70' : 'bg-white hover:bg-slate-50/80'">
+                                            <div class="flex items-start justify-between gap-3">
+                                                <button @click="selectClusterNode(nodeName)" class="flex-1 text-left">
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="w-2.5 h-2.5 rounded-full" :class="isClusterNodeOnline(node) ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'"></span>
+                                                        <span class="font-black text-slate-800">{{ nodeName }}</span>
+                                                        <span class="text-[11px] px-2 py-0.5 rounded-full border font-bold"
+                                                              :class="isClusterNodeOnline(node) ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-500 border-slate-200'">
+                                                            {{ isClusterNodeOnline(node) ? '已连接' : '离线' }}
+                                                        </span>
+                                                    </div>
+                                                    <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-bold text-slate-500">
+                                                        <span class="px-2 py-1 rounded-lg bg-white border border-slate-200">模式 {{ node.stats.mode }}</span>
+                                                        <span class="px-2 py-1 rounded-lg bg-white border border-slate-200">成功 {{ node.stats.success }}/{{ node.stats.target }}</span>
+                                                        <span class="px-2 py-1 rounded-lg bg-white border border-slate-200">总 {{ node.stats.total }}</span>
+                                                        <span class="px-2 py-1 rounded-lg bg-white border border-slate-200">在线 {{ getOnlineDuration(node.join_time) }}</span>
+                                                    </div>
+                                                </button>
+                                                <div class="flex flex-col items-end gap-2 shrink-0">
+                                                    <button @click="selectClusterNode(nodeName)" class="px-3 py-1.5 rounded-lg text-[11px] font-black border transition-all"
+                                                            :class="selectedClusterNodeName === nodeName ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-white text-indigo-700 border-indigo-200 hover:bg-indigo-50'">
+                                                        {{ selectedClusterNodeName === nodeName ? '当前查看' : '查看详情' }}
+                                                    </button>
+                                                    <button @click="toggleClusterNodeVisibility(nodeName)" class="px-3 py-1.5 rounded-lg text-[11px] font-black border transition-all"
+                                                            :class="isClusterNodeVisible(nodeName) ? 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50' : 'bg-slate-900 text-white border-slate-900'">
+                                                        {{ isClusterNodeVisible(nodeName) ? '隐藏大页' : '恢复显示' }}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
 
-                                <div class="bg-[#0f172a] rounded-b-2xl shadow-xl relative overflow-hidden border border-t-0 border-slate-800 flex flex-col h-[300px]">
-                                    <div class="w-full h-8 bg-[#1e293b] flex items-center px-4 gap-2 border-b border-slate-800 shrink-0">
-                                        <div class="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-sm border border-rose-600/50"></div>
-                                        <div class="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-sm border border-amber-600/50"></div>
-                                        <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm border border-emerald-600/50"></div>
-                                        <span class="ml-2 text-[10px] text-slate-400 font-mono tracking-widest">remote-stream: {{ nodeName }}</span>
-                                    </div>
-                                    <div class="flex-1 overflow-y-auto p-3 text-[12px] font-mono leading-relaxed flex flex-col-reverse custom-scrollbar">
-                                        <div>
-                                            <div v-for="(log, idx) in node.logs" :key="idx" class="flex items-start gap-2.5 py-1 px-2 rounded hover:bg-slate-800/50 group">
-                                                <template v-if="log.parsed">
-                                                    <span class="text-slate-500 shrink-0 select-none">[{{ log.time }}]</span>
-                                                    <span class="shrink-0 w-[55px] text-center rounded text-[10px] font-black tracking-widest border"
-                                                          :class="{
-                                                              'bg-emerald-500/10 text-emerald-400 border-emerald-500/20': log.level === 'SUCCESS',
-                                                              'bg-rose-500/10 text-rose-400 border-rose-500/20': log.level === 'ERROR',
-                                                              'bg-amber-500/10 text-amber-400 border-amber-500/20': log.level === 'WARNING',
-                                                              'bg-sky-500/10 text-sky-400 border-sky-500/20': log.level === 'INFO' || log.level === '系统',
-                                                              'bg-slate-700/30 text-slate-400 border-slate-600/50': !['SUCCESS','ERROR','WARNING','INFO','系统'].includes(log.level)
-                                                          }">{{ log.level }}</span>
-                                                    <span class="flex-1 break-all font-medium"
-                                                          :class="{
-                                                              'text-emerald-300': log.level === 'SUCCESS',
-                                                              'text-rose-300': log.level === 'ERROR',
-                                                              'text-amber-300': log.level === 'WARNING',
-                                                              'text-slate-300': !['SUCCESS','ERROR','WARNING'].includes(log.level)
-                                                          }">{{ log.text }}</span>
-                                                </template>
-                                                <template v-else>
-                                                    <span class="text-slate-400 break-all">{{ log.raw }}</span>
-                                                </template>
+                                <div v-if="selectedClusterNode" class="flex flex-col gap-5 animate-fade-in">
+                                    <div class="bg-white/70 backdrop-blur-md border border-slate-200/60 p-4 md:p-5 rounded-2xl shadow-sm">
+                                        <div class="flex flex-col gap-4">
+                                            <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 border-b border-slate-100 pb-3">
+                                                <div class="flex flex-wrap items-center gap-3">
+                                                    <span class="text-sm font-black text-indigo-700 bg-indigo-50 px-3 py-1 rounded-lg border border-indigo-100 shadow-sm flex items-center gap-2">
+                                                        <span class="w-2 h-2 rounded-full" :class="selectedClusterNode.stats.is_running ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'"></span>
+                                                        {{ selectedClusterNodeName }}
+                                                    </span>
+                                                    <span class="text-[11px] font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200/50 shadow-sm flex items-center gap-1.5">
+                                                        模式: {{ selectedClusterNode.stats.mode }}
+                                                        <span class="opacity-30">|</span>
+                                                        <span class="text-slate-500">成功</span> <span class="font-black text-indigo-600">{{selectedClusterNode.stats.success}}/{{selectedClusterNode.stats.target}}</span>
+                                                        <span class="opacity-30">|</span>
+                                                        <span class="text-slate-500">总</span> <span class="font-black text-slate-700">{{selectedClusterNode.stats.total}}</span>
+                                                    </span>
+                                                    <span class="text-[11px] font-bold text-sky-600 bg-sky-50 px-2 py-1 rounded border border-sky-100">
+                                                        🕒 在线时长: {{ getOnlineDuration(selectedClusterNode.join_time) }}
+                                                    </span>
+                                                    <span class="text-[11px] font-bold px-2 py-1 rounded border"
+                                                          :class="isClusterNodeVisible(selectedClusterNodeName) ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-slate-500 bg-slate-50 border-slate-200'">
+                                                        {{ isClusterNodeVisible(selectedClusterNodeName) ? '已连接显示' : '详情已断开显示' }}
+                                                    </span>
+                                                </div>
+                                                <div class="flex flex-wrap items-center gap-2">
+                                                    <button @click="goToPreviousClusterNode" :disabled="!previousClusterNodeName" class="bg-white border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-[12px] font-bold transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                                                        ← 上一个
+                                                    </button>
+                                                    <button @click="goToNextClusterNode" :disabled="!nextClusterNodeName" class="bg-white border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-[12px] font-bold transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                                                        下一个 →
+                                                    </button>
+                                                    <button v-if="!selectedClusterNode.stats.is_running"
+                                                            @click="remoteControlNode(selectedClusterNodeName, 'start')"
+                                                            class="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-[12px] font-bold transition-all shadow-sm">
+                                                        ▶ 启动
+                                                    </button>
+                                                    <button v-else
+                                                            @click="remoteControlNode(selectedClusterNodeName, 'stop')"
+                                                            class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-[12px] font-bold transition-all shadow-sm">
+                                                        🛑 停止运行
+                                                    </button>
+                                                    <button @click="remoteControlNode(selectedClusterNodeName, 'restart')"
+                                                            class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1.5 rounded-lg text-[12px] font-bold transition-all shadow-sm border border-slate-300/50">
+                                                        🔄 重启项目
+                                                    </button>
+                                                    <button @click="remoteControlNode(selectedClusterNodeName, 'export_accounts')"
+                                                            class="bg-purple-600 hover:bg-purple-700 text-white text-[12px] px-3 py-1.5 rounded-lg shadow-sm font-bold flex items-center gap-1 transition-all">
+                                                        <span>📦</span> 提取库存
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+                                                <div class="text-[10px] md:text-[11px] font-mono tracking-wide flex flex-wrap items-center gap-2 text-slate-500 font-bold">
+                                                    <span>成功率 <span class="text-sky-500 font-black ml-0.5">{{selectedClusterNode.stats.success_rate}}</span></span><span>•</span>
+                                                    <span>成功 <span class="text-emerald-500 font-black ml-0.5">{{selectedClusterNode.stats.success}}/{{selectedClusterNode.stats.target}}</span></span><span>•</span>
+                                                    <span>失败 <span class="text-rose-500 font-black ml-0.5">{{selectedClusterNode.stats.failed}}</span></span><span>•</span>
+                                                    <span>风控拦截 <span class="text-amber-500 font-black ml-0.5">{{selectedClusterNode.stats.retries}}</span></span><span>•</span>
+                                                    <span>密码受阻 <span class="text-orange-500 font-black ml-0.5">{{selectedClusterNode.stats.pwd_blocked}}</span></span><span>•</span>
+                                                    <span>出现手机 <span class="text-purple-500 font-black ml-0.5">{{selectedClusterNode.stats.phone_verify}}</span></span><span>•</span>
+                                                    <span>耗时 <span class="text-slate-800 font-black ml-0.5">{{selectedClusterNode.stats.elapsed}}</span></span><span>•</span>
+                                                    <span>平均 <span class="text-slate-800 font-black ml-0.5">{{selectedClusterNode.stats.avg_time}}</span></span>
+                                                </div>
+                                                <div class="flex items-center gap-3">
+                                                    <div class="text-sky-500 font-black text-xs">{{selectedClusterNode.stats.progress_pct}}</div>
+                                                    <div class="w-40 h-2 bg-slate-200/50 rounded-full overflow-hidden shadow-inner">
+                                                        <div class="h-full bg-gradient-to-r from-sky-400 to-indigo-400 transition-all duration-500" :style="{ width: selectedClusterNode.stats.progress_pct }"></div>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
+
+                                    <div class="bg-[#0f172a] rounded-2xl shadow-xl relative overflow-hidden border border-slate-800 flex flex-col h-[520px]">
+                                        <div class="w-full h-9 bg-[#1e293b] flex items-center px-4 gap-2 border-b border-slate-800 shrink-0">
+                                            <div class="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-sm border border-rose-600/50"></div>
+                                            <div class="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-sm border border-amber-600/50"></div>
+                                            <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm border border-emerald-600/50"></div>
+                                            <span class="ml-2 text-[10px] text-slate-400 font-mono tracking-widest">remote-stream: {{ selectedClusterNodeName }}</span>
+                                        </div>
+                                        <div class="flex-1 overflow-y-auto p-3 text-[12px] font-mono leading-relaxed flex flex-col-reverse custom-scrollbar">
+                                            <div>
+                                                <div v-for="(log, idx) in selectedClusterNode.logs" :key="idx" class="flex items-start gap-2.5 py-1 px-2 rounded hover:bg-slate-800/50 group">
+                                                    <template v-if="log.parsed">
+                                                        <span class="text-slate-500 shrink-0 select-none">[{{ log.time }}]</span>
+                                                        <span class="shrink-0 w-[55px] text-center rounded text-[10px] font-black tracking-widest border"
+                                                              :class="{
+                                                                  'bg-emerald-500/10 text-emerald-400 border-emerald-500/20': log.level === 'SUCCESS',
+                                                                  'bg-rose-500/10 text-rose-400 border-rose-500/20': log.level === 'ERROR',
+                                                                  'bg-amber-500/10 text-amber-400 border-amber-500/20': log.level === 'WARNING',
+                                                                  'bg-sky-500/10 text-sky-400 border-sky-500/20': log.level === 'INFO' || log.level === '系统',
+                                                                  'bg-slate-700/30 text-slate-400 border-slate-600/50': !['SUCCESS','ERROR','WARNING','INFO','系统'].includes(log.level)
+                                                              }">{{ log.level }}</span>
+                                                        <span class="flex-1 break-all font-medium"
+                                                              :class="{
+                                                                  'text-emerald-300': log.level === 'SUCCESS',
+                                                                  'text-rose-300': log.level === 'ERROR',
+                                                                  'text-amber-300': log.level === 'WARNING',
+                                                                  'text-slate-300': !['SUCCESS','ERROR','WARNING'].includes(log.level)
+                                                              }">{{ log.text }}</span>
+                                                    </template>
+                                                    <template v-else>
+                                                        <span class="text-slate-400 break-all">{{ log.raw }}</span>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div v-else class="flex flex-col items-center justify-center p-12 bg-white/50 backdrop-blur-sm border border-slate-200/60 rounded-2xl border-dashed">
+                                    <span class="text-4xl grayscale opacity-40 mb-3">🧭</span>
+                                    <span class="text-slate-600 font-black text-sm">先从左侧子控列表选择一个节点</span>
+                                    <span class="text-slate-400 text-xs mt-2">你也可以把某些子控切到“隐藏大页”，只保留列表概览。</span>
                                 </div>
                             </div>
                         </div>
