@@ -2103,11 +2103,6 @@
                                                     <span v-else>🚫</span>
                                                     标记所有无延迟节点失效
                                                 </button>
-                                                <button @click="runV2rayAPrecheck()" :disabled="isProxyBatchChecking" class="bg-white border border-fuchsia-200 text-fuchsia-700 px-4 py-2.5 rounded-2xl hover:bg-fuchsia-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
-                                                    <span v-if="isProxyBatchChecking" class="animate-spin">⏳</span>
-                                                    <span v-else>⚡</span>
-                                                    重新筛选节点
-                                                </button>
                                                 <button @click="testV2rayACurrentProxy" :disabled="isV2rayATesting" class="bg-white border border-fuchsia-200 text-fuchsia-700 px-4 py-2.5 rounded-2xl hover:bg-fuchsia-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
                                                     <span v-if="isV2rayATesting" class="animate-spin">⏳</span>
                                                     <span v-else>⚡</span>

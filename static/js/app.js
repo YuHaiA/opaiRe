@@ -3,7 +3,7 @@ const { createApp } = Vue;
 createApp({
     data() {
         return {
-            appVersion: 'v10.1.7',
+            appVersion: 'v10.1.8',
             versionPageUrl: 'https://github.com/YuHaiA/opaiRe/releases/latest',
             isLoggedIn: !!localStorage.getItem('auth_token'),
             loginPassword: '',
@@ -881,31 +881,6 @@ createApp({
                 this.showToast('v2rayN 订阅更新请求失败', 'error');
             } finally {
                 this.isV2raynSubscriptionUpdating = false;
-            }
-        },
-        async runV2rayAPrecheck() {
-            if (this.isRunning) {
-                this.showToast('请先停止当前运行的任务', 'warning');
-                return;
-            }
-            if (!this.config?.clash_proxy_pool || this.config.clash_proxy_pool.client_type !== 'v2raya') {
-                this.showToast('当前不是 v2rayA 模式', 'warning');
-                return;
-            }
-            this.isProxyBatchChecking = true;
-            this.currentTab = 'console';
-            this.showToast('正在重新筛选 v2rayA 可用节点...', 'info');
-            try {
-                await this.saveConfig(false);
-                const res = await this.authFetch('/api/proxy/v2raya/precheck', { method: 'POST' });
-                const data = await res.json();
-                const level = data.status === 'success' ? 'success' : (data.status === 'warning' ? 'warning' : 'error');
-                this.showToast(data.message || 'v2rayA 可用节点筛选已完成', level);
-                await this.fetchV2rayANodes(false, false);
-            } catch (e) {
-                this.showToast('v2rayA 节点筛选请求失败', 'error');
-            } finally {
-                this.isProxyBatchChecking = false;
             }
         },
         openV2rayAPanel() {
