@@ -2096,23 +2096,24 @@
                                             </div>
                                         </div>
 
-                                        <div class="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-1 gap-3">
-                                            <div class="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                                                <label class="block text-[11px] text-fuchsia-700 font-black mb-2 uppercase tracking-wider">当前接管状态</label>
-                                                <div class="text-sm text-slate-700 font-bold leading-relaxed">{{ config.clash_proxy_pool.enable && config.clash_proxy_pool.client_type === 'v2raya' ? '已启用 v2rayA 自动切点' : '当前未启用 v2rayA 自动切点' }}</div>
-                                                <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">只要上方已开启 <code class="font-mono">智能切点</code> 且 <code class="font-mono">client_type=v2raya</code>，业务运行时就会自动切换；下方按钮只是手动指定覆盖。</div>
-                                            </div>
-                                            <div class="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                                                <label class="block text-[11px] text-slate-500 font-black mb-2 uppercase tracking-wider">节点缓存</label>
-                                                <div class="text-2xl font-black text-slate-900">{{ v2rayANodes.length }}</div>
-                                                <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">{{ v2rayAStatusMessage || 'v2rayA 节点列表已刷新。' }}</div>
-                                            </div>
-                                            <div class="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                                                <label class="block text-[11px] text-amber-700 font-black mb-2 uppercase tracking-wider">节点整理状态</label>
-                                                <div class="text-sm text-slate-700 font-bold leading-relaxed">失效 {{ v2rayAInvalidKeys.length }} 个 · 重复组 {{ v2rayADuplicateGroups.length }} 个</div>
-                                                <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">“移除重复”会把重复节点标记为失效，自动切点时会跳过它们。</div>
-                                            </div>
-                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                                    <div class="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                                        <label class="block text-[11px] text-fuchsia-700 font-black mb-2 uppercase tracking-wider">当前接管状态</label>
+                                        <div class="text-sm text-slate-700 font-bold leading-relaxed">{{ config.clash_proxy_pool.enable && config.clash_proxy_pool.client_type === 'v2raya' ? '已启用 v2rayA 自动切点' : '当前未启用 v2rayA 自动切点' }}</div>
+                                        <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">只要上方已开启 <code class="font-mono">智能切点</code> 且 <code class="font-mono">client_type=v2raya</code>，业务运行时就会自动切换；下方按钮只是手动指定覆盖。</div>
+                                    </div>
+                                    <div class="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                                        <label class="block text-[11px] text-slate-500 font-black mb-2 uppercase tracking-wider">节点缓存</label>
+                                        <div class="text-2xl font-black text-slate-900">{{ v2rayANodes.length }}</div>
+                                        <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">{{ v2rayAStatusMessage || 'v2rayA 节点列表已刷新。' }}</div>
+                                    </div>
+                                    <div class="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm md:col-span-2 xl:col-span-1">
+                                        <label class="block text-[11px] text-amber-700 font-black mb-2 uppercase tracking-wider">节点整理状态</label>
+                                        <div class="text-sm text-slate-700 font-bold leading-relaxed">失效 {{ v2rayAInvalidKeys.length }} 个 · 重复组 {{ v2rayADuplicateGroups.length }} 个</div>
+                                        <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">“移除重复”会把重复节点标记为失效，自动切点时会跳过它们。</div>
                                     </div>
                                 </div>
 
