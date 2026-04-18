@@ -3,6 +3,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
+from utils import config as cfg
 
 from curl_cffi import requests as cffi_requests
 
@@ -316,7 +317,7 @@ class Sub2APIClient:
             response = cffi_requests.post(
                 url,
                 headers=self.headers,
-                json={},
+                json={"model_id": cfg.SUB2API_TEST_MODEL},
                 timeout=60,
                 impersonate="chrome110",
             )
