@@ -1981,7 +1981,7 @@
                                     </div>
                                 </div>
 
-                                <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.3fr)_minmax(360px,0.9fr)] gap-6">
+                                <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.85fr)] gap-6">
                                     <div class="space-y-4">
                                         <div>
                                             <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">v2rayA 面板地址</label>
@@ -2013,6 +2013,30 @@
                                         <div>
                                             <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">环境变量文件</label>
                                             <input type="text" v-model="config.clash_proxy_pool.v2raya_env_file" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 /etc/default/v2raya">
+                                        </div>
+
+                                        <div v-if="v2rayARuntime" class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                                            <div class="bg-white border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
+                                                <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">面板地址</div>
+                                                <div class="text-xs font-mono text-slate-700 break-all mt-2">{{ v2rayARuntime.panel_url || '未填写' }}</div>
+                                            </div>
+                                            <div class="bg-white border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
+                                                <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">API 登录</div>
+                                                <div class="text-sm font-bold text-slate-700 mt-2">{{ v2rayARuntime.api_auth?.username ? v2rayARuntime.api_auth.username : '未配置' }}</div>
+                                                <div class="text-[11px] text-slate-500 mt-2">{{ v2rayARuntime.api_auth?.password_configured ? '密码已配置' : '密码未配置' }}</div>
+                                            </div>
+                                            <div class="bg-white border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
+                                                <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">Xray 路径</div>
+                                                <div class="text-xs font-mono text-slate-700 break-all mt-2">{{ v2rayARuntime.xray_bin?.path || '未填写' }}</div>
+                                            </div>
+                                            <div class="bg-white border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
+                                                <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">默认代理</div>
+                                                <div class="text-xs font-mono text-slate-700 break-all mt-2">{{ v2rayARuntime.default_proxy || '未填写' }}</div>
+                                            </div>
+                                        </div>
+                                        <div v-if="v2rayARuntime && v2rayARuntime.issues && v2rayARuntime.issues.length" class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-4 font-medium">
+                                            <div class="font-black mb-2">待确认项</div>
+                                            <div v-for="issue in v2rayARuntime.issues" :key="issue">{{ issue }}</div>
                                         </div>
                                     </div>
 
@@ -2089,32 +2113,6 @@
                                                 <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">“移除重复”会把重复节点标记为失效，自动切点时会跳过它们。</div>
                                             </div>
                                         </div>
-                                    </div>
-                                </div>
-
-                                <div v-if="v2rayARuntime" class="mt-6 space-y-4">
-                                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                                        <div class="bg-white border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
-                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">面板地址</div>
-                                            <div class="text-xs font-mono text-slate-700 break-all mt-2">{{ v2rayARuntime.panel_url || '未填写' }}</div>
-                                        </div>
-                                        <div class="bg-white border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
-                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">API 登录</div>
-                                            <div class="text-sm font-bold text-slate-700 mt-2">{{ v2rayARuntime.api_auth?.username ? v2rayARuntime.api_auth.username : '未配置' }}</div>
-                                            <div class="text-[11px] text-slate-500 mt-2">{{ v2rayARuntime.api_auth?.password_configured ? '密码已配置' : '密码未配置' }}</div>
-                                        </div>
-                                        <div class="bg-white border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
-                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">Xray 路径</div>
-                                            <div class="text-xs font-mono text-slate-700 break-all mt-2">{{ v2rayARuntime.xray_bin?.path || '未填写' }}</div>
-                                        </div>
-                                        <div class="bg-white border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
-                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">默认代理</div>
-                                            <div class="text-xs font-mono text-slate-700 break-all mt-2">{{ v2rayARuntime.default_proxy || '未填写' }}</div>
-                                        </div>
-                                    </div>
-                                    <div v-if="v2rayARuntime.issues && v2rayARuntime.issues.length" class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-4 font-medium">
-                                        <div class="font-black mb-2">待确认项</div>
-                                        <div v-for="issue in v2rayARuntime.issues" :key="issue">{{ issue }}</div>
                                     </div>
                                 </div>
 
