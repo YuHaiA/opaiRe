@@ -38,6 +38,7 @@ STOP_SCRIPT_PATH = os.path.join(BASE_DIR, "stop.ps1")
 GMAIL_CLIENT_SECRETS = os.path.join(BASE_DIR, "data", "credentials.json")
 GMAIL_TOKEN_PATH = os.path.join(BASE_DIR, "data", "token.json")
 GMAIL_VERIFIER_PATH = os.path.join(BASE_DIR, "data", "temp_verifier.txt")
+GITHUB_UPDATE_REPO = "YuHaiA/opaiRe"
 CLASH_POOL_ROOT = "/opt/mihomo-pool"
 CLASH_POOL_ENV_PATH = os.path.join(CLASH_POOL_ROOT, "pool.env")
 CLASH_POOL_UPDATE_SCRIPT = os.path.join(CLASH_POOL_ROOT, "update_pool.sh")
@@ -1858,7 +1859,7 @@ def get_sub2api_groups(token: str = Depends(verify_token)):
 async def check_update(current_version: str, token: str = Depends(verify_token)):
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get("https://api.github.com/repos/wenfxl/openai-cpa/releases/latest",
+            resp = await client.get(f"https://api.github.com/repos/{GITHUB_UPDATE_REPO}/releases/latest",
                                     headers={"Accept": "application/vnd.github.v3+json"})
             if resp.status_code != 200: return {"status": "error",
                                                 "message": f"无法获取更新数据 (GitHub API 返回 HTTP {resp.status_code})"}
