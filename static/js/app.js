@@ -3,7 +3,7 @@ const { createApp } = Vue;
 createApp({
     data() {
         return {
-            appVersion: 'v10.1.9',
+            appVersion: 'v10.1.10',
             versionPageUrl: 'https://github.com/YuHaiA/opaiRe/releases/latest',
             isLoggedIn: !!localStorage.getItem('auth_token'),
             loginPassword: '',
@@ -459,6 +459,9 @@ createApp({
         },
         isClusterNodeVisible(nodeName) {
             return this.clusterVisibilityMap[nodeName] !== false;
+        },
+        isClusterNodeConnectionAllowed(node) {
+            return node?.connection_allowed !== false;
         },
         loadClusterUiPrefs() {
             try {
@@ -2689,6 +2692,23 @@ createApp({
                 }
             } catch (e) {
                 this.showToast('控制请求异常', 'error'); //
+            }
+        },
+        async toggleClusterNodeConnection(nodeName, allowConnect) {
+            const action = allowConnect ? 'connect' : 'disconnect';
+            try {
+                const res = await this.authFetch('/api/cluster/control', {
+                    method: 'POST',
+                    body: JSON.stringify({ node_name: nodeName, action })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    this.showToast(allowConnect ? `已允许节点重新连接：${nodeName}` : `已断开节点连接：${nodeName}`, 'success');
+                } else {
+                    this.showToast(data.message || '连接状态切换失败', 'warning');
+                }
+            } catch (e) {
+                this.showToast('连接状态切换异常', 'error');
             }
         },
         formatDuration(seconds) {

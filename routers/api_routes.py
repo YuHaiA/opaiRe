@@ -28,7 +28,7 @@ from utils.integrations.tg_notifier import send_tg_msg_async
 from utils.email_providers.gmail_oauth_handler import GmailOAuthHandler
 from utils import proxy_manager
 
-from global_state import VALID_TOKENS, CLUSTER_NODES, NODE_COMMANDS, cluster_lock, log_history, engine, verify_token, worker_status
+from global_state import VALID_TOKENS, CLUSTER_NODES, NODE_COMMANDS, CLUSTER_NODE_BLOCKLIST, cluster_lock, log_history, engine, verify_token, worker_status
 import utils.config as cfg
 
 router = APIRouter()
@@ -3281,9 +3281,25 @@ async def stream_logs(request: Request, token: str = Query(None)):
 
 @router.post("/api/cluster/control")
 async def cluster_control(req: ClusterControlReq, token: str = Depends(verify_token)):
-    if req.action not in ["start", "stop", "restart", "export_accounts"]: return {"status": "error",
+    if req.action not in ["start", "stop", "restart", "export_accounts", "disconnect", "connect"]: return {"status": "error",
                                                                                   "message": "不支持的指令"}
-    with cluster_lock: NODE_COMMANDS[req.node_name] = req.action
+    with cluster_lock:
+        if req.action == "disconnect":
+            CLUSTER_NODE_BLOCKLIST.add(req.node_name)
+            node = CLUSTER_NODES.get(req.node_name)
+            if isinstance(node, dict):
+                node["connection_allowed"] = False
+                node["is_connected"] = False
+                node["blocked_at"] = time.time()
+            NODE_COMMANDS[req.node_name] = "disconnect"
+        elif req.action == "connect":
+            CLUSTER_NODE_BLOCKLIST.discard(req.node_name)
+            node = CLUSTER_NODES.get(req.node_name)
+            if isinstance(node, dict):
+                node["connection_allowed"] = True
+            NODE_COMMANDS[req.node_name] = "none"
+        else:
+            NODE_COMMANDS[req.node_name] = req.action
     return {"status": "success", "message": f"指令 [{req.action}] 已排队"}
 
 
@@ -3292,7 +3308,16 @@ async def cluster_view(token: str = Depends(verify_token)):
     global CLUSTER_NODES
     now = time.time()
     with cluster_lock:
-        CLUSTER_NODES = {k: v for k, v in CLUSTER_NODES.items() if now - v["last_seen"] < 20}
+        keep_nodes = {}
+        for k, v in CLUSTER_NODES.items():
+            blocked = k in CLUSTER_NODE_BLOCKLIST
+            recent = now - v.get("last_seen", 0) < 20
+            if blocked or recent:
+                item = dict(v)
+                item["connection_allowed"] = not blocked
+                item["is_connected"] = bool(recent and not blocked)
+                keep_nodes[k] = item
+        CLUSTER_NODES = keep_nodes
         return {"status": "success", "nodes": CLUSTER_NODES}
 
 
@@ -3301,11 +3326,13 @@ async def cluster_report(req: ClusterReportReq):
     cf_dict = getattr(core_engine.cfg, '_c', {})
     if req.secret != str(cf_dict.get("cluster_secret", "change-me-cluster-secret")).strip(): return {"status": "error",
                                                                                       "message": "密钥错误"}
+    if req.node_name in CLUSTER_NODE_BLOCKLIST:
+        return {"status": "error", "message": "节点已被主控断开", "command": "disconnect"}
 
     target_cmd = NODE_COMMANDS.get(req.node_name, "none")
     node_is_running = req.stats.get("is_running", False)
 
-    if target_cmd in ["restart", "export_accounts"]:
+    if target_cmd in ["restart", "export_accounts", "disconnect"]:
         NODE_COMMANDS[req.node_name] = "none"
     elif (target_cmd == "start" and node_is_running) or (target_cmd == "stop" and not node_is_running):
         NODE_COMMANDS[req.node_name] = "none"
@@ -3314,7 +3341,9 @@ async def cluster_report(req: ClusterReportReq):
     with cluster_lock:
         CLUSTER_NODES[req.node_name] = {
             "stats": req.stats, "logs": req.logs, "last_seen": time.time(),
-            "join_time": CLUSTER_NODES.get(req.node_name, {}).get("join_time", time.time())
+            "join_time": CLUSTER_NODES.get(req.node_name, {}).get("join_time", time.time()),
+            "connection_allowed": req.node_name not in CLUSTER_NODE_BLOCKLIST,
+            "is_connected": req.node_name not in CLUSTER_NODE_BLOCKLIST,
         }
     return {"status": "success", "command": target_cmd}
 
@@ -3325,12 +3354,19 @@ async def ws_cluster_report(websocket: WebSocket, node_name: str, secret: str):
     if secret != str(getattr(core_engine.cfg, '_c', {}).get("cluster_secret", "change-me-cluster-secret")).strip():
         await websocket.close(code=1008, reason="Secret Mismatch")
         return
+    if node_name in CLUSTER_NODE_BLOCKLIST:
+        await websocket.close(code=1008, reason="Node Blocked")
+        return
     try:
         while True:
             data = await websocket.receive_json()
+            if node_name in CLUSTER_NODE_BLOCKLIST:
+                await websocket.send_json({"command": "disconnect"})
+                await websocket.close(code=1008, reason="Node Blocked")
+                return
             target_cmd = NODE_COMMANDS.get(node_name, "none")
             node_is_running = data.get("stats", {}).get("is_running", False)
-            if target_cmd in ["restart", "export_accounts"]:
+            if target_cmd in ["restart", "export_accounts", "disconnect"]:
                 NODE_COMMANDS[node_name] = "none"
             elif (target_cmd == "start" and node_is_running) or (target_cmd == "stop" and not node_is_running):
                 NODE_COMMANDS[node_name] = "none"
@@ -3338,7 +3374,9 @@ async def ws_cluster_report(websocket: WebSocket, node_name: str, secret: str):
             with cluster_lock:
                 CLUSTER_NODES[node_name] = {
                     "stats": data.get("stats", {}), "logs": data.get("logs", []), "last_seen": time.time(),
-                    "join_time": CLUSTER_NODES.get(node_name, {}).get("join_time", time.time())
+                    "join_time": CLUSTER_NODES.get(node_name, {}).get("join_time", time.time()),
+                    "connection_allowed": node_name not in CLUSTER_NODE_BLOCKLIST,
+                    "is_connected": node_name not in CLUSTER_NODE_BLOCKLIST,
                 }
             await websocket.send_json({"command": target_cmd})
     except Exception:
@@ -3356,7 +3394,16 @@ async def cluster_view_ws(websocket: WebSocket, token: str = Query(None)):
             global CLUSTER_NODES
             now = time.time()
             with cluster_lock:
-                CLUSTER_NODES = {k: v for k, v in CLUSTER_NODES.items() if now - v["last_seen"] < 20}
+                keep_nodes = {}
+                for k, v in CLUSTER_NODES.items():
+                    blocked = k in CLUSTER_NODE_BLOCKLIST
+                    recent = now - v.get("last_seen", 0) < 20
+                    if blocked or recent:
+                        item = dict(v)
+                        item["connection_allowed"] = not blocked
+                        item["is_connected"] = bool(recent and not blocked)
+                        keep_nodes[k] = item
+                CLUSTER_NODES = keep_nodes
                 await websocket.send_json({"status": "success", "nodes": CLUSTER_NODES})
             await asyncio.sleep(0.5)
     except Exception:

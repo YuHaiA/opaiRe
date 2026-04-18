@@ -6,6 +6,7 @@ from utils import core_engine
 VALID_TOKENS = set()
 CLUSTER_NODES = {}
 NODE_COMMANDS = {}
+CLUSTER_NODE_BLOCKLIST = set()
 cluster_lock = threading.Lock()
 log_history = deque(maxlen=500)
 worker_status: dict = {}
