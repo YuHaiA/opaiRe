@@ -4,6 +4,7 @@ import json
 import time
 import asyncio
 import threading
+import signal
 import uvicorn
 import re
 import warnings
@@ -23,18 +24,46 @@ from utils.config import reload_all_configs
 from global_state import engine, log_history
 from routers import api_routes
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    yield
-    print("\n" + "="*65, flush=True)
-    print("🛑 接收到系统终止信号，正在强制结束引擎...", flush=True)
+_shutdown_started = threading.Event()
+
+
+def _stop_engine(reason: str):
+    print("\n" + "=" * 65, flush=True)
+    print(f"[{core_engine.ts()}] [系统] {reason}", flush=True)
+    print(f"[{core_engine.ts()}] [系统] 正在停止后台引擎与任务线程...", flush=True)
     try:
         if engine.is_running():
             engine.stop()
-    except Exception: pass
-    print("💥 已强制斩断所有底层连接，进程秒退！", flush=True)
-    print("="*65 + "\n", flush=True)
-    os._exit(0)
+    except Exception as exc:
+        print(f"[{core_engine.ts()}] [ERROR] 停止引擎时发生异常: {exc}", flush=True)
+    print("=" * 65 + "\n", flush=True)
+
+
+def _force_process_exit(reason: str, wait_seconds: float = 5.0):
+    if _shutdown_started.is_set():
+        return
+    _shutdown_started.set()
+
+    def _worker():
+        _stop_engine(reason)
+        engine.wait_until_stopped(wait_seconds)
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(0)
+
+    threading.Thread(target=_worker, daemon=True, name="ForcedExitWorker").start()
+
+
+def _signal_name(sig):
+    try:
+        return signal.Signals(sig).name
+    except Exception:
+        return str(sig)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    _stop_engine("收到 Web 服务关闭请求，准备退出进程...")
 
 app = FastAPI(title="Wenfxl Codex Manager", lifespan=lifespan)
 
@@ -59,6 +88,7 @@ class DummyArgs:
 
 def _worker_push_thread():
     last_role = None
+    last_ws_error = None
 
     def _internal_start():
         try: reload_all_configs()
@@ -70,7 +100,7 @@ def _worker_push_thread():
         else: engine.start_normal(args)
 
     async def _ws_loop():
-        nonlocal last_role
+        nonlocal last_role, last_ws_error
         try: import websockets
         except ImportError:
             print(f"[{core_engine.ts()}] [系统] ❌ 缺少 WebSocket 库！请在终端执行: pip install websockets")
@@ -101,10 +131,18 @@ def _worker_push_thread():
                 ws_endpoint = f"{ws_url.rstrip('/')}/api/cluster/report_ws?node_name={urllib.parse.quote(node_name)}&secret={urllib.parse.quote(secret)}"
 
                 try:
-                    async with websockets.connect(ws_endpoint, ping_interval=None) as ws:
+                    async with websockets.connect(
+                        ws_endpoint,
+                        ping_interval=20,
+                        ping_timeout=20,
+                        close_timeout=5,
+                        open_timeout=15,
+                        max_size=2_000_000,
+                    ) as ws:
                         if last_role != "node":
                             print(f"[{core_engine.ts()}] [集群] 🚀 已通过 WebSocket 建立超高速光纤连接: {master_url}")
                             last_role = "node"
+                        last_ws_error = None
 
                         while True:
                             try:
@@ -141,7 +179,7 @@ def _worker_push_thread():
 
                             await ws.send(json.dumps({"stats": stats_payload, "logs": parsed_logs}))
 
-                            resp_str = await ws.recv()
+                            resp_str = await asyncio.wait_for(ws.recv(), timeout=25)
                             cmd = json.loads(resp_str).get("command", "none")
 
                             if cmd == "restart":
@@ -177,12 +215,22 @@ def _worker_push_thread():
                                         print(f"[{core_engine.ts()}] [ERROR] ❌ 账号上传总控失败: {e}")
                                 threading.Thread(target=_upload_task, daemon=True).start()
 
-                            await asyncio.sleep(0.5)
-                except Exception: pass
+                            await asyncio.sleep(1.0)
+                except Exception as e:
+                    err_text = str(e)
+                    if err_text != last_ws_error:
+                        print(f"[{core_engine.ts()}] [集群] ⚠️ WebSocket 上报链路已断开，准备重连: {err_text}")
+                        last_ws_error = err_text
             await asyncio.sleep(3)
     asyncio.run(_ws_loop())
 
 threading.Thread(target=_worker_push_thread, daemon=True).start()
+
+
+class ManagedUvicornServer(uvicorn.Server):
+    def handle_exit(self, sig: int, frame) -> None:
+        _force_process_exit(f"收到 {_signal_name(sig)}，准备安全退出...", wait_seconds=5.0)
+        super().handle_exit(sig, frame)
 
 if __name__ == "__main__":
     try: reload_all_configs()
@@ -197,4 +245,5 @@ if __name__ == "__main__":
     sys.__stdout__.write(f"[{core_engine.ts()}] [系统] 控制台初始密码：admin \n")
     sys.__stdout__.write(f"[{core_engine.ts()}] [系统] 结束请猛猛重复按CTRL+C \n")
     sys.__stdout__.flush()
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning", access_log=False, timeout_graceful_shutdown=1)
+    config = uvicorn.Config(app, host="0.0.0.0", port=8000, log_level="warning", access_log=False, timeout_graceful_shutdown=1)
+    ManagedUvicornServer(config).run()

@@ -6,6 +6,21 @@ $outLog = Join-Path $projectRoot "run.out.log"
 $errLog = Join-Path $projectRoot "run.err.log"
 $pidFile = Join-Path $projectRoot "data\web_console.pid"
 
+function Stop-OpaiReProcessById {
+    param(
+        [int]$ProcessId
+    )
+
+    if (-not $ProcessId) {
+        return
+    }
+
+    try {
+        Stop-Process -Id $ProcessId -Force -ErrorAction Stop
+    } catch {
+    }
+}
+
 if (-not (Test-Path $pythonPath)) {
     throw "未找到虚拟环境解释器: $pythonPath"
 }
@@ -32,10 +47,16 @@ if ($listener) {
 
 $existingPids = $existingPids | Sort-Object -Unique
 foreach ($procId in $existingPids) {
-    try {
-        Stop-Process -Id $procId -Force -ErrorAction Stop
-    } catch {
+    Stop-OpaiReProcessById -ProcessId $procId
+}
+
+$allOpaiReProcesses = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.CommandLine -and $_.CommandLine -like "*wfxl_openai_regst.py*"
     }
+
+foreach ($proc in $allOpaiReProcesses) {
+    Stop-OpaiReProcessById -ProcessId $proc.ProcessId
 }
 
 Start-Sleep -Seconds 2

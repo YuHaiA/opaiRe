@@ -1388,100 +1388,185 @@ class RegEngine:
         self.current_thread    = None
         self.loop              = None
         self._force_stopped    = False
+        self._state_lock       = threading.Lock()
+
+    def _prepare_start(self):
+        with self._state_lock:
+            thread = self.current_thread
+            if thread is not None and thread.is_alive():
+                return False
+            self.current_thread = None
+            self.loop = None
+            self.async_stop_event = None
+
+        self._force_stopped = False
+        cfg.GLOBAL_STOP = False
+        cfg.POOL_EXHAUSTED = False
+        self.thread_stop_event.clear()
+        return True
+
+    def _register_async_runtime(self, loop, async_stop_event):
+        with self._state_lock:
+            self.loop = loop
+            self.async_stop_event = async_stop_event
+            self.current_thread = threading.current_thread()
+
+    def _register_sync_runtime(self):
+        with self._state_lock:
+            self.current_thread = threading.current_thread()
+            self.loop = None
+            self.async_stop_event = None
+
+    def _cleanup_runtime(self, loop=None, async_stop_event=None):
+        current = threading.current_thread()
+        with self._state_lock:
+            if self.loop is loop:
+                self.loop = None
+            if self.async_stop_event is async_stop_event:
+                self.async_stop_event = None
+            if self.current_thread is current:
+                self.current_thread = None
+        self._force_stopped = False
+
+    @staticmethod
+    def _close_loop(loop):
+        if loop is None:
+            return
+        try:
+            if loop.is_closed():
+                return
+            if loop.is_running():
+                return
+
+            pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
+            for task in pending:
+                task.cancel()
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except Exception:
+            pass
+        finally:
+            try:
+                if not loop.is_closed() and not loop.is_running():
+                    loop.close()
+            except Exception:
+                pass
+
+    def wait_until_stopped(self, timeout: float = 5.0) -> bool:
+        with self._state_lock:
+            thread = self.current_thread
+        if thread is None:
+            return True
+        thread.join(timeout)
+        return not thread.is_alive()
 
     def start_normal(self, args):
-        if self.is_running():
+        if not self._prepare_start():
             return
-        self._force_stopped = False
-        cfg.GLOBAL_STOP = False
-        cfg.POOL_EXHAUSTED = False
-        self.thread_stop_event.clear()
         args.check_stop = lambda: self.thread_stop_event.is_set()
-        self.current_thread = threading.Thread(
-            target=normal_main_loop,
+        thread = threading.Thread(
+            target=self._run_normal_in_thread,
             args=(args, self.thread_stop_event),
             daemon=True,
+            name="RegEngineNormal",
         )
-        self.current_thread.start()
+        with self._state_lock:
+            self.current_thread = thread
+        thread.start()
 
     def start_cpa(self, args):
-        if self.is_running():
+        if not self._prepare_start():
             return
-        self._force_stopped = False
-        cfg.GLOBAL_STOP = False
-        cfg.POOL_EXHAUSTED = False
-        self.thread_stop_event.clear()
-        self.current_thread = threading.Thread(
+        thread = threading.Thread(
             target=self._run_cpa_in_thread, args=(args,), daemon=True
+            , name="RegEngineCPA"
         )
-        self.current_thread.start()
+        with self._state_lock:
+            self.current_thread = thread
+        thread.start()
         
     def start_sub2api(self, args):
-        if self.is_running():
+        if not self._prepare_start():
             return
-        self._force_stopped = False
-        cfg.GLOBAL_STOP = False
-        cfg.POOL_EXHAUSTED = False
-        self.thread_stop_event.clear()
-        self.current_thread = threading.Thread(
+        thread = threading.Thread(
             target=self._run_sub2api_in_thread, args=(args,), daemon=True
+            , name="RegEngineSub2API"
         )
-        self.current_thread.start()
+        with self._state_lock:
+            self.current_thread = thread
+        thread.start()
+
+    def _run_normal_in_thread(self, args, stop_event):
+        self._register_sync_runtime()
+        try:
+            normal_main_loop(args, stop_event)
+        finally:
+            self._cleanup_runtime()
 
     def _run_cpa_in_thread(self, args):
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        async_stop_event = asyncio.Event()
+        self._register_async_runtime(loop, async_stop_event)
         try:
-            self.loop.run_until_complete(self._cpa_wrapper(args))
+            loop.run_until_complete(self._cpa_wrapper(args, async_stop_event))
         finally:
-            self.loop.close()
+            self._close_loop(loop)
+            self._cleanup_runtime(loop, async_stop_event)
 
     def _run_sub2api_in_thread(self, args):
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        async_stop_event = asyncio.Event()
+        self._register_async_runtime(loop, async_stop_event)
         try:
-            self.async_stop_event = asyncio.Event()
-            self.loop.run_until_complete(sub2api_main_loop(args, self.async_stop_event))
+            loop.run_until_complete(sub2api_main_loop(args, async_stop_event))
         finally:
-            self.loop.close()
+            self._close_loop(loop)
+            self._cleanup_runtime(loop, async_stop_event)
             
-    async def _cpa_wrapper(self, args):
-        self.async_stop_event = asyncio.Event()
-        await cpa_main_loop(args, self.async_stop_event)
+    async def _cpa_wrapper(self, args, async_stop_event):
+        await cpa_main_loop(args, async_stop_event)
 
     def stop(self):
-        self._force_stopped = True
         cfg.GLOBAL_STOP = True
         cfg.POOL_EXHAUSTED = True
         self.thread_stop_event.set()
-        if self.loop and self.async_stop_event:
-            self.loop.call_soon_threadsafe(self.async_stop_event.set)
+        with self._state_lock:
+            loop = self.loop
+            async_stop_event = self.async_stop_event
+        if loop and async_stop_event and not loop.is_closed():
+            try:
+                loop.call_soon_threadsafe(async_stop_event.set)
+            except RuntimeError:
+                pass
 
     def is_running(self) -> bool:
-        if self._force_stopped:
-            return False
-        return self.current_thread is not None and self.current_thread.is_alive()
+        with self._state_lock:
+            thread = self.current_thread
+        return thread is not None and thread.is_alive()
 
     def start_check(self, args):
-        if self.is_running(): return
-        self._force_stopped = False
-        cfg.GLOBAL_STOP = False
-        cfg.POOL_EXHAUSTED = False
-        self.thread_stop_event.clear()
-        self.current_thread = threading.Thread(
+        if not self._prepare_start(): return
+        thread = threading.Thread(
             target=self._run_check_in_thread, args=(args,), daemon=True
+            , name="RegEngineCheck"
         )
-        self.current_thread.start()
+        with self._state_lock:
+            self.current_thread = thread
+        thread.start()
 
     def _run_check_in_thread(self, args):
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        async_stop_event = asyncio.Event()
+        self._register_async_runtime(loop, async_stop_event)
         try:
-            self.async_stop_event = asyncio.Event()
-            self.loop.run_until_complete(manual_check_main_loop(args, self.async_stop_event))
+            loop.run_until_complete(manual_check_main_loop(args, async_stop_event))
         finally:
-            self.loop.close()
-            self._force_stopped = True
+            self._close_loop(loop)
+            self._cleanup_runtime(loop, async_stop_event)
 
 if __name__ == "__main__":
     main()

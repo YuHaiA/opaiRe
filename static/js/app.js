@@ -98,6 +98,12 @@ createApp({
             v2rayAGroupPageSize: 10,
             projectUpdateStatus: null,
             updatePackages: [],
+            healthReport: null,
+            isHealthReportLoading: false,
+            isHealthRestarting: false,
+            isSub2ApiProbeLoading: false,
+            logStreamStatus: '未连接',
+            logStreamLastError: '',
             accounts: [],
             selectedAccounts: [],
 			currentPage: 1,
@@ -359,11 +365,14 @@ createApp({
             this.isLoggedIn = false;
             this.loginPassword = '';
 			this.logs = [];
+            this.logBuffer = [];
             Object.keys(this.showPwd).forEach(k => this.showPwd[k] = false);
 			if(this.evtSource) {
                 this.evtSource.close();
                 this.evtSource = null;
             }
+            this.logStreamStatus = '未连接';
+            this.logStreamLastError = '';
             if(this.statsTimer) clearInterval(this.statsTimer);
             if (this._extDetectionTimer) clearInterval(this._extDetectionTimer);
             if (this._extDispatchTimer) clearTimeout(this._extDispatchTimer);
@@ -669,6 +678,9 @@ createApp({
                 }
                 if (this.config.sub2api_mode.enable_ws_mode === undefined) {
                     this.config.sub2api_mode.enable_ws_mode = true;
+                }
+                if (this.config.sub2api_mode.use_proxy === undefined) {
+                    this.config.sub2api_mode.use_proxy = false;
                 }
                 if (this.config.clash_proxy_pool.client_type === undefined) this.config.clash_proxy_pool.client_type = 'clash';
                 if (this.config.clash_proxy_pool.v2raya_url === undefined) this.config.clash_proxy_pool.v2raya_url = '';
@@ -1792,7 +1804,8 @@ createApp({
             } catch (e) {}
         },
         async clearLogs() {
-            this.logs = []; 
+            this.logs = [];
+            this.logBuffer = [];
             try { await this.authFetch('/api/logs/clear', { method: 'POST' }); } catch (e) {}
         },
 		initSSE() {
@@ -1810,11 +1823,19 @@ createApp({
             }
 
             const token = localStorage.getItem('auth_token');
-            if (!token) return;
+            if (!token) {
+                this.logStreamStatus = '未登录';
+                return;
+            }
             const timestamp = new Date().getTime();
             const url = `/api/logs/stream?token=${token}&_t=${timestamp}`;
 
+            this.logStreamStatus = '连接中';
             this.evtSource = new EventSource(url);
+            this.evtSource.onopen = () => {
+                this.logStreamStatus = '已连接';
+                this.logStreamLastError = '';
+            };
             this.logFlushTimer = setInterval(() => {
                 if (this.logBuffer.length > 0) {
                     const container = document.getElementById('terminal-container');
@@ -1861,6 +1882,8 @@ createApp({
             };
             this.evtSource.onerror = (event) => {
                 console.error("🔴 SSE 连接断开或异常。");
+                this.logStreamStatus = '重连中';
+                this.logStreamLastError = '日志通道中断，正在自动重连';
                 if (this.evtSource) {
                     this.evtSource.close();
                     this.evtSource = null;
@@ -2283,6 +2306,77 @@ createApp({
             await this.checkUpdate(false);
             await this.inspectProjectUpdate(false);
             await this.fetchUpdatePackages(showSuccess);
+            await this.fetchHealthReport(false);
+        },
+        async fetchHealthReport(showSuccess = false) {
+            this.isHealthReportLoading = true;
+            try {
+                const res = await this.authFetch('/api/system/health_report');
+                const data = await res.json();
+                this.healthReport = data.data || null;
+                if (showSuccess) {
+                    const level = data.status === 'success' ? 'success' : (data.status === 'warning' ? 'warning' : 'error');
+                    this.showToast(data.message || '系统诊断已刷新', level);
+                }
+                return data;
+            } catch (e) {
+                if (showSuccess) {
+                    this.showToast('读取系统诊断失败', 'error');
+                }
+                return { status: 'error', message: '读取系统诊断失败' };
+            } finally {
+                this.isHealthReportLoading = false;
+            }
+        },
+        async probeSub2ApiRuntime() {
+            this.isSub2ApiProbeLoading = true;
+            try {
+                const res = await this.authFetch('/api/system/sub2api_probe');
+                const data = await res.json();
+                if (!this.healthReport) {
+                    this.healthReport = { sub2api: {} };
+                }
+                if (!this.healthReport.sub2api) {
+                    this.healthReport.sub2api = {};
+                }
+                this.healthReport.sub2api.probe = data.data || null;
+                const level = data.status === 'success' ? 'success' : (data.status === 'warning' ? 'warning' : 'error');
+                this.showToast(data.message || 'Sub2API 探测已完成', level);
+                return data;
+            } catch (e) {
+                this.showToast('Sub2API 探测失败', 'error');
+                return { status: 'error', message: 'Sub2API 探测失败' };
+            } finally {
+                this.isSub2ApiProbeLoading = false;
+            }
+        },
+        async autoHealRestart() {
+            const confirmed = await this.customConfirm('将根据当前健康诊断执行一次自愈重启。这个操作会重启当前 Web 后端与任务线程，页面会在几秒后自动刷新，确定继续吗？');
+            if (!confirmed) return;
+
+            this.isHealthRestarting = true;
+            try {
+                const res = await this.authFetch('/api/system/auto_heal_restart', {
+                    method: 'POST',
+                    body: JSON.stringify({ force: true })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    this.showToast(data.message || '健康自愈重启已触发', 'success');
+                    if(this.statsTimer) clearInterval(this.statsTimer);
+                    if(this.evtSource) this.evtSource.close();
+                    this.logStreamStatus = '重启中';
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 8000);
+                } else {
+                    this.showToast(data.message || '健康自愈重启失败', data.status === 'warning' ? 'warning' : 'error');
+                }
+            } catch (e) {
+                this.showToast('健康自愈重启失败，请检查后端日志', 'error');
+            } finally {
+                this.isHealthRestarting = false;
+            }
         },
         async inspectProjectUpdate(showSuccess = false) {
             this.isProjectUpdateChecking = true;

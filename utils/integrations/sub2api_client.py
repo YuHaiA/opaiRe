@@ -21,12 +21,22 @@ class Sub2APIClient:
             "timeout": 15,
             "impersonate": "chrome110",
         }
+        self._recent_error_log_at: Dict[str, float] = {}
         proxy_url = str(getattr(cfg, "DEFAULT_PROXY", "") or "").strip()
-        if proxy_url:
+        self.use_proxy = bool(getattr(cfg, "SUB2API_USE_PROXY", False))
+        if self.use_proxy and proxy_url:
             self.request_kwargs["proxies"] = {
                 "http": proxy_url,
                 "https": proxy_url,
             }
+
+    def _log_request_issue(self, key: str, level: str, message: str, *args: Any) -> None:
+        now = time.time()
+        last = self._recent_error_log_at.get(key, 0.0)
+        if now - last < 30:
+            return
+        self._recent_error_log_at[key] = now
+        getattr(logger, level, logger.warning)(message, *args)
 
     @staticmethod
     def _as_int(value: Any, default: int, minimum: int) -> int:
@@ -242,13 +252,13 @@ class Sub2APIClient:
             )
             return self._handle_response(response)
         except cffi_requests.exceptions.Timeout as exc:
-            logger.error("Get Sub2API accounts timed out: %s", exc)
+            self._log_request_issue("get_accounts_timeout", "warning", "Get Sub2API accounts timed out: %s", exc)
             return False, f"timeout: {exc}"
         except cffi_requests.exceptions.ConnectionError as exc:
-            logger.error("Get Sub2API accounts connection failed: %s", exc)
+            self._log_request_issue("get_accounts_connection", "warning", "Get Sub2API accounts connection failed: %s", exc)
             return False, f"connection error: {exc}"
         except Exception as exc:
-            logger.error("Get Sub2API accounts failed: %s", exc)
+            self._log_request_issue("get_accounts_failed", "error", "Get Sub2API accounts failed: %s", exc)
             return False, str(exc)
 
     def get_all_accounts(self, page_size: Optional[int] = None) -> Tuple[bool, Any]:
@@ -318,6 +328,35 @@ class Sub2APIClient:
 
         logger.info("Fetched %s Sub2API accounts across paginated results", len(all_items))
         return True, all_items
+
+    def probe_connectivity(self, timeout: Optional[int] = None, page_size: int = 1) -> Dict[str, Any]:
+        started_at = time.perf_counter()
+        resolved_timeout = self._as_int(
+            timeout if timeout is not None else min(self._get_account_fetch_timeout(), 20),
+            min(self._get_account_fetch_timeout(), 20),
+            5,
+        )
+        ok, data = self.get_accounts(page=1, page_size=page_size, timeout=resolved_timeout)
+        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 1)
+
+        result: Dict[str, Any] = {
+            "ok": ok,
+            "elapsed_ms": elapsed_ms,
+            "page_size": page_size,
+            "timeout": resolved_timeout,
+            "use_proxy": self.use_proxy,
+        }
+
+        if ok:
+            inner = data.get("data", {}) if isinstance(data, dict) else {}
+            items = inner.get("items", []) if isinstance(inner, dict) else []
+            result["count"] = len(items) if isinstance(items, list) else 0
+            result["total"] = inner.get("total") if isinstance(inner, dict) else None
+            result["message"] = "Sub2API 管理接口探测成功"
+        else:
+            result["message"] = str(data)
+
+        return result
 
     def add_account(self, token_data: Dict[str, Any]) -> Tuple[bool, str]:
         settings = self._get_push_settings()
