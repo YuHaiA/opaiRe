@@ -63,6 +63,18 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(CURRENT_DIR)
 
 
+def _hidden_subprocess_kwargs() -> dict:
+    if os.name != "nt":
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = 0
+    return {
+        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        "startupinfo": startupinfo,
+    }
+
+
 def _call_with_original_socket(fn, *args, **kwargs):
     with _socket_restore_lock:
         current_socket = socket.socket
@@ -1358,17 +1370,17 @@ def _restart_v2rayn():
     if not V2RAYN_EXE_PATH or not os.path.exists(V2RAYN_EXE_PATH):
         print(f"[{ts()}] [ERROR] 未找到 v2rayN.exe，请先配置 v2rayN 根目录。")
         return False
-    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    hidden_kwargs = _hidden_subprocess_kwargs()
     try:
-        subprocess.run(["taskkill", "/IM", "xray.exe", "/F"], capture_output=True, text=True)
-        subprocess.run(["taskkill", "/IM", "v2rayN.exe", "/F"], capture_output=True, text=True)
+        subprocess.run(["taskkill", "/IM", "xray.exe", "/F"], capture_output=True, text=True, **hidden_kwargs)
+        subprocess.run(["taskkill", "/IM", "v2rayN.exe", "/F"], capture_output=True, text=True, **hidden_kwargs)
         time.sleep(0.8)
         subprocess.Popen(
             [V2RAYN_EXE_PATH],
             cwd=V2RAYN_BASE_DIR if V2RAYN_BASE_DIR else None,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            creationflags=creation_flags,
+            **hidden_kwargs,
         )
         return True
     except Exception as e:
@@ -1437,7 +1449,7 @@ def _test_v2rayn_proxy_liveness(proxy_url=None, silent: bool = False):
                     if loc in {"CN", "HK"}:
                         if not silent:
                             print(f"[{ts()}] [代理测活] {display_name} 地区受限 ({loc})，立即切换下一节点。")
-                        return False, loc
+                        return False, loc, None
                     if not silent:
                         print(f"[{ts()}] [代理测活] {display_name} 成功！地区 ({loc})，基础探测延迟: {probe_res.elapsed.total_seconds():.2f}s | 探测URL={probe_url}")
                     return True, loc, round(float(probe_res.elapsed.total_seconds() * 1000), 1)
@@ -1520,6 +1532,7 @@ def _run_v2rayn_subscription_update(force: bool = False) -> bool:
             text=True,
             timeout=300,
             shell=True,
+            **_hidden_subprocess_kwargs(),
         )
         stdout = (proc.stdout or "").strip()
         stderr = (proc.stderr or "").strip()

@@ -46,6 +46,18 @@ CLASH_POOL_ENV_PATH = os.path.join(CLASH_POOL_ROOT, "pool.env")
 CLASH_POOL_UPDATE_SCRIPT = os.path.join(CLASH_POOL_ROOT, "update_pool.sh")
 CLASH_POOL_STATUS_SCRIPT = os.path.join(CLASH_POOL_ROOT, "status_pool.sh")
 
+
+def _hidden_subprocess_kwargs() -> dict:
+    if os.name != "nt":
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = 0
+    return {
+        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        "startupinfo": startupinfo,
+    }
+
 class DummyArgs:
     def __init__(self, proxy=None, once=False):
         self.proxy = proxy
@@ -255,6 +267,7 @@ def _run_git_command(args: list[str], timeout: int = 30) -> tuple[int, str]:
             text=True,
             timeout=timeout,
             cwd=BASE_DIR,
+            **_hidden_subprocess_kwargs(),
         )
         return proc.returncode, (proc.stdout or "").strip()
     except FileNotFoundError:
@@ -465,6 +478,7 @@ def _run_clash_pool_script(script_path: str, timeout: int = 300) -> tuple[int, s
         text=True,
         timeout=timeout,
         cwd=CLASH_POOL_ROOT if os.path.isdir(CLASH_POOL_ROOT) else None,
+        **_hidden_subprocess_kwargs(),
     )
     return proc.returncode, proc.stdout or ""
 

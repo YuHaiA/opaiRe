@@ -1436,9 +1436,12 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event):
 
         except Exception as e:
             print(f"[{ts()}] [ERROR] Sub2API 循环发生致命异常: {e}")
-            print(f"[{ts()}] [INFO] 触发安全保护，系统已自动停止运行。")
-            async_stop_event.set()
-            break
+            print(f"[{ts()}] [WARNING] 本轮 Sub2API 调度已跳过，不自动停止主任务。")
+            try:
+                await asyncio.wait_for(async_stop_event.wait(), timeout=15)
+            except asyncio.TimeoutError:
+                pass
+            continue
 
 
 def main() -> None:

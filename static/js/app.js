@@ -861,6 +861,7 @@ createApp({
             }
             this.isProxyBatchChecking = true;
             this.currentTab = 'console';
+            this.scrollTerminalToBottom(true);
             this.showToast(refreshSubscription ? '正在更新订阅并重新筛选可用节点...' : '正在重新筛选可用节点...', 'info');
             try {
                 await this.saveConfig(false);
@@ -1200,18 +1201,32 @@ createApp({
             this.selectedAccounts = []; 
             this.fetchAccounts(false);
         },
-		changePageSize() {
+        changePageSize() {
             this.currentPage = 1;
             
             this.selectedAccounts = []; 
             
             this.fetchAccounts(false);
         },
+        scrollTerminalToBottom(force = false) {
+            this.$nextTick(() => {
+                requestAnimationFrame(() => {
+                    const container = document.getElementById('terminal-container');
+                    if (!container) return;
+
+                    const nearBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 120;
+                    if (force || this.currentTab === 'console' || nearBottom) {
+                        container.scrollTop = container.scrollHeight;
+                    }
+                });
+            });
+        },
         switchTab(tabId) {
             this.currentTab = tabId;
             window.location.hash = tabId;
 			if (tabId === 'console') {
-				this.pollStats(); 
+				this.pollStats();
+				this.scrollTerminalToBottom(true);
 			}
             if (tabId === 'accounts') {
                 this.fetchAccounts();
@@ -1402,6 +1417,7 @@ createApp({
                         text: `任务生成失败: ${data.message}`,
                         raw: `[${timeStr}] [总控] 任务生成失败: ${data.message}`
                     });
+                    this.scrollTerminalToBottom(true);
                     return;
                 }
 
@@ -1415,10 +1431,7 @@ createApp({
                     raw: `[${timeStr}] [总控] 📦 古法任务已打包，目标邮箱: ${task.email}，正在下发到浏览器插件...`
                 });
 
-                this.$nextTick(() => {
-                    const container = document.getElementById('terminal-container');
-                    if (container) container.scrollTop = container.scrollHeight;
-                });
+                this.scrollTerminalToBottom(true);
 
                 window.postMessage({
                     type: "CMD_EXECUTE_TASK",
@@ -1530,10 +1543,7 @@ createApp({
                         text: `✅ 浏览器插件已连接，节点识别码: ${localWorkerId}`,
                         raw: `[${timeStr}] [总控] ✅ 浏览器插件已连接，节点识别码: ${localWorkerId}`
                     });
-                    this.$nextTick(() => {
-                        const container = document.getElementById('terminal-container');
-                        if (container) container.scrollTop = container.scrollHeight;
-                    });
+                    this.scrollTerminalToBottom(true);
                     this.syncTokenToExtension();
                     return;
                 }
@@ -1547,10 +1557,7 @@ createApp({
                         text: event.data.log,
                         raw: `[${timeStr}] [节点] ${event.data.log}`
                     });
-                    this.$nextTick(() => {
-                        const container = document.getElementById('terminal-container');
-                        if (container) container.scrollTop = container.scrollHeight;
-                    });
+                    this.scrollTerminalToBottom(true);
                     return;
                 }
 
@@ -1667,6 +1674,7 @@ createApp({
 
             this.isRunning = true;
             this.currentTab = 'console';
+            this.scrollTerminalToBottom(true);
             await this.authFetch('/api/ext/reset_stats', { method: 'POST' }).catch(() => {});
             this.pollStats();
             this.showToast("✅ 插件节点在线，已启动【古法插件模式】", "success");
@@ -1715,6 +1723,7 @@ createApp({
                 if (data.status === 'success') {
                     this.isRunning = true;
                     this.currentTab = 'console';
+                    this.scrollTerminalToBottom(true);
                     this.pollStats();
                     this.showToast(`启动成功`, "success");
                 } else { this.showToast(data.message, "error"); }
@@ -1736,12 +1745,7 @@ createApp({
                     raw: `[${timeStr}] [系统] 🛑 接收到紧急停止指令，引擎已停止运行！`
                 });
 
-                this.$nextTick(() => {
-                    const container = document.getElementById('terminal-container');
-                    if (container) {
-                        container.scrollTop = container.scrollHeight;
-                    }
-                });
+                this.scrollTerminalToBottom(true);
                 this.pollStats();
             } catch (e) {
                 this.showToast("停止请求发送失败", "error");
@@ -1755,6 +1759,7 @@ createApp({
             const confirmed = await this.customConfirm(`确定推送到 CPA？`);
             if (!confirmed) return;
             this.currentTab = 'console';
+            this.scrollTerminalToBottom(true);
             for (let i = 0; i < this.selectedAccounts.length; i++) {
                 const acc = this.selectedAccounts[i];
                 try {
@@ -1775,6 +1780,7 @@ createApp({
             const confirmed = await this.customConfirm(`确定推送到 Sub2API？`);
             if (!confirmed) return;
             this.currentTab = 'console';
+            this.scrollTerminalToBottom(true);
             for (let i = 0; i < this.selectedAccounts.length; i++) {
                 const acc = this.selectedAccounts[i];
                 try {
@@ -1792,6 +1798,7 @@ createApp({
                 this.showToast("🚫 无法推送：请先配置 CPA 参数！", "warning"); return;
             }
             this.currentTab = 'console';
+            this.scrollTerminalToBottom(true);
             try {
                 const res = await this.authFetch('/api/account/action', {
                     method: 'POST', body: JSON.stringify({ email: account.email, action: action })
@@ -1838,7 +1845,7 @@ createApp({
                     const container = document.getElementById('terminal-container');
                     let isScrolledToBottom = true;
                     if (container) {
-                        isScrolledToBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 100;
+                        isScrolledToBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 120;
                     }
                     this.logs.push(...this.logBuffer);
                     this.logBuffer = [];
@@ -1846,14 +1853,9 @@ createApp({
                     if (this.logs.length > 500) {
                         this.logs.splice(0, this.logs.length - 500);
                     }
-                    this.$nextTick(() => {
-                        if (container && (isScrolledToBottom || this.logs.length < 20)) {
-                            container.scrollTo({
-                                top: container.scrollHeight,
-                                behavior: 'auto'
-                            });
-                        }
-                    });
+                    if (isScrolledToBottom || this.logs.length < 20 || this.currentTab === 'console') {
+                        this.scrollTerminalToBottom(true);
+                    }
                 }
             }, 300);
 
@@ -1941,6 +1943,7 @@ createApp({
 			this.isLoadingSync = true;
 			this.showToast('🚀 多线程同步中，请耐心等待...', 'info');
             this.currentTab = 'console';
+			this.scrollTerminalToBottom(true);
 			try {
 				const res = await this.authFetch('/api/config/add_wildcard_dns', {
 					method: 'POST',
