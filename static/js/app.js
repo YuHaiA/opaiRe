@@ -98,10 +98,6 @@ createApp({
             v2rayAGroupPageSize: 10,
             projectUpdateStatus: null,
             updatePackages: [],
-            healthReport: null,
-            isHealthReportLoading: false,
-            isHealthRestarting: false,
-            isSub2ApiProbeLoading: false,
             logStreamStatus: '未连接',
             logStreamLastError: '',
             accounts: [],
@@ -1233,6 +1229,7 @@ createApp({
 			    this.fetchCloudAccounts();
 			}
             if (tabId === 'cluster') {
+                this.fetchLocalClusterStatus(false);
                 this.initClusterWebSocket();
                 this.syncClusterNodeSelection();
             } else {
@@ -2306,77 +2303,6 @@ createApp({
             await this.checkUpdate(false);
             await this.inspectProjectUpdate(false);
             await this.fetchUpdatePackages(showSuccess);
-            await this.fetchHealthReport(false);
-        },
-        async fetchHealthReport(showSuccess = false) {
-            this.isHealthReportLoading = true;
-            try {
-                const res = await this.authFetch('/api/system/health_report');
-                const data = await res.json();
-                this.healthReport = data.data || null;
-                if (showSuccess) {
-                    const level = data.status === 'success' ? 'success' : (data.status === 'warning' ? 'warning' : 'error');
-                    this.showToast(data.message || '系统诊断已刷新', level);
-                }
-                return data;
-            } catch (e) {
-                if (showSuccess) {
-                    this.showToast('读取系统诊断失败', 'error');
-                }
-                return { status: 'error', message: '读取系统诊断失败' };
-            } finally {
-                this.isHealthReportLoading = false;
-            }
-        },
-        async probeSub2ApiRuntime() {
-            this.isSub2ApiProbeLoading = true;
-            try {
-                const res = await this.authFetch('/api/system/sub2api_probe');
-                const data = await res.json();
-                if (!this.healthReport) {
-                    this.healthReport = { sub2api: {} };
-                }
-                if (!this.healthReport.sub2api) {
-                    this.healthReport.sub2api = {};
-                }
-                this.healthReport.sub2api.probe = data.data || null;
-                const level = data.status === 'success' ? 'success' : (data.status === 'warning' ? 'warning' : 'error');
-                this.showToast(data.message || 'Sub2API 探测已完成', level);
-                return data;
-            } catch (e) {
-                this.showToast('Sub2API 探测失败', 'error');
-                return { status: 'error', message: 'Sub2API 探测失败' };
-            } finally {
-                this.isSub2ApiProbeLoading = false;
-            }
-        },
-        async autoHealRestart() {
-            const confirmed = await this.customConfirm('将根据当前健康诊断执行一次自愈重启。这个操作会重启当前 Web 后端与任务线程，页面会在几秒后自动刷新，确定继续吗？');
-            if (!confirmed) return;
-
-            this.isHealthRestarting = true;
-            try {
-                const res = await this.authFetch('/api/system/auto_heal_restart', {
-                    method: 'POST',
-                    body: JSON.stringify({ force: true })
-                });
-                const data = await res.json();
-                if (data.status === 'success') {
-                    this.showToast(data.message || '健康自愈重启已触发', 'success');
-                    if(this.statsTimer) clearInterval(this.statsTimer);
-                    if(this.evtSource) this.evtSource.close();
-                    this.logStreamStatus = '重启中';
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 8000);
-                } else {
-                    this.showToast(data.message || '健康自愈重启失败', data.status === 'warning' ? 'warning' : 'error');
-                }
-            } catch (e) {
-                this.showToast('健康自愈重启失败，请检查后端日志', 'error');
-            } finally {
-                this.isHealthRestarting = false;
-            }
         },
         async inspectProjectUpdate(showSuccess = false) {
             this.isProjectUpdateChecking = true;
@@ -2805,6 +2731,39 @@ createApp({
                 this.showToast('连接状态切换异常', 'error');
             }
         },
+        async fetchLocalClusterStatus(showToast = false) {
+            if (!this.isLoggedIn) return;
+            this.isLocalClusterStatusLoading = true;
+            try {
+                const res = await this.authFetch('/api/cluster/local_status');
+                const data = await res.json();
+                if (data.status === 'success') {
+                    this.localClusterStatus = data.data || null;
+                    if (showToast) {
+                        this.showToast('已刷新本机子控连接状态', 'success');
+                    }
+                } else if (showToast) {
+                    this.showToast(data.message || '读取本机子控状态失败', 'warning');
+                }
+            } catch (e) {
+                if (showToast) {
+                    this.showToast('读取本机子控状态失败', 'error');
+                }
+            } finally {
+                this.isLocalClusterStatusLoading = false;
+            }
+        },
+        async toggleLocalClusterLink() {
+            if (!this.config) return;
+            const nextEnabled = !(this.config.cluster_enabled !== false);
+            const confirmed = await this.customConfirm(nextEnabled ? '确认恢复子控与主控的连接吗？恢复后会重新开始上报本机状态，但不会影响主任务运行。' : '确认断开子控与主控的连接吗？断开后主任务继续运行，只是不再向主控上报。');
+            if (!confirmed) return;
+
+            this.config.cluster_enabled = nextEnabled;
+            await this.saveConfig(false);
+            await this.fetchLocalClusterStatus(false);
+            this.showToast(nextEnabled ? '已恢复子控连接' : '已断开子控连接', 'success');
+        },
         formatDuration(seconds) {
             if (!seconds || seconds < 0) return "0s";
             const h = Math.floor(seconds / 3600);
@@ -2847,6 +2806,12 @@ createApp({
 
             this.clusterWs = new WebSocket(wsUrl);
 
+            this.clusterWs.onerror = () => {
+                if (this.clusterWs) {
+                    this.clusterWs.close();
+                }
+            };
+
             this.clusterWs.onmessage = (event) => {
                 const res = JSON.parse(event.data);
                 if (res.status === 'success') {
@@ -2856,11 +2821,7 @@ createApp({
             };
 
             this.clusterWs.onclose = () => {
-                setTimeout(() => {
-                    if (this.currentTab === 'cluster' && this.isLoggedIn) {
-                        this.initClusterWebSocket();
-                    }
-                }, 3000);
+                this.clusterWs = null;
             };
         },
     }

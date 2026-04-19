@@ -224,6 +224,8 @@ TG_BOT: dict = {"enable": False, "token": "", "chat_id": ""}
 CLUSTER_NODE_NAME: str = ""
 CLUSTER_MASTER_URL: str = ""
 CLUSTER_SECRET: str = "change-me-cluster-secret"
+CLUSTER_ENABLED: bool = True
+CLUSTER_PREFER_WS: bool = True
 TEMPORAM_COOKIE: str = ""
 FVIA_TOKEN: str = ""
 TMAILOR_CURRENT_TOKEN: str = ""
@@ -271,7 +273,7 @@ def reload_all_configs():
     global DUCKMAIL_API_URL, DUCKMAIL_DOMAIN, DUCKMAIL_MODE, DUCK_API_TOKEN, DUCK_COOKIE, DUCK_OFFICIAL_API_BASE
     global DUCKMAIL_FORWARD_MODE, DUCKMAIL_FORWARD_EMAIL
     global DUCK_USE_PROXY
-    global CLUSTER_NODE_NAME, CLUSTER_MASTER_URL, CLUSTER_SECRET
+    global CLUSTER_NODE_NAME, CLUSTER_MASTER_URL, CLUSTER_SECRET, CLUSTER_ENABLED, CLUSTER_PREFER_WS
 
 
     def safe_int(value, default, minimum=None):
@@ -583,6 +585,8 @@ def reload_all_configs():
     CLUSTER_NODE_NAME = str(_c.get("cluster_node_name", "")).strip()
     CLUSTER_MASTER_URL = str(_c.get("cluster_master_url", "")).strip().rstrip("/")
     CLUSTER_SECRET = str(_c.get("cluster_secret", "change-me-cluster-secret")).strip()
+    CLUSTER_ENABLED = safe_bool(_c.get("cluster_enabled", True), default=True)
+    CLUSTER_PREFER_WS = safe_bool(_c.get("cluster_prefer_ws", True), default=True)
     REG_MODE = str(_c.get("reg_mode", "protocol")).strip().lower()
 
     _temporam = _c.get("temporam", {})

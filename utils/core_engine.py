@@ -60,7 +60,99 @@ log_queue = queue.Queue(maxsize=500)
 _orig_print  = builtins.print
 _thread_local = threading.local()
 _print_lock   = threading.Lock()
+_timeout_log_throttle_state = {}
+_TIMEOUT_LOG_THROTTLE_WINDOW = 8.0
+_TIMEOUT_LOG_THROTTLE_MAX_KEYS = 128
 
+
+def _queue_web_log(msg: str) -> None:
+    try:
+        log_queue.put_nowait(msg)
+    except queue.Full:
+        pass
+
+
+def _is_timeout_warning_log(msg: str) -> bool:
+    text = str(msg or "").lower()
+    if "[warning]" not in text:
+        return False
+    return any(
+        token in text
+        for token in (
+            "curl: (28)",
+            "timed out",
+            "connection timed out",
+            "operation timed out",
+            "recv failure",
+            "proxyconnect tcp",
+            "timeout",
+        )
+    )
+
+
+def _normalize_timeout_warning_signature(msg: str) -> str:
+    text = str(msg or "").strip().lower()
+    text = re.sub(r"\[\d{1,2}:\d{2}:\d{2}\]", "[time]", text)
+    text = re.sub(r"[a-z0-9._%+\-*]+@[a-z0-9.\-*]+", "<email>", text)
+    text = re.sub(r"\d+", "<n>", text)
+    return text[:320]
+
+
+def _flush_stale_timeout_log_summaries(now: float | None = None) -> None:
+    now = now or time.time()
+    stale_keys = []
+    for signature, state in list(_timeout_log_throttle_state.items()):
+        suppressed = int(state.get("suppressed", 0) or 0)
+        last_emit = float(state.get("last_emit", 0.0) or 0.0)
+        last_seen = float(state.get("last_seen", 0.0) or 0.0)
+        if suppressed > 0 and now - last_emit >= _TIMEOUT_LOG_THROTTLE_WINDOW:
+            _queue_web_log(
+                f"[{ts()}] [WARNING] 已折叠 {suppressed} 条相似超时警告，避免日志滚动卡顿。"
+            )
+            state["suppressed"] = 0
+            state["last_emit"] = now
+        if suppressed <= 0 and now - last_seen > 120:
+            stale_keys.append(signature)
+    for signature in stale_keys:
+        _timeout_log_throttle_state.pop(signature, None)
+
+
+def _enqueue_runtime_log(msg: str) -> None:
+    now = time.time()
+    _flush_stale_timeout_log_summaries(now)
+
+    if not _is_timeout_warning_log(msg):
+        _queue_web_log(msg)
+        return
+
+    signature = _normalize_timeout_warning_signature(msg)
+    state = _timeout_log_throttle_state.get(signature)
+    if state is None:
+        state = {"last_emit": 0.0, "last_seen": now, "suppressed": 0}
+        _timeout_log_throttle_state[signature] = state
+
+    if now - float(state.get("last_emit", 0.0) or 0.0) < _TIMEOUT_LOG_THROTTLE_WINDOW:
+        state["suppressed"] = int(state.get("suppressed", 0) or 0) + 1
+        state["last_seen"] = now
+        return
+
+    suppressed = int(state.get("suppressed", 0) or 0)
+    if suppressed > 0:
+        _queue_web_log(
+            f"[{ts()}] [WARNING] 已折叠 {suppressed} 条相似超时警告，避免日志滚动卡顿。"
+        )
+        state["suppressed"] = 0
+
+    _queue_web_log(msg)
+    state["last_emit"] = now
+    state["last_seen"] = now
+
+    if len(_timeout_log_throttle_state) > _TIMEOUT_LOG_THROTTLE_MAX_KEYS:
+        oldest_signature = min(
+            _timeout_log_throttle_state,
+            key=lambda key: float(_timeout_log_throttle_state[key].get("last_seen", 0.0) or 0.0),
+        )
+        _timeout_log_throttle_state.pop(oldest_signature, None)
 
 def web_print(*args, **kwargs):
     if "file" in kwargs and kwargs["file"] is not None:
@@ -76,10 +168,7 @@ def web_print(*args, **kwargs):
         with _print_lock:
             msg = _thread_local.buffer.lstrip("\n")
             if msg and msg.strip() != ".":
-                try:
-                    log_queue.put_nowait(msg.strip())
-                except queue.Full:
-                    pass
+                _enqueue_runtime_log(msg.strip())
         _thread_local.buffer = ""
 
 

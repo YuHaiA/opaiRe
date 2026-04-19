@@ -344,5 +344,7 @@ cf_api_key:
 #集群总控
 cluster_node_name: "NODE-1"
 cluster_master_url: ""
+cluster_enabled: true
+cluster_prefer_ws: true
 # 请务必改成你自己的随机长字符串，不要使用默认值
 cluster_secret: "change-me-cluster-secret"

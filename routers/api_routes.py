@@ -11,7 +11,6 @@ import sys
 import subprocess
 import shutil
 import shlex
-import socket
 import urllib.parse
 import zipfile
 import yaml
@@ -29,7 +28,7 @@ from utils.integrations.tg_notifier import send_tg_msg_async
 from utils.email_providers.gmail_oauth_handler import GmailOAuthHandler
 from utils import proxy_manager
 
-from global_state import VALID_TOKENS, CLUSTER_NODES, NODE_COMMANDS, CLUSTER_NODE_BLOCKLIST, cluster_lock, log_history, engine, verify_token, worker_status
+from global_state import VALID_TOKENS, CLUSTER_NODES, NODE_COMMANDS, CLUSTER_NODE_BLOCKLIST, cluster_lock, log_history, engine, verify_token, worker_status, CLUSTER_RUNTIME_STATUS, cluster_runtime_lock
 import utils.config as cfg
 
 router = APIRouter()
@@ -105,10 +104,6 @@ class V2rayANodeKeysReq(BaseModel):
 
 class ProjectUpdateReq(BaseModel):
     restart_after_update: bool = False
-
-
-class SystemHealReq(BaseModel):
-    force: bool = True
 
 
 class DownloadUpdatePackageReq(BaseModel):
@@ -1111,201 +1106,6 @@ def parse_cpa_usage_to_details(raw_usage: dict) -> dict:
     return details
 
 
-def _read_pid_file_pid(pid_path: str) -> int | None:
-    try:
-        if not os.path.exists(pid_path):
-            return None
-        raw = (open(pid_path, "r", encoding="utf-8").read() or "").strip().splitlines()
-        if not raw:
-            return None
-        return int(str(raw[0]).strip())
-    except Exception:
-        return None
-
-
-def _pid_exists(pid: int | None) -> bool:
-    if not pid:
-        return False
-    try:
-        os.kill(int(pid), 0)
-        return True
-    except Exception:
-        return False
-
-
-def _brief_endpoint(value: str) -> str:
-    raw = str(value or "").strip()
-    if not raw:
-        return ""
-    try:
-        parsed = urllib.parse.urlsplit(raw if "://" in raw else f"http://{raw}")
-        host = parsed.hostname or ""
-        port = f":{parsed.port}" if parsed.port else ""
-        scheme = parsed.scheme or "http"
-        return f"{scheme}://{host}{port}"
-    except Exception:
-        return raw[:48]
-
-
-def _build_socket_probe(host: str = "127.0.0.1", port: int = 8000, timeout: float = 1.5) -> dict:
-    started = time.perf_counter()
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(timeout)
-    try:
-        result = sock.connect_ex((host, port))
-        return {
-            "ok": result == 0,
-            "host": host,
-            "port": port,
-            "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
-            "error": "" if result == 0 else f"connect_ex={result}",
-        }
-    except Exception as e:
-        return {
-            "ok": False,
-            "host": host,
-            "port": port,
-            "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
-            "error": str(e),
-        }
-    finally:
-        try:
-            sock.close()
-        except Exception:
-            pass
-
-
-async def _probe_local_console_http() -> dict:
-    url = "http://127.0.0.1:8000/"
-    started = time.perf_counter()
-    try:
-        async with httpx.AsyncClient(timeout=3.5, follow_redirects=True) as client:
-            resp = await client.get(url, headers={"User-Agent": "opaiRe-health-check"})
-        return {
-            "ok": 200 <= resp.status_code < 500,
-            "status_code": resp.status_code,
-            "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
-            "body_size": len(resp.text or ""),
-            "error": "",
-            "url": url,
-        }
-    except Exception as e:
-        return {
-            "ok": False,
-            "status_code": 0,
-            "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
-            "body_size": 0,
-            "error": str(e),
-            "url": url,
-        }
-
-
-def _build_systemd_runtime_snapshot() -> dict:
-    if os.name == "nt":
-        return {"available": False, "service_name": "", "error": "Windows 环境无 systemd"}
-    try:
-        proc = subprocess.run(
-            ["systemctl", "show", "opaire.service", "--property=LoadState,ActiveState,SubState,MainPID"],
-            cwd=BASE_DIR,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=8,
-        )
-        output = (proc.stdout or "").strip()
-        if proc.returncode != 0:
-            return {"available": False, "service_name": "opaire.service", "error": output or "systemctl 不可用"}
-        data = {}
-        for line in output.splitlines():
-            if "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            data[key.strip()] = value.strip()
-        return {
-            "available": True,
-            "service_name": "opaire.service",
-            "load_state": data.get("LoadState", ""),
-            "active_state": data.get("ActiveState", ""),
-            "sub_state": data.get("SubState", ""),
-            "main_pid": data.get("MainPID", ""),
-            "error": "",
-        }
-    except Exception as e:
-        return {"available": False, "service_name": "opaire.service", "error": str(e)}
-
-
-def _build_engine_runtime_snapshot() -> dict:
-    lock = getattr(engine, "_state_lock", None)
-    if lock:
-        with lock:
-            thread = getattr(engine, "current_thread", None)
-            loop = getattr(engine, "loop", None)
-            async_stop_event = getattr(engine, "async_stop_event", None)
-    else:
-        thread = getattr(engine, "current_thread", None)
-        loop = getattr(engine, "loop", None)
-        async_stop_event = getattr(engine, "async_stop_event", None)
-
-    return {
-        "is_running": bool(engine.is_running()),
-        "thread_name": getattr(thread, "name", "") if thread else "",
-        "thread_alive": bool(thread and thread.is_alive()),
-        "thread_ident": getattr(thread, "ident", None) if thread else None,
-        "thread_stop_flag": bool(getattr(engine, "thread_stop_event", None) and engine.thread_stop_event.is_set()),
-        "loop_present": loop is not None,
-        "loop_running": bool(loop and loop.is_running()),
-        "loop_closed": bool(loop and loop.is_closed()),
-        "async_stop_event_set": bool(async_stop_event and async_stop_event.is_set()),
-        "process_thread_count": len(threading.enumerate()),
-    }
-
-
-def _build_log_runtime_snapshot() -> dict:
-    snap = list(log_history)
-    latest = snap[-5:] if snap else []
-    try:
-        queue_size = core_engine.log_queue.qsize()
-    except Exception:
-        queue_size = -1
-    return {
-        "history_size": len(snap),
-        "queue_size": queue_size,
-        "latest": latest,
-        "stream_strategy": "snapshot_overlap",
-        "duplicate_safe": True,
-    }
-
-
-def _build_sub2api_runtime_snapshot(probe: dict | None = None) -> dict:
-    enabled = bool(getattr(cfg, "ENABLE_SUB2API_MODE", False))
-    use_proxy = bool(getattr(cfg, "SUB2API_USE_PROXY", False))
-    default_proxy = str(getattr(cfg, "DEFAULT_PROXY", "") or "").strip()
-    issues = []
-    if enabled and not getattr(cfg, "SUB2API_URL", ""):
-        issues.append("未配置 Sub2API 接口地址")
-    if enabled and not getattr(cfg, "SUB2API_KEY", ""):
-        issues.append("未配置 Sub2API API Key")
-    if enabled and use_proxy and not default_proxy:
-        issues.append("已开启 Sub2API 代理，但 default_proxy 为空")
-    if enabled and int(getattr(cfg, "SUB2API_ACCOUNT_FETCH_TIMEOUT", 0) or 0) < 30:
-        issues.append("Sub2API 拉库超时过短，建议至少 30 秒")
-
-    return {
-        "enabled": enabled,
-        "api_url": _brief_endpoint(getattr(cfg, "SUB2API_URL", "")),
-        "use_proxy": use_proxy,
-        "default_proxy": _brief_endpoint(default_proxy),
-        "default_proxy_configured": bool(default_proxy),
-        "auto_check": bool(getattr(cfg, "SUB2API_AUTO_CHECK", False)),
-        "threads": int(getattr(cfg, "SUB2API_THREADS", 0) or 0),
-        "batch_reg_count": int(getattr(cfg, "SUB2API_BATCH_COUNT", 0) or 0),
-        "page_size": int(getattr(cfg, "SUB2API_ACCOUNT_PAGE_SIZE", 0) or 0),
-        "fetch_timeout": int(getattr(cfg, "SUB2API_ACCOUNT_FETCH_TIMEOUT", 0) or 0),
-        "issues": issues,
-        "probe": probe or None,
-    }
-
-
 def _schedule_python_process_restart(reason: str, delay_seconds: float = 1.2) -> None:
     def _do_restart():
         time.sleep(delay_seconds)
@@ -1321,75 +1121,6 @@ def _schedule_python_process_restart(reason: str, delay_seconds: float = 1.2) ->
 
     threading.Thread(target=_do_restart, daemon=True, name="ProjectRestartWorker").start()
 
-
-async def _build_system_health_report() -> dict:
-    pid_file_path = os.path.join(BASE_DIR, "data", "web_console.pid")
-    pid_file_pid = _read_pid_file_pid(pid_file_path)
-    current_pid = os.getpid()
-    socket_probe = _build_socket_probe()
-    http_probe = await _probe_local_console_http()
-    systemd_runtime = _build_systemd_runtime_snapshot()
-    engine_runtime = _build_engine_runtime_snapshot()
-    log_runtime = _build_log_runtime_snapshot()
-    sub2api_runtime = _build_sub2api_runtime_snapshot()
-
-    issues: list[str] = []
-    suggestions: list[str] = []
-
-    if pid_file_pid and pid_file_pid != current_pid and os.name == "nt":
-        issues.append("PID 文件记录的进程号与当前 Web 进程不一致")
-        suggestions.append("优先使用项目自带 start.ps1 / stop.ps1 管理本地 Web 进程")
-    if not socket_probe.get("ok"):
-        issues.append("8000 端口未监听")
-        suggestions.append("检查 Web 进程是否已经退出，必要时执行项目重启")
-    if not http_probe.get("ok"):
-        issues.append("本地 Web 控制台 HTTP 自检失败")
-        suggestions.append("若端口已监听但页面不可访问，优先执行健康自愈重启")
-    if log_runtime.get("queue_size", 0) > 300:
-        issues.append("日志队列堆积较多，可能影响日志实时刷新")
-        suggestions.append("检查是否存在持续超时或异常刷屏日志")
-    if sub2api_runtime["enabled"] and sub2api_runtime["issues"]:
-        issues.extend([f"Sub2API: {item}" for item in sub2api_runtime["issues"]])
-        suggestions.append("优先检查 Sub2API 接口地址、代理设置与拉库超时配置")
-    if systemd_runtime.get("available") and systemd_runtime.get("active_state") not in {"active", ""}:
-        issues.append(f"systemd 服务状态异常: {systemd_runtime.get('active_state')}/{systemd_runtime.get('sub_state')}")
-        suggestions.append("检查 systemd 服务日志并考虑执行自愈重启")
-
-    needs_restart = any([
-        not socket_probe.get("ok"),
-        not http_probe.get("ok"),
-        bool(pid_file_pid and pid_file_pid != current_pid and os.name == "nt"),
-        bool(systemd_runtime.get("available") and systemd_runtime.get("active_state") not in {"active", ""}),
-    ])
-
-    if not issues:
-        suggestions.append("当前未发现明显故障，可先继续观察运行态")
-
-    return {
-        "issues": issues,
-        "suggestions": suggestions,
-        "needs_restart": needs_restart,
-        "current_process": {
-            "pid": current_pid,
-            "parent_pid": os.getppid(),
-            "python": sys.executable,
-            "project_root": BASE_DIR,
-            "platform": os.name,
-            "pid_file_path": pid_file_path,
-            "pid_file_pid": pid_file_pid,
-            "pid_file_exists": os.path.exists(pid_file_path),
-            "pid_matches_current": None if pid_file_pid is None else (pid_file_pid == current_pid),
-            "pid_file_process_alive": _pid_exists(pid_file_pid),
-            "start_script_exists": os.path.exists(START_SCRIPT_PATH),
-            "stop_script_exists": os.path.exists(STOP_SCRIPT_PATH),
-        },
-        "socket_probe": socket_probe,
-        "http_probe": http_probe,
-        "engine": engine_runtime,
-        "logs": log_runtime,
-        "sub2api": sub2api_runtime,
-        "systemd": systemd_runtime,
-    }
 
 @router.get("/")
 async def get_dashboard():
@@ -1440,58 +1171,6 @@ async def get_web_process_info(token: str = Depends(verify_token)):
         "stop_command": f'powershell -ExecutionPolicy Bypass -File "{STOP_SCRIPT_PATH}"',
     }
 
-
-@router.get("/api/system/health_report")
-async def get_health_report(token: str = Depends(verify_token)):
-    try:
-        data = await _build_system_health_report()
-        level = "success" if not data.get("issues") else ("warning" if not data.get("needs_restart") else "error")
-        message = "系统运行健康。" if level == "success" else ("检测到异常，建议关注诊断结果。" if level == "warning" else "检测到需要优先处理的运行异常。")
-        return {"status": level, "message": message, "data": data}
-    except Exception as e:
-        return {"status": "error", "message": f"读取系统健康报告失败: {e}"}
-
-
-@router.get("/api/system/sub2api_probe")
-async def probe_sub2api_runtime(token: str = Depends(verify_token)):
-    if not getattr(cfg, "ENABLE_SUB2API_MODE", False):
-        return {"status": "warning", "message": "当前未开启 Sub2API 模式。"}
-    try:
-        client = Sub2APIClient(api_url=cfg.SUB2API_URL, api_key=cfg.SUB2API_KEY)
-        probe = client.probe_connectivity()
-        level = "success" if probe.get("ok") else "warning"
-        return {
-            "status": level,
-            "message": probe.get("message") or ("Sub2API 探测成功。" if level == "success" else "Sub2API 探测失败。"),
-            "data": probe,
-        }
-    except Exception as e:
-        return {"status": "error", "message": f"Sub2API 主动探测失败: {e}"}
-
-
-@router.post("/api/system/auto_heal_restart")
-async def auto_heal_restart(req: SystemHealReq, token: str = Depends(verify_token)):
-    try:
-        report = await _build_system_health_report()
-        if not req.force and not report.get("needs_restart"):
-            return {
-                "status": "warning",
-                "message": "当前诊断结果未发现必须重启的故障，已跳过自动重启。",
-                "data": report,
-            }
-
-        if engine.is_running():
-            engine.stop()
-            engine.wait_until_stopped(5.0)
-
-        _schedule_python_process_restart("健康自愈重启已触发，准备重新拉起当前项目...")
-        return {
-            "status": "success",
-            "message": "健康自愈重启指令已下发，页面将自动恢复。",
-            "data": report,
-        }
-    except Exception as e:
-        return {"status": "error", "message": f"健康自愈重启失败: {e}"}
 
 @router.post("/api/start")
 async def start_task(token: str = Depends(verify_token)):
@@ -2869,6 +2548,16 @@ async def save_config(new_config: dict, token: str = Depends(verify_token)):
                 current_config = {}
         if isinstance(new_config.get("sub2api_mode"), dict):
             new_config["sub2api_mode"].pop("min_remaining_weekly_percent", None)
+        if "cluster_node_name" in new_config:
+            new_config["cluster_node_name"] = str(new_config.get("cluster_node_name", "") or "").strip()
+        if "cluster_master_url" in new_config:
+            new_config["cluster_master_url"] = str(new_config.get("cluster_master_url", "") or "").strip().rstrip("/")
+        if "cluster_secret" in new_config:
+            new_config["cluster_secret"] = str(new_config.get("cluster_secret", "change-me-cluster-secret") or "change-me-cluster-secret").strip()
+        if "cluster_enabled" in new_config:
+            new_config["cluster_enabled"] = bool(new_config.get("cluster_enabled", True))
+        if "cluster_prefer_ws" in new_config:
+            new_config["cluster_prefer_ws"] = bool(new_config.get("cluster_prefer_ws", True))
         if "default_proxy" in new_config:
             new_config["default_proxy"] = _normalize_proxy_input_for_save(new_config.get("default_proxy", ""))
         clash_proxy_pool = new_config.get("clash_proxy_pool")
@@ -3649,6 +3338,19 @@ async def cluster_view(token: str = Depends(verify_token)):
                 keep_nodes[k] = item
         CLUSTER_NODES = keep_nodes
         return {"status": "success", "nodes": CLUSTER_NODES}
+
+
+@router.get("/api/cluster/local_status")
+async def cluster_local_status(token: str = Depends(verify_token)):
+    with cluster_runtime_lock:
+        runtime = dict(CLUSTER_RUNTIME_STATUS)
+    runtime.update({
+        "configured_enabled": bool(getattr(core_engine.cfg, 'CLUSTER_ENABLED', True)),
+        "configured_master_url": str(getattr(core_engine.cfg, 'CLUSTER_MASTER_URL', '') or '').strip(),
+        "configured_node_name": str(getattr(core_engine.cfg, 'CLUSTER_NODE_NAME', '') or '').strip(),
+        "prefer_ws": bool(getattr(core_engine.cfg, 'CLUSTER_PREFER_WS', True)),
+    })
+    return {"status": "success", "data": runtime}
 
 
 @router.post("/api/cluster/report")

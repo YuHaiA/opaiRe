@@ -8,6 +8,18 @@ CLUSTER_NODES = {}
 NODE_COMMANDS = {}
 CLUSTER_NODE_BLOCKLIST = set()
 cluster_lock = threading.Lock()
+cluster_runtime_lock = threading.Lock()
+CLUSTER_RUNTIME_STATUS = {
+    "enabled": True,
+    "connected": False,
+    "transport": "idle",
+    "master_url": "",
+    "node_name": "",
+    "last_error": "",
+    "last_event": 0.0,
+    "last_report_at": 0.0,
+    "last_command": "none",
+}
 log_history = deque(maxlen=500)
 worker_status: dict = {}
 engine = core_engine.RegEngine()

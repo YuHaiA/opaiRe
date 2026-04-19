@@ -311,6 +311,33 @@
                                         </div>
                                     </div>
                                 </div>
+                                <div class="mt-4 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 items-center">
+                                    <div class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4">
+                                        <div class="flex flex-wrap items-center gap-2">
+                                            <span class="text-[11px] px-2 py-1 rounded-full border font-black"
+                                                  :class="(localClusterStatus?.configured_enabled !== false) ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-600 border-slate-200'">
+                                                {{ (localClusterStatus?.configured_enabled !== false) ? '子控连接已开启' : '子控连接已断开' }}
+                                            </span>
+                                            <span class="text-[11px] px-2 py-1 rounded-full border font-black"
+                                                  :class="localClusterStatus?.connected ? 'bg-sky-50 text-sky-700 border-sky-200' : 'bg-amber-50 text-amber-700 border-amber-200'">
+                                                {{ localClusterStatus?.connected ? `当前通过 ${localClusterStatus?.transport || 'unknown'} 上报` : '当前未连接主控' }}
+                                            </span>
+                                        </div>
+                                        <div class="text-xs text-slate-500 mt-3 font-medium leading-relaxed">
+                                            WSS 现在只是副功能。若 WSS 握手失败，系统会自动降级为 HTTP 心跳上报，不会影响主任务运行。
+                                            <span v-if="localClusterStatus?.last_error" class="block mt-2 text-amber-700">最近链路提示：{{ localClusterStatus.last_error }}</span>
+                                        </div>
+                                    </div>
+                                    <div class="flex flex-wrap gap-3 justify-start md:justify-end">
+                                        <button @click="fetchLocalClusterStatus(true)" :disabled="isLocalClusterStatusLoading" class="px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors shadow-sm text-sm font-black disabled:opacity-50">
+                                            {{ isLocalClusterStatusLoading ? '刷新中...' : '刷新状态' }}
+                                        </button>
+                                        <button @click="toggleLocalClusterLink" class="px-4 py-2.5 rounded-xl border text-sm font-black shadow-sm transition-colors"
+                                                :class="(config.cluster_enabled === false) ? 'border-emerald-200 bg-emerald-600 text-white hover:bg-emerald-700' : 'border-rose-200 bg-white text-rose-700 hover:bg-rose-50'">
+                                            {{ (config.cluster_enabled === false) ? '恢复连接' : '断开连接' }}
+                                        </button>
+                                    </div>
+                                </div>
                                 <p class="text-[11px] text-slate-500 mt-3 font-medium">💡 提示：如果你想在 A 机器查看 B 和 C，只需在 B 和 C 这里填入 A 机器的网址（如 http://A机器的IP:8000）并保持密钥一致，保存后即可在 A 机器的此页面实时监控它们！</p>
                             </div>
 
@@ -3101,128 +3128,6 @@
                                     <div v-else class="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-6 font-medium">
                                         还没有读取 Git 工作区更新状态。
                                     </div>
-                                </div>
-                            </div>
-
-                            <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200/60 border-l-4 border-l-rose-500">
-                                <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-5 mb-5">
-                                    <div>
-                                        <h4 class="text-lg font-black text-slate-800 flex items-center gap-2"><span>🩺</span> 健康诊断与自愈</h4>
-                                        <p class="text-xs text-slate-500 mt-1">这里聚合 Web 进程、日志通道、Sub2API 探测和 systemd 运行态，用来判断“卡死”到底发生在哪一层。</p>
-                                    </div>
-                                    <div class="flex flex-wrap gap-3">
-                                        <button @click="fetchHealthReport(true)" :disabled="isHealthReportLoading" class="px-4 py-2.5 rounded-xl border border-rose-200 bg-white text-rose-700 hover:bg-rose-50 transition-colors shadow-sm text-sm font-black disabled:opacity-50 flex items-center gap-2">
-                                            <span v-if="isHealthReportLoading" class="animate-spin">⏳</span>
-                                            <span v-else>🔍</span>
-                                            刷新诊断
-                                        </button>
-                                        <button @click="probeSub2ApiRuntime" :disabled="isSub2ApiProbeLoading" class="px-4 py-2.5 rounded-xl border border-purple-200 bg-white text-purple-700 hover:bg-purple-50 transition-colors shadow-sm text-sm font-black disabled:opacity-50 flex items-center gap-2">
-                                            <span v-if="isSub2ApiProbeLoading" class="animate-spin">⏳</span>
-                                            <span v-else>🛰️</span>
-                                            探测 Sub2API
-                                        </button>
-                                        <button @click="autoHealRestart" :disabled="isHealthRestarting" class="px-4 py-2.5 rounded-xl border border-amber-200 bg-amber-600 text-white hover:bg-amber-700 transition-colors shadow-sm text-sm font-black disabled:opacity-50 flex items-center gap-2">
-                                            <span v-if="isHealthRestarting" class="animate-spin">⏳</span>
-                                            <span v-else>🧯</span>
-                                            自愈重启
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div v-if="healthReport" class="space-y-5">
-                                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                                        <div class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4">
-                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">Web 端口</div>
-                                            <div class="mt-2 text-lg font-black" :class="healthReport.socket_probe?.ok ? 'text-emerald-700' : 'text-rose-700'">{{ healthReport.socket_probe?.ok ? '8000 正常监听' : '8000 未监听' }}</div>
-                                            <div class="text-xs text-slate-500 font-mono mt-2">PID {{ healthReport.current_process?.pid || '-' }}</div>
-                                        </div>
-                                        <div class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4">
-                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">HTTP 自检</div>
-                                            <div class="mt-2 text-lg font-black" :class="healthReport.http_probe?.ok ? 'text-emerald-700' : 'text-rose-700'">{{ healthReport.http_probe?.ok ? `HTTP ${healthReport.http_probe?.status_code}` : '页面探测失败' }}</div>
-                                            <div class="text-xs text-slate-500 font-mono mt-2">{{ healthReport.http_probe?.elapsed_ms || 0 }} ms</div>
-                                        </div>
-                                        <div class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4">
-                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">日志通道</div>
-                                            <div class="mt-2 text-lg font-black" :class="logStreamStatus === '已连接' ? 'text-emerald-700' : 'text-amber-700'">{{ logStreamStatus }}</div>
-                                            <div class="text-xs text-slate-500 mt-2">后端队列 {{ healthReport.logs?.queue_size ?? '-' }} · 历史 {{ healthReport.logs?.history_size ?? '-' }}</div>
-                                        </div>
-                                        <div class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4">
-                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">任务线程</div>
-                                            <div class="mt-2 text-lg font-black" :class="healthReport.engine?.is_running ? 'text-sky-700' : 'text-slate-700'">{{ healthReport.engine?.is_running ? '任务运行中' : '当前空闲' }}</div>
-                                            <div class="text-xs text-slate-500 mt-2">{{ healthReport.engine?.thread_name || '无活动线程' }}</div>
-                                        </div>
-                                    </div>
-
-                                    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                                        <div class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4 space-y-3">
-                                            <div class="flex items-center justify-between gap-3">
-                                                <div class="text-sm font-black text-slate-800">当前进程与本地脚本</div>
-                                                <span class="px-2.5 py-1 rounded-lg text-[11px] font-black border" :class="healthReport.current_process?.pid_matches_current === false ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'">
-                                                    {{ healthReport.current_process?.pid_matches_current === false ? 'PID 文件不一致' : '进程记录正常' }}
-                                                </span>
-                                            </div>
-                                            <div class="text-xs text-slate-600 font-mono break-all leading-relaxed">
-                                                当前 PID：{{ healthReport.current_process?.pid || '-' }}<br>
-                                                PID 文件：{{ healthReport.current_process?.pid_file_pid || '-' }}<br>
-                                                Python：{{ healthReport.current_process?.python || '-' }}
-                                            </div>
-                                            <div class="flex flex-wrap gap-2 text-[11px] font-black">
-                                                <span class="px-2.5 py-1 rounded-lg border" :class="healthReport.current_process?.start_script_exists ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'">start.ps1 {{ healthReport.current_process?.start_script_exists ? '存在' : '缺失' }}</span>
-                                                <span class="px-2.5 py-1 rounded-lg border" :class="healthReport.current_process?.stop_script_exists ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'">stop.ps1 {{ healthReport.current_process?.stop_script_exists ? '存在' : '缺失' }}</span>
-                                            </div>
-                                        </div>
-
-                                        <div class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4 space-y-3">
-                                            <div class="flex items-center justify-between gap-3">
-                                                <div class="text-sm font-black text-slate-800">Sub2API 链路</div>
-                                                <span class="px-2.5 py-1 rounded-lg text-[11px] font-black border" :class="healthReport.sub2api?.enabled ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-slate-100 text-slate-600 border-slate-200'">
-                                                    {{ healthReport.sub2api?.enabled ? '已启用' : '未启用' }}
-                                                </span>
-                                            </div>
-                                            <div class="text-xs text-slate-600 leading-relaxed">
-                                                接口：<code class="font-mono">{{ healthReport.sub2api?.api_url || '未配置' }}</code><br>
-                                                管理接口代理：<code class="font-mono">{{ healthReport.sub2api?.use_proxy ? '开启' : '关闭' }}</code><br>
-                                                拉库参数：<code class="font-mono">page_size={{ healthReport.sub2api?.page_size || '-' }}</code> · <code class="font-mono">timeout={{ healthReport.sub2api?.fetch_timeout || '-' }}s</code>
-                                            </div>
-                                            <div v-if="healthReport.sub2api?.probe" class="text-xs rounded-xl px-3 py-3 border" :class="healthReport.sub2api.probe.ok ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-amber-50 text-amber-800 border-amber-200'">
-                                                {{ healthReport.sub2api.probe.message }}
-                                                <div class="mt-2 font-mono">{{ healthReport.sub2api.probe.elapsed_ms }} ms</div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                                        <div class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4">
-                                            <div class="text-sm font-black text-slate-800 mb-3">诊断结论</div>
-                                            <div v-if="healthReport.issues && healthReport.issues.length > 0" class="space-y-2">
-                                                <div v-for="(item, idx) in healthReport.issues" :key="`issue-${idx}`" class="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-3 font-medium leading-relaxed">
-                                                    {{ item }}
-                                                </div>
-                                            </div>
-                                            <div v-else class="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-3 font-medium leading-relaxed">
-                                                当前没有检测到明显故障。
-                                            </div>
-                                        </div>
-                                        <div class="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4">
-                                            <div class="text-sm font-black text-slate-800 mb-3">建议下一步</div>
-                                            <div class="space-y-2">
-                                                <div v-for="(item, idx) in (healthReport.suggestions || [])" :key="`suggestion-${idx}`" class="text-sm text-slate-700 bg-white border border-slate-200 rounded-xl px-3 py-3 font-medium leading-relaxed">
-                                                    {{ item }}
-                                                </div>
-                                            </div>
-                                            <div v-if="logStreamLastError" class="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-3 font-medium">
-                                                前端日志通道：{{ logStreamLastError }}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div v-if="healthReport.systemd && healthReport.systemd.available" class="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-4 font-mono leading-relaxed break-all">
-                                        systemd：{{ healthReport.systemd.service_name }} · {{ healthReport.systemd.active_state || '-' }}/{{ healthReport.systemd.sub_state || '-' }} · MainPID={{ healthReport.systemd.main_pid || '-' }}
-                                    </div>
-                                </div>
-
-                                <div v-else class="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-6 font-medium">
-                                    还没有读取系统健康诊断数据。
                                 </div>
                             </div>
 
