@@ -176,6 +176,10 @@ createApp({
             const tab = window.location.hash.replace('#', '');
             if (tab && this.tabs.some(t => t.id === tab)) {
                 this.currentTab = tab;
+                if (tab === 'console') {
+                    this.pollStats();
+                    this.scrollTerminalToBottom(true);
+                }
             }
         });
         this.timer = setInterval(() => {
@@ -385,6 +389,10 @@ createApp({
             this.initSSE();
             this.startStatsPolling();
             this.checkUpdate();
+            if (this.currentTab === 'console') {
+                this.pollStats();
+                this.scrollTerminalToBottom(true);
+            }
             if (this.config && this.config.reg_mode === 'extension') {
                 this.listenToExtension();
             }

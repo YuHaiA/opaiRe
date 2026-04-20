@@ -213,6 +213,28 @@ def _worker_push_thread():
             print(f"[{core_engine.ts()}] [系统] ❌ 缺少 WebSocket 库！请在终端执行: pip install websockets")
             return
 
+        cluster_http_timeout = 15
+        cluster_ws_open_timeout = 15
+        cluster_ws_ping_timeout = 25
+        cluster_retry_sleep = 3.0
+
+        def _is_cluster_transient_error(error_text: str) -> bool:
+            text = str(error_text or "").lower()
+            return any(token in text for token in (
+                "timed out",
+                "timeout",
+                "handshake operation timed out",
+                "connection refused",
+                "connection reset",
+                "temporarily unavailable",
+                "bad gateway",
+                "502",
+                "503",
+                "504",
+                "remote end closed connection without response",
+                "upstream prematurely closed connection",
+            ))
+
         def _build_cluster_payload():
             _drain_runtime_logs_to_history()
             s = core_engine.run_stats
@@ -317,7 +339,7 @@ def _worker_push_thread():
             )
 
             def _send_once():
-                with opener.open(req, timeout=8) as resp:
+                with opener.open(req, timeout=cluster_http_timeout) as resp:
                     return json.loads(resp.read().decode("utf-8") or "{}")
 
             return await asyncio.to_thread(_send_once)
@@ -367,9 +389,9 @@ def _worker_push_thread():
                     async with websockets.connect(
                         ws_endpoint,
                         ping_interval=20,
-                        ping_timeout=20,
+                        ping_timeout=cluster_ws_ping_timeout,
                         close_timeout=5,
-                        open_timeout=8,
+                        open_timeout=cluster_ws_open_timeout,
                         max_size=2_000_000,
                     ) as ws:
                         if last_role != "node":
@@ -397,11 +419,15 @@ def _worker_push_thread():
                 except Exception as e:
                     err_text = str(e)
                     if err_text != last_ws_error:
-                        print(f"[{core_engine.ts()}] [集群] ⚠️ WebSocket 上报链路异常，已自动降级到 HTTP 心跳: {err_text}")
+                        if _is_cluster_transient_error(err_text):
+                            print(f"[{core_engine.ts()}] [集群] ⚠️ WebSocket 握手偏慢或主控仍在预热，先自动降级到 HTTP 心跳: {err_text}")
+                        else:
+                            print(f"[{core_engine.ts()}] [集群] ⚠️ WebSocket 上报链路异常，已自动降级到 HTTP 心跳: {err_text}")
                         last_ws_error = err_text
-                    ws_retry_after = time.time() + 60
+                    ws_retry_after = time.time() + (20 if _is_cluster_transient_error(err_text) else 60)
                     _set_cluster_runtime_status(connected=False, transport="http-fallback", last_error=err_text)
 
+            retry_sleep = cluster_retry_sleep
             try:
                 response = await _post_cluster_report_http(master_url, node_name, secret, payload)
                 is_running = bool(payload.get("stats", {}).get("is_running", False))
@@ -411,11 +437,16 @@ def _worker_push_thread():
             except Exception as e:
                 err_text = str(e)
                 _set_cluster_runtime_status(connected=False, transport="http", last_error=err_text)
+                if _is_cluster_transient_error(err_text):
+                    retry_sleep = 6.0
                 if err_text != last_ws_error:
-                    print(f"[{core_engine.ts()}] [集群] ⚠️ 集群上报失败，但不会影响主任务运行: {err_text}")
+                    if _is_cluster_transient_error(err_text):
+                        print(f"[{core_engine.ts()}] [集群] ⚠️ 主控可能正在重启或 HTTPS 链路握手偏慢，子控稍后会自动重试: {err_text}")
+                    else:
+                        print(f"[{core_engine.ts()}] [集群] ⚠️ 集群上报失败，但不会影响主任务运行: {err_text}")
                     last_ws_error = err_text
 
-            await asyncio.sleep(3)
+            await asyncio.sleep(retry_sleep)
 
     asyncio.run(_ws_loop())
 
