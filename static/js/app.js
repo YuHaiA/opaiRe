@@ -3,7 +3,7 @@ const { createApp } = Vue;
 createApp({
     data() {
         return {
-            appVersion: 'v10.1.20',
+            appVersion: 'v10.2.0',
             versionPageUrl: 'https://github.com/YuHaiA/opaiRe/releases/latest',
             isLoggedIn: !!localStorage.getItem('auth_token'),
             loginPassword: '',
@@ -160,6 +160,7 @@ createApp({
             showCloudDetailModal: false,
             currentCloudDetail: null,
             nowTimestamp: Math.floor(Date.now() / 1000),
+            terminalAutoFollow: true,
             clusterNodes: {},
             selectedClusterNodeName: '',
             clusterVisibilityMap: {},
@@ -185,9 +186,20 @@ createApp({
         this.timer = setInterval(() => {
             this.nowTimestamp = Math.floor(Date.now() / 1000);
         }, 1000);
+        this.$nextTick(() => {
+            const container = document.getElementById('terminal-container');
+            if (container) {
+                container.addEventListener('scroll', this.updateTerminalFollowState, { passive: true });
+                this.updateTerminalFollowState();
+            }
+        });
     },
     beforeUnmount() {
         if(this.statsTimer) clearInterval(this.statsTimer);
+        const container = document.getElementById('terminal-container');
+        if (container) {
+            container.removeEventListener('scroll', this.updateTerminalFollowState);
+        }
     },
 	computed: {
         totalPages() {
@@ -1223,17 +1235,24 @@ createApp({
                     if (!container) return;
 
                     const nearBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 120;
-                    if (force || this.currentTab === 'console' || nearBottom) {
+                    if (force || nearBottom || this.terminalAutoFollow) {
                         container.scrollTop = container.scrollHeight;
+                        this.terminalAutoFollow = true;
                     }
                 });
             });
+        },
+        updateTerminalFollowState() {
+            const container = document.getElementById('terminal-container');
+            if (!container) return;
+            this.terminalAutoFollow = container.scrollHeight - container.clientHeight <= container.scrollTop + 120;
         },
         switchTab(tabId) {
             this.currentTab = tabId;
             window.location.hash = tabId;
 			if (tabId === 'console') {
 				this.pollStats();
+                this.terminalAutoFollow = true;
 				this.scrollTerminalToBottom(true);
 			}
             if (tabId === 'accounts') {
@@ -1861,7 +1880,7 @@ createApp({
                     if (this.logs.length > 500) {
                         this.logs.splice(0, this.logs.length - 500);
                     }
-                    if (isScrolledToBottom || this.logs.length < 20 || this.currentTab === 'console') {
+                    if (isScrolledToBottom || this.logs.length < 20 || this.terminalAutoFollow) {
                         this.scrollTerminalToBottom(true);
                     }
                 }

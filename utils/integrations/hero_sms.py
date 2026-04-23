@@ -64,12 +64,6 @@ def _hero_sms_base_url() -> str:
     url = str(cfg.HERO_SMS_BASE_URL).strip()
     return url or "https://hero-sms.com/stubs/handler_api.php"
 
-def _hero_sms_use_proxy() -> bool:
-    return bool(getattr(cfg, "HERO_SMS_USE_PROXY", False))
-
-def _hero_sms_api_proxies(proxies: Any) -> Any:
-    return proxies if _hero_sms_use_proxy() else None
-
 def _hero_sms_min_balance_limit() -> float:
     return float(cfg.HERO_SMS_MIN_BALANCE)
 
@@ -655,7 +649,7 @@ def _hero_sms_request(
         resp = requests.get(
             _hero_sms_base_url(),
             params=query,
-            proxies=_hero_sms_api_proxies(proxies),
+            proxies=proxies,
             verify=_ssl_verify(),
             timeout=timeout,
             impersonate="chrome131",
@@ -1032,7 +1026,7 @@ def _try_verify_phone_via_hero_sms(
         hint_url: str = "",
 ) -> tuple[bool, str]:
     if not _hero_sms_enabled():
-        return False, "HeroSMS 未配置 API Key 或主开关未开启，如果不接码请忽略该提示"
+        return False, "HeroSMS 未配置 API Key 或HeroSMS主开关未开启，如果不想花钱接码请忽略该条提示"
 
     max_tries = _hero_sms_max_tries()
     last_reason = "HeroSMS 手机验证失败"

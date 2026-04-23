@@ -73,7 +73,20 @@ $proc = Start-Process -FilePath $launcherPath `
 
 Start-Sleep -Seconds 4
 $listener = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-$listenPid = if ($listener) { $listener.OwningProcess } else { $proc.Id }
+if (-not $listener) {
+    $alive = $false
+    try {
+        $null = Get-Process -Id $proc.Id -ErrorAction Stop
+        $alive = $true
+    } catch {
+    }
+    if (-not $alive) {
+        throw "Web 服务启动失败：入口进程已退出，且 8000 端口未监听。"
+    }
+    throw "Web 服务启动失败：入口进程仍在，但 8000 端口未监听。"
+}
+
+$listenPid = $listener.OwningProcess
 
 New-Item -ItemType Directory -Path (Split-Path -Parent $pidFile) -Force | Out-Null
 Set-Content -LiteralPath $pidFile -Value $listenPid -Encoding ascii

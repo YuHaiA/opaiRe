@@ -55,6 +55,9 @@ local_microsoft:
   master_email: ""
   client_id: ""
   refresh_token: ""
+  suffix_mode: "fixed"
+  suffix_len_min: 8
+  suffix_len_max: 8
   pool_fission: false
 
 # [模式 "freemail" 专属]
@@ -96,10 +99,6 @@ luckmail:
   preferred_domain: ""
   email_type: ms_graph
   variant_mode: ''
-  # true = 调用你已导入到 LuckMail 私有邮箱池的邮箱；false = 走 LuckMail 购号/历史复用
-  use_imported_pool: false
-  # 私有邮箱池模式下可指定某个具体邮箱，不填则按 email_type/domain 自动分配
-  specified_email: ""
   reuse_purchased: true
   tag_id:
 # [temporam 邮箱配置]
@@ -111,22 +110,20 @@ tmailor:
 # [FviaInboxes 配置]
 fvia:
   token: ''
-# [代理配置]
-# openai注册时代理地址，例子：socks5://127.0.0.1:10808。如果是国外服务器此项可以不填
-default_proxy: ""
 
-# [HTTP 动态代理池]
-# 适用于 HTTP 动态代理网关（用户名:密码@主机:端口），支持多线程独立通道复用同一条或多条动态代理
-# 如果只填一条动态代理，系统会按 pool_size 复制成多个工作位；
-# 是否换 IP 取决于服务商是否按“新建连接/会话”轮换出口
-http_dynamic_proxy:
-  enable: false
-  # 动态代理池通道数。通常建议与 reg_threads 保持一致
-  pool_size: 3
-  # 支持填写一条或多条代理。保存时若缺少协议头会自动补全为 http://
-  # 若留空则回退使用上面的 default_proxy；若两者都为空，后端会拒绝保存
-  proxy_list:
-    - "http://user:pass@gate.example.com:10000"
+# Gmail OAuth 裂变配置
+gmail_oauth_mode:
+  master_email: ""           # Gmail 主号 (需已完成 credentials.json 授权)
+  fission_enable: false      # 是否开启 Gmail 裂变
+  fission_mode: "suffix"     # 裂变模式: suffix、dot
+  # 后缀生成配置 (当 fission_mode 为 suffix 时生效)
+  suffix_mode: "mystic"      # fixed (固定长度) / range (随机范围) / mystic (高拟真词库)
+  suffix_len_min: 8
+  suffix_len_max: 12
+
+# [代理配置]
+# openai注册时代理地址，例子：http://127.0.0.1:7897。如果是国外服务器此项可以不填
+default_proxy: ""
 
 # 是否开启注册多线程并发 (true/false)
 enable_multi_thread_reg: false    
@@ -139,50 +136,21 @@ reg_threads: 10
 clash_proxy_pool:
   # 【开关】是否在每次注册前自动通过 Clash 切换节点
   enable: false
-  # 代理客户端类型：clash=Clash/Mihomo 控制 API 切点；v2rayn=自动切换当前选中节点；v2raya=由 v2rayA 面板管理订阅与节点，本项目只检测当前链路
-  client_type: "clash"
-  # v2rayA Web 面板地址（当 client_type=v2raya 时建议填写，方便面板跳转）
-  v2raya_url: ""
-  # 如果 v2rayA 面板开启了登录保护，可填写下列账号供本项目读取节点与切换
-  v2raya_username: ""
-  v2raya_password: ""
-  # v2rayA 使用的 Xray 可执行文件路径（Linux 例如 /usr/local/bin/xray）
-  v2raya_xray_bin: ""
-  # v2rayA 使用的 geodata 目录（Linux 例如 /usr/share/xray）
-  v2raya_assets_dir: ""
-  # v2rayA 环境变量文件路径（Linux 默认一般是 /etc/default/v2raya）
-  v2raya_env_file: ""
-  # v2rayN 根目录（当 client_type=v2rayn 时必填）
-  v2rayn_base_dir: ""
-  # v2rayN 切换节点后等待核心重启生效的秒数
-  v2rayn_restart_wait_sec: 15
-  # v2rayN 切点后自动隐藏主窗口，避免每次切换都弹出界面
-  v2rayn_hide_window_on_restart: true
-  # 启动业务前先批量测活，后续仅在存活节点池内切换
-  v2rayn_precheck_on_start: false
-  # 批量测活结果缓存分钟数；0 表示只在启动时预检一次，不按时间刷新
-  v2rayn_precheck_cache_minutes: 30
-  # 单次批量测活最多抽检多少个节点；0 表示测完整个候选池
-  v2rayn_precheck_max_nodes: 50
-  # 批量测活完成后，按延迟排序只保留前多少个活节点进入运行池
-  v2rayn_live_pool_limit: 50
-  # 是否定时执行“订阅更新命令”，更新后自动重新批量测活
-  v2rayn_subscription_update_enabled: false
-  # 订阅更新间隔（分钟）；仅在上方开关开启后生效
-  v2rayn_subscription_update_interval_minutes: 180
-  # 订阅更新命令（例如调用你本机现有的更新脚本、bat、powershell 命令）
-  v2rayn_subscription_update_command: ""
   # 【核心开关】true=服务器10容器独立推算模式；false=本地单机/单容器模式
   pool_mode: false
   # Clash 的外部控制 API 地址 (注意端口通常是 9090 或 9097)
   api_url: "http://127.0.0.1:9097"
   #true为测速优选，false为随机盲抽。提示：如果A节点一直是最低延迟那么可能每次都是A节点。
   fastest_mode: false
-  # 业务策略组名称。若使用“Clash 订阅自助更新”，更新后可在面板中自动识别并同步
+  # 目标集群实例数量
+  cluster_count: 5
+  # 订阅链接存储
+  sub_url: ""
+  # 你机场包含所有节点的策略组名称，带有 Emoji 也没关系
   group_name: "节点选择"
   # Clash 的外部控制鉴权秘钥 (Secret)
   secret: "set-your-secret"
-  # 用于连接外网测活的本地代理端口。独享池模式下当 warp_proxy_list 为空时会回退使用它
+  # 用于连接外网测活的本地代理端口 (通常与上方的 default_proxy 保持一致)
   test_proxy_url: ""
   # 节点过滤黑名单：严格剔除包含以下关键词的节点 (如港台地区、说明性节点)
   blacklist:
@@ -205,8 +173,24 @@ clash_proxy_pool:
     - "China"
     - "回国"
 
+raw_proxy_pool:
+  # 独立于 Clash 的批量代理池；启用后优先使用这里的代理列表
+  # 支持 HTTP / HTTPS / SOCKS5 显式协议；未写协议时默认按 socks5h 解析
+  enable: false
+  proxy_list:
+    # 支持以下格式：
+    # - http://user:pass@host:8080
+    # - https://user:pass@host:8443
+    # - socks5://user:pass@host:1080
+    # - socks5h://user:pass@host:1080
+    # - host:port
+    # - host:port:user:pass
+    # - user:pass@host:port
+    - "http://user:pass@127.0.0.1:8080"
+    - "socks5://user:pass@127.0.0.1:1080"
+    - "127.0.0.1:1081:user:pass"
+
 warp_proxy_list:
-  # 独享池模式下，每条代表一个独立通道 / 一个 Mihomo 实例对应的 HTTP 代理端口
   - "http://127.0.0.1:41001"
   - "http://127.0.0.1:41002"
   - "http://127.0.0.1:41003"
@@ -232,6 +216,9 @@ enable_email_masking: true
 #注册后等待多少秒在去拿tokens,默认是5-15秒之内
 login_delay_min: 20
 login_delay_max: 45
+
+#常规模式是否保存仅注册账号，用于后续手动登录或者其他作用
+retain_reg_only: false
 
 # CPA 模式专属配置
 cpa_mode:
@@ -261,6 +248,8 @@ cpa_mode:
   check_interval_minutes: 60
   #并发线程数配置，默认 10 线程
   threads: 10
+  #是否保存仅注册账号，用于后续手动登录或者其他作用
+  retain_reg_only: false
 
 # SUB2APIA配置 参数含义跟CPA相同
 sub2api_mode:
@@ -282,9 +271,10 @@ sub2api_mode:
   account_rate_multiplier: 1.0
   account_group_ids: ""
   enable_ws_mode: true
-  account_page_size: 20
-  account_fetch_timeout: 45
-  use_proxy: false
+  test_model: "gpt-5.2"
+  default_proxy: ""
+  #是否保存仅注册账号，用于后续手动登录或者其他作用
+  retain_reg_only: false
 
 hero_sms:
   enabled: false
@@ -292,8 +282,8 @@ hero_sms:
   base_url: https://hero-sms.com/stubs/handler_api.php
   country: 50
   service: dr
-  use_proxy: false
   auto_pick_country: false
+  verify_on_register: false
   reuse_phone: true
   max_price: 0.08
   min_balance: 1
@@ -313,26 +303,18 @@ tg_bot:
   enable: false
   token: ''
   chat_id: ''
-  use_proxy: false
   mask_email: false
   mask_password: false
-  template_success: |
-    🎉 <b>注册成功</b>
-    ━━━━━━━━━━━━
-    ⏰ 时间：<code>{time}</code>
-    📧 账号：<code>{email}</code>
-    🔑 密码：<code>{password}</code>
-  template_stop: |
-    🛑 <b>任务已停止</b>
-    ━━━━━━━━━━━━
-    📊 成功率：<code>{success_rate}%</code>
-    ✅ 成功：<code>{success}/{target}</code>
-    ❌ 失败：<code>{failed}</code>
-    🚧 风控：<code>{retries}</code>
-    🔒 密码受阻：<code>{pwd_blocked}</code>
-    📱 出现手机：<code>{phone_verify}</code>
-    ⏱ 总耗时：<code>{elapsed_time}s</code>
-    📈 平均单号：<code>{avg_time}s</code>
+
+# 数据库适配，默认为本地sqlite
+database:
+  type: "sqlite"  # 可选值: "sqlite" 或 "mysql"
+  mysql:
+    host: "127.0.0.1"
+    port: 3306
+    user: "root"
+    password: ""
+    db_name: "wenfxl_manager"
 
 # WEB端密码
 web_password: admin
@@ -340,11 +322,11 @@ web_password: admin
 cf_api_email: 
 #CF KEY
 cf_api_key:
-
+max_log_lines: "500"
 #集群总控
 cluster_node_name: "NODE-1"
 cluster_master_url: ""
-cluster_enabled: true
-cluster_prefer_ws: true
-# 请务必改成你自己的随机长字符串，不要使用默认值
-cluster_secret: "change-me-cluster-secret"
+cluster_secret: "wenfxl666"
+
+# 是否放弃强行变道走无密码OTP
+disable_forced_takeover: true

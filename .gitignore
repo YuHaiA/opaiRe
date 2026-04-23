@@ -1,23 +1,26 @@
-.venv/
+# Python 缓存文件
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-!utils/auth_core.pyd
+*.py[cod]
+*$py.class
+.gitignore
+utils/__pycache__/
+routers/__pycache__/
+luckmail/__pycache__/
+# IDE 配置文件
+.idea/
+.vscode/
 
+# 本地数据库和日志
 data/
-run.out.log
-run.err.log
+*.db
+*.log
 
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
+# 本地备份配置
+*副本*.yaml
+config.yaml
+utils/sentinel.py
 
-.DS_Store
-Thumbs.db
-DawnCache/
-GPUCache/
-Web Data
-Web Data-journal
-.codex/
-updates/
+data
+utils/auth_core/
+!utils/auth_core.pyd
+test.py
