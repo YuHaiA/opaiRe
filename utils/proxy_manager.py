@@ -59,6 +59,8 @@ _global_switch_lock = threading.Lock()
 _socket_restore_lock = threading.Lock()
 _original_socket = socket.socket
 _last_switch_time = 0
+_last_v2rayn_core_restart_time = 0.0
+_last_v2rayn_pressure_log_at = 0.0
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(CURRENT_DIR)
 
@@ -83,6 +85,63 @@ def _call_with_original_socket(fn, *args, **kwargs):
             return fn(*args, **kwargs)
         finally:
             socket.socket = current_socket
+
+
+def _count_local_proxy_active_connections(proxy_url=None) -> int:
+    if os.name != "nt":
+        return 0
+    target_proxy = _get_v2rayn_inbound_proxy_url(proxy_url if proxy_url else LOCAL_PROXY_URL)
+    parsed = urllib.parse.urlparse(target_proxy)
+    port = parsed.port
+    if not port:
+        return 0
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano", "-p", "tcp"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+            **_hidden_subprocess_kwargs(),
+        )
+        if result.returncode != 0:
+            return 0
+        count = 0
+        marker = f":{port}"
+        for line in (result.stdout or "").splitlines():
+            text = line.strip()
+            if not text.startswith("TCP"):
+                continue
+            parts = re.split(r"\s+", text)
+            if len(parts) < 5:
+                continue
+            local_addr, remote_addr, state = parts[1], parts[2], parts[3].upper()
+            if marker not in local_addr and marker not in remote_addr:
+                continue
+            if state in {"ESTABLISHED", "CLOSE_WAIT", "FIN_WAIT_1", "FIN_WAIT_2", "SYN_SENT", "SYN_RECEIVED"}:
+                count += 1
+        return count
+    except Exception:
+        return 0
+
+
+def _wait_for_local_proxy_pressure_relief(proxy_url=None, threshold: int = 16, timeout_sec: float = 6.0) -> int:
+    global _last_v2rayn_pressure_log_at
+    if os.name != "nt":
+        return 0
+    start = time.time()
+    last_count = _count_local_proxy_active_connections(proxy_url)
+    if last_count <= threshold:
+        return last_count
+    while time.time() - start < timeout_sec:
+        now = time.time()
+        if now - _last_v2rayn_pressure_log_at >= 2.0:
+            print(f"[{ts()}] [代理池] 本地代理活跃连接较多 ({last_count})，等待网络栈缓冲后再切换...")
+            _last_v2rayn_pressure_log_at = now
+        time.sleep(0.5)
+        last_count = _count_local_proxy_active_connections(proxy_url)
+        if last_count <= threshold:
+            break
+    return last_count
 
 
 def format_docker_url(url: str) -> str:
@@ -1136,17 +1195,21 @@ def smart_switch_node(proxy_url=None):
         pass
     if not ENABLE_NODE_SWITCH:
         return True
-    if PROXY_CLIENT_TYPE == "v2rayn":
-        return _switch_v2rayn_node(proxy_url)
-    if PROXY_CLIENT_TYPE == "v2raya":
-        return _switch_v2raya_node(proxy_url)
-    if POOL_MODE and proxy_url:
-        return _do_smart_switch(proxy_url)
     with _global_switch_lock:
-        if time.time() - _last_switch_time < 10:
+        cooldown = 10.0
+        if PROXY_CLIENT_TYPE in {"v2rayn", "v2raya"}:
+            cooldown = max(8.0, float(V2RAYN_RESTART_WAIT_SEC) + 4.0)
+        if time.time() - _last_switch_time < cooldown:
             print(f"[{ts()}] [代理池] 其他线程刚完成切换，跳过本次请求...")
             return True
-        success = _do_smart_switch(proxy_url)
+        if PROXY_CLIENT_TYPE == "v2rayn":
+            success = _switch_v2rayn_node(proxy_url)
+        elif PROXY_CLIENT_TYPE == "v2raya":
+            success = _switch_v2raya_node(proxy_url)
+        elif POOL_MODE and proxy_url:
+            success = _do_smart_switch(proxy_url)
+        else:
+            success = _do_smart_switch(proxy_url)
         if success:
             _last_switch_time = time.time()
         return success
@@ -1366,9 +1429,11 @@ def _write_v2rayn_selection(profile):
     if not cfg:
         return False
     cfg["IndexId"] = profile["index_id"]
-    # Force a global node selection by IndexId only. Keeping SubIndexId
-    # can pin v2rayN to the current subscription subgroup.
-    cfg.pop("SubIndexId", None)
+    subid = str(profile.get("subid") or "").strip()
+    if subid:
+        cfg["SubIndexId"] = subid
+    else:
+        cfg.pop("SubIndexId", None)
     if V2RAYN_HIDE_WINDOW_ON_RESTART:
         ui_item = cfg.get("UiItem") or {}
         ui_item["AutoHideStartup"] = True
@@ -1376,9 +1441,108 @@ def _write_v2rayn_selection(profile):
     try:
         with open(V2RAYN_GUI_CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
         return True
     except Exception as e:
         print(f"[{ts()}] [ERROR] 写入 v2rayN 当前节点失败: {e}")
+        return False
+
+
+def _get_v2rayn_process_ids() -> list[int]:
+    if os.name != "nt":
+        return []
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FO", "CSV", "/NH", "/FI", "IMAGENAME eq v2rayN.exe"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            **_hidden_subprocess_kwargs(),
+        )
+        if result.returncode != 0:
+            return []
+        pids = []
+        for line in (result.stdout or "").splitlines():
+            line = line.strip().strip("\ufeff")
+            if not line or line.startswith("INFO:"):
+                continue
+            if "v2rayN.exe" not in line:
+                continue
+            parts = [part.strip().strip('"') for part in line.split('","')]
+            if len(parts) < 2:
+                continue
+            try:
+                pids.append(int(parts[1]))
+            except Exception:
+                continue
+        return sorted(set(pids))
+    except Exception:
+        return []
+
+
+def _wait_for_v2rayn_exit(timeout_sec: float = 8.0) -> bool:
+    if os.name != "nt":
+        return True
+    start = time.time()
+    while time.time() - start < timeout_sec:
+        if not _get_v2rayn_process_ids():
+            return True
+        time.sleep(0.25)
+    still_running = _get_v2rayn_process_ids()
+    if still_running:
+        print(f"[{ts()}] [WARNING] v2rayN 旧进程未在 {timeout_sec}s 内完全退出: {still_running}")
+        return False
+    return True
+
+
+def _wait_for_v2rayn_start(previous_pids: list[int] | None = None, timeout_sec: float = 8.0) -> tuple[bool, list[int]]:
+    if os.name != "nt":
+        return True, []
+    prev = set(int(x) for x in (previous_pids or []))
+    start = time.time()
+    last_seen = []
+    while time.time() - start < timeout_sec:
+        current = _get_v2rayn_process_ids()
+        last_seen = current
+        if current and (not prev or any(pid not in prev for pid in current)):
+            return True, current
+        time.sleep(0.25)
+    if last_seen:
+        print(f"[{ts()}] [WARNING] v2rayN 启动后进程未发生变化，当前 PID: {last_seen}")
+    else:
+        print(f"[{ts()}] [WARNING] v2rayN 启动后未检测到 v2rayN.exe 进程。")
+    return False, last_seen
+
+
+def _launch_v2rayn(hidden: bool = True) -> bool:
+    launch_kwargs = _hidden_subprocess_kwargs() if hidden else {}
+    try:
+        subprocess.Popen(
+            [V2RAYN_EXE_PATH],
+            cwd=V2RAYN_BASE_DIR if V2RAYN_BASE_DIR else None,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            **launch_kwargs,
+        )
+        return True
+    except Exception as e:
+        mode = "隐藏窗口" if hidden else "普通窗口"
+        print(f"[{ts()}] [WARNING] v2rayN 以{mode}启动失败: {e}")
+    try:
+        subprocess.Popen(
+            ["cmd", "/c", "start", "", V2RAYN_EXE_PATH],
+            cwd=V2RAYN_BASE_DIR if V2RAYN_BASE_DIR else None,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            shell=False,
+            **launch_kwargs,
+        )
+        print(f"[{ts()}] [代理池] v2rayN 已回退到 cmd/start 方式拉起 GUI。")
+        return True
+    except Exception as e:
+        mode = "隐藏窗口" if hidden else "普通窗口"
+        print(f"[{ts()}] [WARNING] v2rayN 以{mode}回退 cmd/start 启动仍失败: {e}")
         return False
 
 
@@ -1387,21 +1551,61 @@ def _restart_v2rayn():
         print(f"[{ts()}] [ERROR] 未找到 v2rayN.exe，请先配置 v2rayN 根目录。")
         return False
     hidden_kwargs = _hidden_subprocess_kwargs()
-    try:
-        subprocess.run(["taskkill", "/IM", "xray.exe", "/F"], capture_output=True, text=True, **hidden_kwargs)
-        subprocess.run(["taskkill", "/IM", "v2rayN.exe", "/F"], capture_output=True, text=True, **hidden_kwargs)
-        time.sleep(0.8)
-        subprocess.Popen(
-            [V2RAYN_EXE_PATH],
-            cwd=V2RAYN_BASE_DIR if V2RAYN_BASE_DIR else None,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            **hidden_kwargs,
+    previous_pids = _get_v2rayn_process_ids()
+    for attempt in range(1, 3):
+        try:
+            subprocess.run(["taskkill", "/IM", "xray.exe", "/F"], capture_output=True, text=True, timeout=10, **hidden_kwargs)
+            subprocess.run(["taskkill", "/IM", "v2rayN.exe", "/F"], capture_output=True, text=True, timeout=10, **hidden_kwargs)
+        except Exception as e:
+            print(f"[{ts()}] [WARNING] 结束 v2rayN/xray 进程时出现异常: {e}")
+
+        _wait_for_v2rayn_exit(timeout_sec=max(3.0, min(10.0, float(V2RAYN_RESTART_WAIT_SEC))))
+        time.sleep(0.6)
+
+        launched = _launch_v2rayn(hidden=True)
+        if not launched:
+            launched = _launch_v2rayn(hidden=False)
+        if not launched:
+            print(f"[{ts()}] [WARNING] v2rayN 第 {attempt}/2 次重启未能成功发起。")
+            continue
+
+        started, current_pids = _wait_for_v2rayn_start(
+            previous_pids=previous_pids,
+            timeout_sec=max(4.0, min(12.0, float(V2RAYN_RESTART_WAIT_SEC) + 2.0)),
         )
-        return True
-    except Exception as e:
-        print(f"[{ts()}] [ERROR] 重启 v2rayN 失败: {e}")
+        if started:
+            print(f"[{ts()}] [代理池] v2rayN 已拉起，当前 PID: {current_pids}")
+            return True
+
+        previous_pids = current_pids or previous_pids
+        print(f"[{ts()}] [WARNING] v2rayN 第 {attempt}/2 次重启后未确认启动成功，准备重试...")
+
+    print(f"[{ts()}] [ERROR] 重启 v2rayN 失败：多次尝试后仍未检测到成功拉起。")
+    return False
+
+
+def _restart_v2rayn_core_only(proxy_url=None) -> bool:
+    global _last_v2rayn_core_restart_time
+    if os.name != "nt":
         return False
+    gui_pids = _get_v2rayn_process_ids()
+    if not gui_pids:
+        return False
+    now = time.time()
+    if now - _last_v2rayn_core_restart_time < 3.0:
+        time.sleep(3.0 - (now - _last_v2rayn_core_restart_time))
+    hidden_kwargs = _hidden_subprocess_kwargs()
+    try:
+        subprocess.run(["taskkill", "/IM", "xray.exe", "/F"], capture_output=True, text=True, timeout=10, **hidden_kwargs)
+    except Exception as e:
+        print(f"[{ts()}] [WARNING] 仅重启 v2rayN 内核时结束 xray 失败: {e}")
+    _last_v2rayn_core_restart_time = time.time()
+    time.sleep(0.8)
+    if _wait_for_local_proxy_ready(proxy_url, timeout_sec=max(4.0, float(V2RAYN_RESTART_WAIT_SEC) + 1.0)):
+        print(f"[{ts()}] [代理池] v2rayN GUI 已在运行，已通过重启 xray 内核应用新节点。")
+        return True
+    print(f"[{ts()}] [WARNING] 仅重启 xray 内核未能恢复代理监听，回退到全量重启 v2rayN GUI。")
+    return False
 
 
 def _wait_for_local_proxy_ready(proxy_url=None, timeout_sec=None):
@@ -1423,14 +1627,15 @@ def _wait_for_local_proxy_ready(proxy_url=None, timeout_sec=None):
     return False
 
 
-def _test_v2rayn_proxy_liveness(proxy_url=None, silent: bool = False):
+def _test_v2rayn_proxy_liveness(proxy_url=None, silent: bool = False, light: bool = False):
     raw_url = _get_v2rayn_inbound_proxy_url(proxy_url if proxy_url else LOCAL_PROXY_URL)
     target_proxy = format_docker_url(raw_url)
     proxies = {"http": target_proxy, "https": target_proxy}
     display_name = get_display_name(proxy_url if proxy_url else LOCAL_PROXY_URL)
     probe_urls = _get_v2rayn_probe_urls()
     last_error = None
-    for attempt in range(2):
+    max_attempts = 1 if light else 2
+    for attempt in range(max_attempts):
         probe_res = None
         probe_url = ""
         try:
@@ -1450,33 +1655,35 @@ def _test_v2rayn_proxy_liveness(proxy_url=None, silent: bool = False):
                     probe_res = None
             if probe_res is None:
                 raise last_error or RuntimeError("all probe urls failed")
-            try:
-                trace_res = _call_with_original_socket(
-                    std_requests.get,
-                    "https://cloudflare.com/cdn-cgi/trace",
-                    proxies=proxies,
-                    timeout=4.0,
-                )
-                if trace_res.status_code == 200:
-                    loc = "UNKNOWN"
-                    for line in trace_res.text.split("\n"):
-                        if line.startswith("loc="):
-                            loc = line.split("=")[1].strip()
-                    if loc in {"CN", "HK"}:
+            if not light:
+                try:
+                    trace_res = _call_with_original_socket(
+                        std_requests.get,
+                        "https://cloudflare.com/cdn-cgi/trace",
+                        proxies=proxies,
+                        timeout=4.0,
+                    )
+                    if trace_res.status_code == 200:
+                        loc = "UNKNOWN"
+                        for line in trace_res.text.split("\n"):
+                            if line.startswith("loc="):
+                                loc = line.split("=")[1].strip()
+                        if loc in {"CN", "HK"}:
+                            if not silent:
+                                print(f"[{ts()}] [代理测活] {display_name} 地区受限 ({loc})，立即切换下一节点。")
+                            return False, loc, None
                         if not silent:
-                            print(f"[{ts()}] [代理测活] {display_name} 地区受限 ({loc})，立即切换下一节点。")
-                        return False, loc, None
-                    if not silent:
-                        print(f"[{ts()}] [代理测活] {display_name} 成功！地区 ({loc})，基础探测延迟: {probe_res.elapsed.total_seconds():.2f}s | 探测URL={probe_url}")
-                    return True, loc, round(float(probe_res.elapsed.total_seconds() * 1000), 1)
-            except Exception:
-                pass
+                            print(f"[{ts()}] [代理测活] {display_name} 成功！地区 ({loc})，基础探测延迟: {probe_res.elapsed.total_seconds():.2f}s | 探测URL={probe_url}")
+                        return True, loc, round(float(probe_res.elapsed.total_seconds() * 1000), 1)
+                except Exception:
+                    pass
             if not silent:
-                print(f"[{ts()}] [代理测活] {display_name} 基础探测成功，地区校验跳过。延迟: {probe_res.elapsed.total_seconds():.2f}s | 探测URL={probe_url}")
+                mode_desc = "轻量探测" if light else "基础探测"
+                print(f"[{ts()}] [代理测活] {display_name} {mode_desc}成功，地区校验跳过。延迟: {probe_res.elapsed.total_seconds():.2f}s | 探测URL={probe_url}")
             return True, "UNKNOWN", round(float(probe_res.elapsed.total_seconds() * 1000), 1)
         except Exception as exc:
             last_error = exc
-            if attempt == 0:
+            if attempt == 0 and max_attempts > 1:
                 if not silent:
                     print(f"[{ts()}] [代理测活] {display_name} 首次探测超时，等待链路稳定后重试一次...")
                 time.sleep(1.0)
@@ -1489,7 +1696,7 @@ def _test_v2rayn_proxy_liveness(proxy_url=None, silent: bool = False):
 def _activate_v2rayn_profile(profile, proxy_url=None):
     if not _write_v2rayn_selection(profile):
         return False, None, None
-    if not _restart_v2rayn():
+    if not (_restart_v2rayn_core_only(proxy_url) or _restart_v2rayn()):
         return False, None, None
     if not _wait_for_local_proxy_ready(proxy_url, timeout_sec=V2RAYN_RESTART_WAIT_SEC):
         return False, None, None
@@ -1501,7 +1708,7 @@ def _activate_v2rayn_profile(profile, proxy_url=None):
 def _activate_v2rayn_profile_runtime(profile, proxy_url=None):
     if not _write_v2rayn_selection(profile):
         return False
-    if not _restart_v2rayn():
+    if not (_restart_v2rayn_core_only(proxy_url) or _restart_v2rayn()):
         return False
     if not _wait_for_local_proxy_ready(proxy_url, timeout_sec=V2RAYN_RESTART_WAIT_SEC):
         return False
