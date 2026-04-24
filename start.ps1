@@ -1,8 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $projectRoot = (Resolve-Path (Split-Path -Parent $MyInvocation.MyCommand.Path)).Path
-$pythonPath = Join-Path $projectRoot ".venv\Scripts\python.exe"
-$pythonwPath = Join-Path $projectRoot ".venv\Scripts\pythonw.exe"
+$uvCommand = (Get-Command uv -ErrorAction Stop).Source
 $outLog = Join-Path $projectRoot "run.out.log"
 $errLog = Join-Path $projectRoot "run.err.log"
 $pidFile = Join-Path $projectRoot "data\web_console.pid"
@@ -21,12 +20,6 @@ function Stop-OpaiReProcessById {
     } catch {
     }
 }
-
-if (-not (Test-Path $pythonPath)) {
-    throw "未找到虚拟环境解释器: $pythonPath"
-}
-
-$launcherPath = if (Test-Path $pythonwPath) { $pythonwPath } else { $pythonPath }
 
 $existingPids = @()
 
@@ -65,8 +58,13 @@ foreach ($proc in $allOpaiReProcesses) {
 Start-Sleep -Seconds 2
 Remove-Item -LiteralPath $outLog, $errLog -ErrorAction SilentlyContinue
 
-$proc = Start-Process -FilePath $launcherPath `
-    -ArgumentList "wfxl_openai_regst.py" `
+& $uvCommand sync --frozen --no-dev --project $projectRoot
+if ($LASTEXITCODE -ne 0) {
+    throw "uv sync 执行失败，无法启动 Web 服务。"
+}
+
+$proc = Start-Process -FilePath $uvCommand `
+    -ArgumentList @("run", "--frozen", "--no-dev", "--project", $projectRoot, "wfxl_openai_regst.py") `
     -WorkingDirectory $projectRoot `
     -WindowStyle Hidden `
     -PassThru

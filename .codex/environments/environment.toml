@@ -8,7 +8,7 @@ script = ""
 [[actions]]
 name = "运行"
 icon = "run"
-command = ".venv\\Scripts\\python.exe wfxl_openai_regst.py"
+command = "./start.ps1"
 
 [[actions]]
 name = "停止"

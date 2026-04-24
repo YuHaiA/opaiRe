@@ -323,6 +323,9 @@ cf_api_email:
 #CF KEY
 cf_api_key:
 max_log_lines: "500"
+log_memory_trim_mb: "700"
+log_memory_trim_ratio: "0.7"
+log_memory_check_every: "25"
 #集群总控
 cluster_node_name: "NODE-1"
 cluster_master_url: ""

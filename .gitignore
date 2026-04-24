@@ -9,6 +9,8 @@ luckmail/__pycache__/
 # IDE 配置文件
 .idea/
 .vscode/
+.venv/
+.uv/
 
 # 本地数据库和日志
 data/
@@ -24,3 +26,4 @@ data
 utils/auth_core/
 !utils/auth_core.pyd
 test.py
+aitest.py

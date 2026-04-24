@@ -1,0 +1,27 @@
+[project]
+name = "opaire"
+version = "10.2.0"
+description = "Wenfxl Codex Manager Web Console"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "PyYAML",
+    "pydantic",
+    "websockets",
+    "requests",
+    "httpx[socks]",
+    "curl-cffi",
+    "PySocks",
+    "cloudflare",
+    "google-api-python-client",
+    "google-auth-httplib2",
+    "google-auth-oauthlib",
+    "docker",
+    "pymysql",
+    "cryptography",
+]
+
+[tool.uv]
+package = false

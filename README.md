@@ -35,10 +35,10 @@ It also supports **random multi-level subdomain generation**, designed to work t
 
 ## Environment Setup
 
-Install Python Dependencies Install the required base libraries using the requirements.txt file in the root directory:
+Use `uv` to create the environment and install dependencies:
 
 ```bash
-pip install -r requirements.txt
+uv sync
 ```
 
 ## ☕ Buy me a coffee
@@ -183,7 +183,8 @@ An overview of the core directories and files in this repository:
 ├── Dockerfile               # Container image definition
 ├── docker-compose.yml       # Docker compose deployment example
 ├── config.example.yaml      # Configuration fallback template
-├── requirements.txt         # Python dependency list
+├── pyproject.toml           # Python dependency manifest
+├── uv.lock                  # uv lockfile
 └── README.md                # Project documentation
 ```
 
@@ -192,7 +193,7 @@ An overview of the core directories and files in this repository:
 Start the Web Console service locally:
 
 ```bash
-python wfxl_openai_regst.py
+uv run wfxl_openai_regst.py
 ```
 
 After startup, open the Web Console in your browser:

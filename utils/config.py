@@ -287,6 +287,9 @@ NORMAL_SLEEP_MIN: int = 5
 NORMAL_SLEEP_MAX: int = 30
 NORMAL_TARGET_COUNT: int = 0
 MAX_LOG_LINES: int = 500
+LOG_MEMORY_TRIM_MB: int = 700
+LOG_MEMORY_TRIM_RATIO: float = 0.7
+LOG_MEMORY_CHECK_EVERY: int = 25
 _clash_enable: bool = False
 _clash_pool_mode: bool = False
 CLASH_CLUSTER_COUNT: int = 5
@@ -397,7 +400,7 @@ def reload_all_configs(new_config_dict=None):
     global LOCAL_MS_ENABLE_FISSION, LOCAL_MS_MASTER_EMAIL, LOCAL_MS_PASSWORD, LOCAL_MS_CLIENT_ID, LOCAL_MS_REFRESH_TOKEN, LOCAL_MS_POOL_FISSION
     global LOCAL_MS_SUFFIX_MODE, LOCAL_MS_SUFFIX_LEN_MIN, LOCAL_MS_SUFFIX_LEN_MAX
     global DB_TYPE, MYSQL_CFG
-    global MAX_LOG_LINES
+    global MAX_LOG_LINES, LOG_MEMORY_TRIM_MB, LOG_MEMORY_TRIM_RATIO, LOG_MEMORY_CHECK_EVERY
     global CPA_RETAIN_REG_ONLY, SUB2API_RETAIN_REG_ONLY, RETAIN_REG_ONLY
     global GMAIL_OAUTH_MASTER_EMAIL, GMAIL_OAUTH_FISSION_ENABLE, GMAIL_OAUTH_FISSION_MODE
     global GMAIL_OAUTH_SUFFIX_MODE, GMAIL_OAUTH_SUFFIX_LEN_MIN, GMAIL_OAUTH_SUFFIX_LEN_MAX
@@ -732,6 +735,13 @@ def reload_all_configs(new_config_dict=None):
     FVIA_TOKEN = str(_fvia.get("token") or "").strip()
 
     MAX_LOG_LINES = safe_int(_c.get("max_log_lines", 500), 500, minimum=50)
+    LOG_MEMORY_TRIM_MB = safe_int(_c.get("log_memory_trim_mb", 700), 700, minimum=0)
+    try:
+        LOG_MEMORY_TRIM_RATIO = float(_c.get("log_memory_trim_ratio", 0.7))
+    except Exception:
+        LOG_MEMORY_TRIM_RATIO = 0.7
+    LOG_MEMORY_TRIM_RATIO = max(0.1, min(0.95, LOG_MEMORY_TRIM_RATIO))
+    LOG_MEMORY_CHECK_EVERY = safe_int(_c.get("log_memory_check_every", 25), 25, minimum=1)
 
     _gmail = _c.get("gmail_oauth_mode", {})
     GMAIL_OAUTH_MASTER_EMAIL = str(_gmail.get("master_email", "")).strip()
