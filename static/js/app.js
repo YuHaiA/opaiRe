@@ -3,7 +3,7 @@ const { createApp } = Vue;
 createApp({
     data() {
         return {
-            appVersion: 'v11.0.0',
+            appVersion: 'v11.0.1',
             versionPageUrl: 'https://github.com/YuHaiA/opaiRe/releases/latest',
             isLoggedIn: !!localStorage.getItem('auth_token'),
             loginPassword: '',

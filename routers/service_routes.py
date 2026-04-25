@@ -176,17 +176,29 @@ def get_sub2api_groups(token: str = Depends(verify_token)):
     from curl_cffi import requests as cffi_requests
     sub2api_url = getattr(core_engine.cfg, "SUB2API_URL", "").strip()
     sub2api_key = getattr(core_engine.cfg, "SUB2API_KEY", "").strip()
-    if not sub2api_url or not sub2api_key: return {"status": "error",
-                                                   "message": "Please save the Sub2API URL and API key first."}
+    if not sub2api_url or not sub2api_key:
+        return {"status": "error", "message": "请先保存 Sub2API 的 API 地址和 API Key。"}
     try:
         response = cffi_requests.get(f"{sub2api_url.rstrip('/')}/api/v1/admin/groups/all",
                                      headers={"x-api-key": sub2api_key, "Content-Type": "application/json"}, timeout=10,
                                      impersonate="chrome110")
-        if response.status_code != 200: return {"status": "error",
-                                                "message": f"HTTP {response.status_code}: {response.text[:200]}"}
+        if response.status_code != 200:
+            if response.status_code == 404:
+                try:
+                    probe = cffi_requests.get(sub2api_url.rstrip("/"), timeout=10, impersonate="chrome110")
+                    page_text = str(probe.text or "")[:2000]
+                    if "Wenfxl 注册管理系统" in page_text or "Wenfxl Codex Manager" in page_text:
+                        return {
+                            "status": "error",
+                            "message": "当前 Sub2API 地址指向的是管理台页面，不是 Sub2API 后端 API。请填写真正的 Sub2API 服务地址。",
+                        }
+                except Exception:
+                    pass
+            return {"status": "error",
+                    "message": f"远端分组接口返回 HTTP {response.status_code}，请检查 Sub2API API 地址是否正确。"}
         return {"status": "success", "data": response.json().get("data", [])}
     except Exception as exc:
-        return {"status": "error", "message": f"Failed to fetch Sub2API groups: {exc}"}
+        return {"status": "error", "message": f"获取 Sub2API 线上分组失败: {exc}"}
 
 @router.get("/api/clash/status")
 async def get_clash_status(token: str = Depends(verify_token)):
