@@ -8,6 +8,7 @@ import uvicorn
 import warnings
 import subprocess
 import socket
+import io
 import socks
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="trio")
 
@@ -16,12 +17,67 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from utils import core_engine, db_manager
-from utils.config import reload_all_configs
-from utils.log_stream_cache import RecentParsedLogCache
+class _ImportOutputFilter(io.TextIOBase):
+    def __init__(self, wrapped):
+        self._wrapped = wrapped
+        self._buffer = ""
+        self._blocked = (
+            "项目仓库: https://github.com/wenfxl/openai-cpa",
+            "openai-cpa Project",
+        )
+
+    def write(self, s):
+        text = str(s)
+        self._buffer += text
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            if not any(marker in line for marker in self._blocked):
+                self._wrapped.write(line + "\n")
+        return len(text)
+
+    def flush(self):
+        if self._buffer:
+            if not any(marker in self._buffer for marker in self._blocked):
+                self._wrapped.write(self._buffer)
+            self._buffer = ""
+        self._wrapped.flush()
+
+
+_original_stdout = sys.stdout
+sys.stdout = _ImportOutputFilter(sys.stdout)
+try:
+    from utils import core_engine, db_manager
+    from utils.config import reload_all_configs
+    from utils.log_stream_cache import RecentParsedLogCache
+finally:
+    sys.stdout.flush()
+    sys.stdout = _original_stdout
 
 from global_state import engine, log_history, append_log
 from routers import api_routes
+
+
+def _get_origin_repo_web_url() -> str:
+    default_url = "https://github.com/YuHaiA/opaiRe"
+    try:
+        proc = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=10,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+        )
+        remote_url = str(proc.stdout or "").strip()
+        if not remote_url:
+            return default_url
+        import re
+        matched = re.search(r"github\.com[:/](?P<slug>[^/\s]+/[^/\s]+?)(?:\.git)?$", remote_url)
+        if not matched:
+            return default_url
+        return f"https://github.com/{matched.group('slug')}"
+    except Exception:
+        return default_url
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -188,9 +244,11 @@ threading.Thread(target=_worker_push_thread, daemon=True).start()
 if __name__ == "__main__":
     try: reload_all_configs()
     except: pass
+    repo_web_url = _get_origin_repo_web_url()
     print("=" * 65)
     print(f"[{core_engine.ts()}] [系统] OpenAI 全链路自动化生产与多维资源中转调度平台")
     print(f"[{core_engine.ts()}] [系统] Author: (wenfxl)轩灵")
+    print(f"[{core_engine.ts()}] [系统] 项目仓库：{repo_web_url}")
     print(f"[{core_engine.ts()}] [系统] 如果遇到问题请更换域名解决，目前eu.cc，xyz，cn，edu.cc等常见域名均不可用，请更换为冷门域名")
     print("-" * 65)
     print(f"[{core_engine.ts()}] [系统] Web 控制台已准备就绪，等待下发指令...")

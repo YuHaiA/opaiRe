@@ -24,6 +24,30 @@ import utils.config as cfg
 router = APIRouter()
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+
+def _get_origin_repo_info() -> tuple[str, str]:
+    default_slug = "YuHaiA/opaiRe"
+    default_web_url = "https://github.com/YuHaiA/opaiRe"
+    try:
+        proc = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=10,
+            cwd=BASE_DIR,
+        )
+        remote_url = str(proc.stdout or "").strip()
+        if not remote_url:
+            return default_slug, default_web_url
+        matched = re.search(r"github\.com[:/](?P<slug>[^/\s]+/[^/\s]+?)(?:\.git)?$", remote_url)
+        if not matched:
+            return default_slug, default_web_url
+        slug = matched.group("slug")
+        return slug, f"https://github.com/{slug}"
+    except Exception:
+        return default_slug, default_web_url
+
 class DummyArgs:
     def __init__(self, proxy=None, once=False):
         self.proxy = proxy
@@ -655,8 +679,9 @@ async def save_config(new_config: dict, token: str = Depends(verify_token)):
 @router.get("/api/system/check_update")
 async def check_update(current_version: str, token: str = Depends(verify_token)):
     try:
+        repo_slug, repo_web_url = _get_origin_repo_info()
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get("https://api.github.com/repos/wenfxl/openai-cpa/releases/latest",
+            resp = await client.get(f"https://api.github.com/repos/{repo_slug}/releases/latest",
                                     headers={"Accept": "application/vnd.github.v3+json"})
             if resp.status_code != 200: return {"status": "error",
                                                 "message": f"无法获取更新数据 (GitHub API 返回 HTTP {resp.status_code})"}
@@ -669,9 +694,10 @@ async def check_update(current_version: str, token: str = Depends(verify_token))
         has_update = _parse(remote_version) > _parse(current_version) if remote_version else False
         assets = data.get("assets")
         download_url = assets[0].get("browser_download_url", "") if assets else data.get("zipball_url", "")
+        html_url = data.get("html_url", "")
         return {"status": "success", "has_update": has_update, "remote_version": remote_version,
                 "changelog": data.get("body", "无更新日志"), "download_url": download_url,
-                "html_url": data.get("html_url", "")}
+                "html_url": html_url, "version_page_url": html_url or f"{repo_web_url}/releases/latest"}
     except Exception as e:
         return {"status": "error", "message": f"检查更新发生未知异常: {str(e)}"}
 
