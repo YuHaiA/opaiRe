@@ -6,11 +6,14 @@ import asyncio
 import threading
 import sys
 import subprocess
+import shutil
+import zipfile
 import httpx
 from typing import Optional, Any
 from fastapi import APIRouter, Depends, Query, Request, WebSocket, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
+import yaml
 
 from global_state import VALID_TOKENS, CLUSTER_NODES, NODE_COMMANDS, cluster_lock, log_history, engine, verify_token, worker_status, append_log
 from utils import core_engine, db_manager
@@ -30,6 +33,9 @@ class LoginData(BaseModel): password: str
 class ClusterUploadAccountsReq(BaseModel): node_name: str; secret: str; accounts: list
 class ClusterReportReq(BaseModel): node_name: str; secret: str; stats: dict; logs: list
 class ClusterControlReq(BaseModel): node_name: str; action: str
+class ProjectUpdateReq(BaseModel): restart_after_update: bool = False
+class DownloadUpdatePackageReq(BaseModel): version: str; download_url: str
+class MigrateUpdatePackageReq(BaseModel): version: str; cleanup_zip: bool = True; cleanup_other_versions: bool = False
 
 class ExtResultReq(BaseModel):
     status: str
@@ -74,6 +80,200 @@ def _sanitize_local_microsoft_config(local_ms: Any) -> dict:
     data["suffix_len_min"] = min_len
     data["suffix_len_max"] = max_len
     return data
+
+
+def _run_git_command(args: list[str], timeout: int = 30) -> tuple[int, str]:
+    try:
+        proc = subprocess.run(
+            ["git"] + args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout,
+            cwd=BASE_DIR,
+        )
+        return proc.returncode, (proc.stdout or "").strip()
+    except FileNotFoundError:
+        return 127, "git_not_found"
+
+
+def _safe_extract_zip(zip_path: str, target_dir: str) -> None:
+    os.makedirs(target_dir, exist_ok=True)
+    target_real = os.path.realpath(target_dir)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for member in zf.infolist():
+            member_name = str(member.filename or "")
+            if not member_name or member_name.endswith("/"):
+                continue
+            destination = os.path.realpath(os.path.join(target_dir, member_name))
+            if not destination.startswith(target_real + os.sep) and destination != target_real:
+                raise ValueError(f"压缩包包含非法路径: {member_name}")
+        zf.extractall(target_dir)
+
+
+def _get_updates_root() -> str:
+    return os.path.join(BASE_DIR, "updates")
+
+
+def _sanitize_update_version(version: str) -> str:
+    return re.sub(r"[^0-9A-Za-z._-]", "_", str(version or "").strip())
+
+
+def _get_update_paths(version: str) -> dict:
+    safe_version = _sanitize_update_version(version)
+    updates_root = _get_updates_root()
+    version_root = os.path.join(updates_root, safe_version)
+    package_dir = os.path.join(version_root, "package")
+    extract_dir = os.path.join(version_root, "source")
+    zip_path = os.path.join(package_dir, f"{safe_version}.zip")
+    marker_path = os.path.join(version_root, ".download_complete")
+    return {
+        "version": str(version or "").strip(),
+        "safe_version": safe_version,
+        "updates_root": updates_root,
+        "version_root": version_root,
+        "package_dir": package_dir,
+        "extract_dir": extract_dir,
+        "zip_path": zip_path,
+        "marker_path": marker_path,
+    }
+
+
+def _list_downloaded_updates() -> list[dict]:
+    updates_root = _get_updates_root()
+    if not os.path.isdir(updates_root):
+        return []
+    result = []
+    for name in os.listdir(updates_root):
+        version_root = os.path.join(updates_root, name)
+        if not os.path.isdir(version_root):
+            continue
+        paths = _get_update_paths(name)
+        marker_exists = os.path.exists(paths["marker_path"])
+        extract_exists = os.path.isdir(paths["extract_dir"])
+        zip_exists = os.path.isfile(paths["zip_path"])
+        mtime = 0.0
+        try:
+            mtime = os.path.getmtime(version_root)
+        except Exception:
+            mtime = 0.0
+        result.append({
+            "version": name,
+            "version_root": version_root,
+            "package_dir": paths["package_dir"],
+            "extract_dir": paths["extract_dir"],
+            "zip_path": paths["zip_path"],
+            "marker_exists": marker_exists,
+            "extract_exists": extract_exists,
+            "zip_exists": zip_exists,
+            "mtime": mtime,
+        })
+    result.sort(key=lambda item: item.get("mtime", 0), reverse=True)
+    return result
+
+
+def _copy_directory_contents(src_dir: str, dest_dir: str, exclude_names: set[str] | None = None) -> tuple[int, int]:
+    exclude_names = exclude_names or set()
+    copied_files = 0
+    copied_dirs = 0
+    for root, dirs, files in os.walk(src_dir):
+        dirs[:] = [item for item in dirs if item not in exclude_names]
+        rel_root = os.path.relpath(root, src_dir)
+        target_root = dest_dir if rel_root == "." else os.path.join(dest_dir, rel_root)
+        os.makedirs(target_root, exist_ok=True)
+        copied_dirs += 1
+        for filename in files:
+            if filename in exclude_names:
+                continue
+            src_path = os.path.join(root, filename)
+            dest_path = os.path.join(target_root, filename)
+            shutil.copy2(src_path, dest_path)
+            copied_files += 1
+    return copied_files, copied_dirs
+
+
+def _build_project_update_status(fetch_remote: bool = True) -> dict:
+    status = {
+        "git_available": False,
+        "is_git_repo": False,
+        "branch": "",
+        "is_main_branch": False,
+        "dirty_files": [],
+        "dirty_count": 0,
+        "local_head": "",
+        "remote_head": "",
+        "merge_base": "",
+        "needs_update": False,
+        "fast_forward": False,
+        "can_update": False,
+        "message": "",
+    }
+
+    code, _ = _run_git_command(["--version"])
+    if code != 0:
+        status["message"] = "当前环境未安装 Git，请使用左侧的普通用户更新流程。"
+        return status
+    status["git_available"] = True
+
+    code, output = _run_git_command(["rev-parse", "--is-inside-work-tree"])
+    if code != 0 or output.lower() != "true":
+        status["message"] = "当前目录不是 Git 工作区，无法执行项目内更新。"
+        return status
+    status["is_git_repo"] = True
+
+    code, branch = _run_git_command(["branch", "--show-current"])
+    if code == 0:
+        status["branch"] = branch.strip()
+    status["is_main_branch"] = status["branch"] == "main"
+
+    code, dirty_output = _run_git_command(["status", "--porcelain"])
+    dirty_lines = [line.rstrip() for line in dirty_output.splitlines() if line.strip()] if code == 0 else []
+    status["dirty_files"] = dirty_lines
+    status["dirty_count"] = len(dirty_lines)
+
+    if fetch_remote:
+        fetch_code, fetch_output = _run_git_command(["fetch", "origin"], timeout=120)
+        if fetch_code != 0:
+            status["message"] = f"无法同步远端信息：{fetch_output or 'git fetch origin 失败'}"
+            return status
+
+    code, local_head = _run_git_command(["rev-parse", "HEAD"])
+    if code == 0:
+        status["local_head"] = local_head.strip()
+    code, remote_head = _run_git_command(["rev-parse", "origin/main"])
+    if code != 0:
+        status["message"] = "未找到 origin/main，请先确认当前仓库已配置 origin 并完成首次拉取。"
+        return status
+    status["remote_head"] = remote_head.strip()
+    code, merge_base = _run_git_command(["merge-base", "HEAD", "origin/main"])
+    if code == 0:
+        status["merge_base"] = merge_base.strip()
+
+    local_head = status["local_head"]
+    remote_head = status["remote_head"]
+    merge_base = status["merge_base"]
+
+    if not status["is_main_branch"]:
+        status["message"] = f"当前分支是 {status['branch'] or '未知'}，仅支持在 main 分支上执行项目内更新。"
+        return status
+    if status["dirty_count"] > 0:
+        status["message"] = f"当前工作区有 {status['dirty_count']} 处未提交修改，请先提交或清理后再更新。"
+        return status
+    if local_head == remote_head:
+        status["message"] = "当前项目已经和 origin/main 同步，无需更新。"
+        return status
+    if merge_base == local_head and remote_head and remote_head != local_head:
+        status["needs_update"] = True
+        status["fast_forward"] = True
+        status["can_update"] = True
+        status["message"] = "检测到 origin/main 有新提交，可执行 fast-forward 更新。"
+        return status
+    if merge_base == remote_head and local_head != remote_head:
+        status["message"] = "当前本地 main 领先于 origin/main，不适合执行自动更新。"
+        return status
+
+    status["message"] = "当前本地与 origin/main 已分叉，自动更新已拦截，请手动处理 Git 冲突。"
+    return status
 
 @router.get("/")
 async def get_dashboard():
@@ -228,6 +428,204 @@ async def restart_system(token: str = Depends(verify_token)):
         return {"status": "success", "message": "指令已下发，系统即将重启..."}
     except Exception as e:
         return {"status": "error", "message": f"重启异常: {str(e)}"}
+
+
+@router.get("/api/system/project_update_status")
+async def project_update_status(token: str = Depends(verify_token)):
+    try:
+        data = _build_project_update_status(fetch_remote=True)
+        level = "success" if data.get("can_update") else ("warning" if data.get("is_git_repo") else "error")
+        return {
+            "status": level,
+            "message": data.get("message") or "项目更新状态已读取。",
+            "data": data,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"读取项目更新状态失败: {e}"}
+
+
+@router.post("/api/system/update_project")
+async def update_project(req: ProjectUpdateReq, token: str = Depends(verify_token)):
+    if engine.is_running():
+        return {"status": "warning", "message": "当前有任务正在运行，请先停止任务后再更新当前项目。"}
+    try:
+        status = _build_project_update_status(fetch_remote=True)
+        if not status.get("can_update"):
+            return {
+                "status": "warning",
+                "message": status.get("message") or "当前不满足自动更新条件。",
+                "data": status,
+            }
+
+        code, output = _run_git_command(["pull", "--ff-only", "origin", "main"], timeout=180)
+        if code != 0:
+            return {
+                "status": "error",
+                "message": f"项目更新失败：{output or 'git pull --ff-only origin main 执行失败'}",
+                "data": status,
+            }
+
+        refreshed = _build_project_update_status(fetch_remote=False)
+        message = "当前项目代码已更新到最新 main。"
+        if req.restart_after_update:
+            def _do_restart_after_update():
+                time.sleep(1.2)
+                print(f"[{core_engine.ts()}] [系统] 项目更新完成，准备自动重启...")
+                try:
+                    sys.stdout.flush()
+                    sys.stderr.flush()
+                    subprocess.Popen([sys.executable] + sys.argv)
+                    os._exit(0)
+                except Exception as restart_error:
+                    print(f"[{core_engine.ts()}] [系统] 更新后重启失败: {restart_error}")
+                    os._exit(1)
+
+            threading.Thread(target=_do_restart_after_update, daemon=True).start()
+            message = "当前项目代码已更新，系统即将自动重启。"
+        return {
+            "status": "success",
+            "message": message,
+            "output": output,
+            "data": refreshed,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"更新当前项目失败: {e}"}
+
+
+@router.post("/api/system/download_update_package")
+async def download_update_package(req: DownloadUpdatePackageReq, token: str = Depends(verify_token)):
+    try:
+        version = str(req.version or "").strip()
+        download_url = str(req.download_url or "").strip()
+        if not version or not download_url:
+            return {"status": "error", "message": "缺少版本号或下载地址，无法下载更新包。"}
+
+        paths = _get_update_paths(version)
+        version_root = paths["version_root"]
+        package_dir = paths["package_dir"]
+        extract_dir = paths["extract_dir"]
+        zip_path = paths["zip_path"]
+        marker_path = paths["marker_path"]
+
+        if os.path.exists(marker_path) and os.path.isdir(extract_dir):
+            return {
+                "status": "success",
+                "message": f"更新包已存在：{extract_dir}",
+                "data": {
+                    "version": version,
+                    "version_root": version_root,
+                    "package_dir": package_dir,
+                    "extract_dir": extract_dir,
+                    "zip_path": zip_path,
+                    "download_url": download_url,
+                    "already_exists": True,
+                },
+            }
+
+        os.makedirs(package_dir, exist_ok=True)
+        os.makedirs(extract_dir, exist_ok=True)
+
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+            async with client.stream("GET", download_url, headers={"User-Agent": f"opaiRe/{version}"}) as resp:
+                if resp.status_code != 200:
+                    return {
+                        "status": "error",
+                        "message": f"下载更新包失败 (HTTP {resp.status_code})",
+                        "data": {"download_url": download_url, "version": version},
+                    }
+                with open(zip_path, "wb") as f:
+                    async for chunk in resp.aiter_bytes():
+                        if chunk:
+                            f.write(chunk)
+
+        _safe_extract_zip(zip_path, extract_dir)
+        with open(marker_path, "w", encoding="utf-8") as f:
+            f.write(version + "\n")
+
+        return {
+            "status": "success",
+            "message": f"更新包已下载并解压到：{extract_dir}",
+            "data": {
+                "version": version,
+                "version_root": version_root,
+                "package_dir": package_dir,
+                "extract_dir": extract_dir,
+                "zip_path": zip_path,
+                "download_url": download_url,
+                "already_exists": False,
+            },
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"下载更新包失败: {e}"}
+
+
+@router.get("/api/system/update_packages")
+async def update_packages(token: str = Depends(verify_token)):
+    try:
+        return {
+            "status": "success",
+            "message": "本地更新包列表已读取。",
+            "data": {
+                "packages": _list_downloaded_updates(),
+                "updates_root": _get_updates_root(),
+            },
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"读取本地更新包列表失败: {e}"}
+
+
+@router.post("/api/system/migrate_update_package")
+async def migrate_update_package(req: MigrateUpdatePackageReq, token: str = Depends(verify_token)):
+    if engine.is_running():
+        return {"status": "warning", "message": "当前有任务正在运行，请先停止任务后再迁移配置。"}
+    try:
+        paths = _get_update_paths(req.version)
+        extract_dir = paths["extract_dir"]
+        if not os.path.isdir(extract_dir):
+            return {"status": "error", "message": "目标更新目录不存在，请先下载并解压该版本。"}
+
+        src_data_dir = os.path.join(BASE_DIR, "data")
+        if not os.path.isdir(src_data_dir):
+            return {"status": "error", "message": "当前项目没有 data 目录，无法迁移配置。"}
+
+        dest_data_dir = os.path.join(extract_dir, "data")
+        os.makedirs(dest_data_dir, exist_ok=True)
+        copied_files, copied_dirs = _copy_directory_contents(src_data_dir, dest_data_dir, exclude_names={"web_console.pid"})
+
+        removed_paths = []
+        if req.cleanup_zip and os.path.isfile(paths["zip_path"]):
+            os.remove(paths["zip_path"])
+            removed_paths.append(paths["zip_path"])
+            if os.path.isdir(paths["package_dir"]) and not os.listdir(paths["package_dir"]):
+                os.rmdir(paths["package_dir"])
+                removed_paths.append(paths["package_dir"])
+
+        if req.cleanup_other_versions:
+            current_root = os.path.realpath(paths["version_root"])
+            updates_root = os.path.realpath(paths["updates_root"])
+            for item in _list_downloaded_updates():
+                other_root = os.path.realpath(str(item.get("version_root") or ""))
+                if not other_root or other_root == current_root:
+                    continue
+                if not other_root.startswith(updates_root + os.sep):
+                    continue
+                shutil.rmtree(other_root, ignore_errors=False)
+                removed_paths.append(other_root)
+
+        return {
+            "status": "success",
+            "message": f"已把当前 data 目录迁移到：{dest_data_dir}",
+            "data": {
+                "version": req.version,
+                "extract_dir": extract_dir,
+                "dest_data_dir": dest_data_dir,
+                "copied_files": copied_files,
+                "copied_dirs": copied_dirs,
+                "removed_paths": removed_paths,
+            },
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"迁移更新包配置失败: {e}"}
 
 
 @router.get("/api/config")
