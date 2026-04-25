@@ -21,6 +21,7 @@ dependencies = [
     "docker",
     "pymysql",
     "cryptography",
+    "cachetools",
 ]
 
 [tool.uv]
