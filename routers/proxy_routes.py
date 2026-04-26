@@ -3,6 +3,7 @@ import json
 import os
 import re
 from typing import Any, List, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 import yaml
@@ -273,6 +274,31 @@ def _build_v2raya_api_settings(config_data: dict | None = None) -> dict:
     }
 
 
+def _build_v2raya_panel_candidates(panel_url: str) -> list[str]:
+    base = _normalize_v2raya_panel_url(panel_url)
+    if not base:
+        return []
+
+    candidates: list[str] = [base]
+    try:
+        parsed = urlsplit(base)
+        hostname = (parsed.hostname or "").strip().lower()
+        port = parsed.port
+        if hostname and hostname not in {"127.0.0.1", "localhost", "::1"}:
+            for local_host in ("127.0.0.1", "localhost"):
+                netloc = f"{local_host}:{port}" if port else local_host
+                local_url = urlunsplit((parsed.scheme or "http", netloc, parsed.path or "", "", ""))
+                candidates.append(_normalize_v2raya_panel_url(local_url))
+    except Exception:
+        pass
+
+    deduped: list[str] = []
+    for item in candidates:
+        if item and item not in deduped:
+            deduped.append(item)
+    return deduped
+
+
 async def _v2raya_request(
     client: httpx.AsyncClient,
     panel_url: str,
@@ -356,6 +382,24 @@ async def _v2raya_login(
         if item not in deduped:
             deduped.append(item)
     return deduped, token
+
+
+async def _v2raya_login_any(
+    client: httpx.AsyncClient,
+    panel_url: str,
+    username: str,
+    password: str,
+) -> tuple[str, list[str], str]:
+    last_error: Exception | None = None
+    for candidate in _build_v2raya_panel_candidates(panel_url):
+        try:
+            auth_values, token = await _v2raya_login(client, candidate, username, password)
+            return candidate, auth_values, token
+        except Exception as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("请先填写 v2rayA 面板地址。")
 
 
 def _append_v2raya_ref(refs: set[str], value: Any) -> None:
@@ -679,11 +723,13 @@ async def _load_v2raya_nodes_snapshot(with_latency: bool = False) -> dict:
         }
 
     async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
-        auth_values, token = await _v2raya_login(client, panel_url, settings.get("username", ""), settings.get("password", ""))
-        touch_resp, touch_payload, _ = await _v2raya_request(client, panel_url, "GET", "touch", auth_values=auth_values)
-        outbounds_resp, outbounds_payload, _ = await _v2raya_request(client, panel_url, "GET", "outbounds", auth_values=auth_values)
+        resolved_panel_url, auth_values, token = await _v2raya_login_any(
+            client, panel_url, settings.get("username", ""), settings.get("password", "")
+        )
+        touch_resp, touch_payload, _ = await _v2raya_request(client, resolved_panel_url, "GET", "touch", auth_values=auth_values)
+        outbounds_resp, outbounds_payload, _ = await _v2raya_request(client, resolved_panel_url, "GET", "outbounds", auth_values=auth_values)
         outbound_resp, outbound_payload, _ = await _v2raya_request(
-            client, panel_url, "GET", "outbound", auth_values=auth_values, params={"outbound": "proxy"}
+            client, resolved_panel_url, "GET", "outbound", auth_values=auth_values, params={"outbound": "proxy"}
         )
 
         if touch_resp is None or touch_resp.status_code >= 400:
@@ -704,6 +750,7 @@ async def _load_v2raya_nodes_snapshot(with_latency: bool = False) -> dict:
 
             nodes = list(await asyncio.gather(*[_worker(item) for item in nodes]))
 
+        runtime["resolved_panel_url"] = resolved_panel_url
         return {
             "nodes": _sort_v2raya_nodes(nodes),
             "runtime": runtime,
@@ -747,7 +794,7 @@ def _build_v2raya_switch_payloads(req: V2rayASwitchReq) -> list[dict]:
     deduped: list[dict] = []
     seen: set[str] = set()
     for item in payloads:
-        cleaned = {k: v for k, v in item.items() if v not in {None, ""}}
+        cleaned = {k: v for k, v in item.items() if v is not None and v != ""}
         signature = json.dumps(cleaned, sort_keys=True, ensure_ascii=False)
         if signature not in seen:
             seen.add(signature)
@@ -814,14 +861,16 @@ async def api_v2raya_switch(req: V2rayASwitchReq, token: str = Depends(verify_to
         if not panel_url:
             return {"status": "error", "message": "请先填写 v2rayA 面板地址。"}
         async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
-            auth_values, _ = await _v2raya_login(client, panel_url, settings.get("username", ""), settings.get("password", ""))
+            resolved_panel_url, auth_values, _ = await _v2raya_login_any(
+                client, panel_url, settings.get("username", ""), settings.get("password", "")
+            )
             switch_ok = False
             last_message = ""
             for endpoint in ["connection", "outbound"]:
                 for payload in _build_v2raya_switch_payloads(req):
                     resp, body, _ = await _v2raya_request(
                         client,
-                        panel_url,
+                        resolved_panel_url,
                         "POST",
                         endpoint,
                         auth_values=auth_values,
