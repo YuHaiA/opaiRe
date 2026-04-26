@@ -3,7 +3,7 @@ const { createApp } = Vue;
 createApp({
     data() {
         return {
-            appVersion: 'v11.0.1',
+            appVersion: 'v11.0.2',
             versionPageUrl: 'https://github.com/YuHaiA/opaiRe/releases/latest',
             isLoggedIn: !!localStorage.getItem('auth_token'),
             loginPassword: '',
@@ -2452,6 +2452,7 @@ createApp({
                 }
                 return data;
             } catch (e) {
+                this.projectUpdateStatus = null;
                 if (showSuccess) {
                     this.showToast('读取项目更新状态失败', 'error');
                 }
