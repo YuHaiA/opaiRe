@@ -2447,103 +2447,144 @@
                                     </div>
                                 </div>
 
-                                <div class="grid grid-cols-1 2xl:grid-cols-[minmax(0,1.55fr)_420px] gap-6 xl:gap-7 items-start">
-                                    <div class="rounded-[24px] border border-slate-200 bg-white/90 shadow-[0_1px_2px_rgba(15,23,42,0.03),0_10px_24px_rgba(15,23,42,0.04)] p-5 md:p-6">
-                                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
-                                            <div>
-                                                <div class="text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">Config</div>
-                                                <h4 class="mt-1 text-base md:text-lg font-black text-slate-900">基础接入配置</h4>
+                                <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.18fr)_minmax(360px,0.92fr)] 2xl:grid-cols-[minmax(0,1.28fr)_420px] gap-6 xl:gap-7 items-start">
+                                    <div class="space-y-5">
+                                        <div class="rounded-[24px] border border-slate-200 bg-white/90 shadow-[0_1px_2px_rgba(15,23,42,0.03),0_10px_24px_rgba(15,23,42,0.04)] p-5 md:p-6">
+                                            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
+                                                <div>
+                                                    <div class="text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">Config</div>
+                                                    <h4 class="mt-1 text-base md:text-lg font-black text-slate-900">基础接入配置</h4>
+                                                </div>
+                                                <div class="text-[11px] text-slate-500 font-medium">先配面板、认证与订阅，再做服务与节点操作。</div>
                                             </div>
-                                            <div class="text-[11px] text-slate-500 font-medium">先配面板、认证与订阅，再做服务与节点操作。</div>
-                                        </div>
-                                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-5">
-                                        <div class="lg:col-span-2 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">v2rayA 运行场景</label>
-                                            <div class="flex flex-wrap gap-2">
-                                                <button type="button" @click="setV2rayARuntimeMode('server')" class="inline-flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-black transition-all"
-                                                        :class="config.clash_proxy_pool.v2raya_runtime_mode === 'server' ? 'bg-fuchsia-600 text-white border-fuchsia-600 shadow-md shadow-fuchsia-500/20' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'">
-                                                    <span>🖥️</span>
-                                                    服务器模式
-                                                </button>
-                                                <button type="button" @click="setV2rayARuntimeMode('local')" class="inline-flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-black transition-all"
-                                                        :class="config.clash_proxy_pool.v2raya_runtime_mode === 'local' ? 'bg-fuchsia-600 text-white border-fuchsia-600 shadow-md shadow-fuchsia-500/20' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'">
-                                                    <span>💻</span>
-                                                    本地模式
-                                                </button>
-                                            </div>
-                                            <div class="text-[11px] text-slate-500 mt-3">
-                                                服务器模式会让后端自动切点、补货测活优先走服务器自己的 v2rayA API；本地模式则优先使用你本机的 v2rayA 地址，适合把同一份配置同步到本地测试。
-                                            </div>
-                                        </div>
-                                        <div class="lg:col-span-2 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">v2rayA API 地址（服务器）</label>
-                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_api_url" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 http://127.0.0.1:2017">
-                                            <div class="text-[11px] text-slate-500 mt-2">给服务器后端请求 v2rayA API 用；远程部署建议填服务器本机可直连地址。</div>
-                                        </div>
-                                        <div class="lg:col-span-2 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">v2rayA 面板地址（服务器浏览器）</label>
-                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_panel_url" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 https://mycodexy.duckdns.org/v2raya">
-                                            <div class="text-[11px] text-slate-500 mt-2">给远程部署时“打开 v2rayA 面板”按钮用；通常填可从浏览器访问服务器面板的地址。</div>
-                                        </div>
-                                        <div class="lg:col-span-2 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">v2rayA API 地址（本地）</label>
-                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_local_api_url" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 http://127.0.0.1:2017">
-                                            <div class="text-[11px] text-slate-500 mt-2">本机运行项目时使用；若切到“本地模式”，后台优先走这里。</div>
-                                        </div>
-                                        <div class="lg:col-span-2 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">v2rayA 面板地址（本地浏览器）</label>
-                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_local_panel_url" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 http://127.0.0.1:2017">
-                                            <div class="text-[11px] text-slate-500 mt-2">切到“本地模式”后，“打开 v2rayA 面板”按钮优先打开这里。</div>
-                                        </div>
-                                        <div class="lg:col-span-2 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">兼容旧地址</label>
-                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_url" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="旧配置兼容字段，可留空">
-                                            <div class="text-[11px] text-slate-500 mt-2">不填新字段时会回退到这里，保留是为了兼容你现有的本地/远程配置。</div>
-                                        </div>
-                                            <div class="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                                                <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">API 用户名</label>
-                                                <input type="text" v-model="config.clash_proxy_pool.v2raya_username" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm text-sm" placeholder="如启用登录保护可填写">
-                                            </div>
-                                            <div class="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                                                <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">API 密码</label>
-                                                <div class="relative">
-                                                    <input :type="showPwd.v2raya_password ? 'text' : 'password'" v-model="config.clash_proxy_pool.v2raya_password" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 pr-10 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm text-sm">
-                                                    <button @click="showPwd.v2raya_password = !showPwd.v2raya_password" class="absolute right-3 top-1/2 -translate-y-1/2 text-lg text-slate-400 hover:text-fuchsia-600">
-                                                        {{ showPwd.v2raya_password ? '👁️' : '🙈' }}
-                                                    </button>
+
+                                            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 md:gap-5">
+                                                <div class="xl:col-span-2 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+                                                    <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                                        <div>
+                                                            <label class="block text-slate-700 text-xs font-extrabold uppercase tracking-wider">v2rayA 运行场景</label>
+                                                            <div class="text-[11px] text-slate-500 mt-2">把自动切点和打开面板拆成本地/服务器两套地址，避免同一份配置互相干扰。</div>
+                                                        </div>
+                                                        <div class="flex flex-wrap gap-2">
+                                                            <button type="button" @click="setV2rayARuntimeMode('server')" class="inline-flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-black transition-all"
+                                                                    :class="config.clash_proxy_pool.v2raya_runtime_mode === 'server' ? 'bg-fuchsia-600 text-white border-fuchsia-600 shadow-md shadow-fuchsia-500/20' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'">
+                                                                <span>🖥️</span>
+                                                                服务器模式
+                                                            </button>
+                                                            <button type="button" @click="setV2rayARuntimeMode('local')" class="inline-flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-black transition-all"
+                                                                    :class="config.clash_proxy_pool.v2raya_runtime_mode === 'local' ? 'bg-fuchsia-600 text-white border-fuchsia-600 shadow-md shadow-fuchsia-500/20' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'">
+                                                                <span>💻</span>
+                                                                本地模式
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div class="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4 space-y-4">
+                                                    <div>
+                                                        <div class="text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">Server Routes</div>
+                                                        <h5 class="mt-1 text-sm font-black text-slate-900">服务器接入</h5>
+                                                        <p class="text-[11px] text-slate-500 mt-2">远程部署时，后台自动切点和浏览器入口都走这里。</p>
+                                                    </div>
+                                                    <div class="space-y-3">
+                                                        <div>
+                                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">API 地址（服务器）</label>
+                                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_api_url" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 http://127.0.0.1:2017">
+                                                        </div>
+                                                        <div>
+                                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">面板地址（服务器浏览器）</label>
+                                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_panel_url" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 https://mycodexy.duckdns.org/v2raya">
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div class="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4 space-y-4">
+                                                    <div>
+                                                        <div class="text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">Local Routes</div>
+                                                        <h5 class="mt-1 text-sm font-black text-slate-900">本机接入</h5>
+                                                        <p class="text-[11px] text-slate-500 mt-2">本机运行项目时，后台接口和打开面板会优先使用本地地址。</p>
+                                                    </div>
+                                                    <div class="space-y-3">
+                                                        <div>
+                                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">API 地址（本地）</label>
+                                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_local_api_url" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 http://127.0.0.1:2017">
+                                                        </div>
+                                                        <div>
+                                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">面板地址（本地浏览器）</label>
+                                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_local_panel_url" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 http://127.0.0.1:2017">
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div class="xl:col-span-2 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+                                                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                                        <div>
+                                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">兼容旧地址</label>
+                                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_url" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="旧配置兼容字段，可留空">
+                                                            <div class="text-[11px] text-slate-500 mt-2">未填新字段时会回退到这里，便于兼容历史配置。</div>
+                                                        </div>
+                                                        <div>
+                                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">订阅链接</label>
+                                                            <div class="relative">
+                                                                <input v-if="!showPwd.sub_url" readonly :value="maskValue(config.clash_proxy_pool.sub_url)"
+                                                                       class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm">
+                                                                <input v-else type="text" v-model="config.clash_proxy_pool.sub_url" autocomplete="off"
+                                                                       class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm"
+                                                                       placeholder="如 https://example.com/subscription">
+                                                                <button @click="showPwd.sub_url = !showPwd.sub_url" class="absolute right-3 top-1/2 -translate-y-1/2 text-lg text-slate-400 hover:text-fuchsia-600">
+                                                                    {{ showPwd.sub_url ? '👁️' : '🙈' }}
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div class="xl:col-span-2 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+                                                    <div class="text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">Auth & Runtime</div>
+                                                    <h5 class="mt-1 text-sm font-black text-slate-900">认证与环境</h5>
+                                                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+                                                        <div>
+                                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">API 用户名</label>
+                                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_username" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm text-sm" placeholder="如启用登录保护可填写">
+                                                        </div>
+                                                        <div>
+                                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">API 密码</label>
+                                                            <div class="relative">
+                                                                <input :type="showPwd.v2raya_password ? 'text' : 'password'" v-model="config.clash_proxy_pool.v2raya_password" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 pr-10 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm text-sm">
+                                                                <button @click="showPwd.v2raya_password = !showPwd.v2raya_password" class="absolute right-3 top-1/2 -translate-y-1/2 text-lg text-slate-400 hover:text-fuchsia-600">
+                                                                    {{ showPwd.v2raya_password ? '👁️' : '🙈' }}
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                        <div>
+                                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">Xray 可执行文件</label>
+                                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_xray_bin" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 /usr/local/bin/xray">
+                                                        </div>
+                                                        <div>
+                                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">geodata 目录</label>
+                                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_assets_dir" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 /usr/share/xray">
+                                                        </div>
+                                                        <div class="lg:col-span-2">
+                                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">环境变量文件</label>
+                                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_env_file" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 /etc/default/v2raya">
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </div>
-                                        <div class="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">Xray 可执行文件</label>
-                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_xray_bin" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 /usr/local/bin/xray">
-                                        </div>
-                                        <div class="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">geodata 目录</label>
-                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_assets_dir" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 /usr/share/xray">
-                                        </div>
-                                        <div class="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">环境变量文件</label>
-                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_env_file" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 /etc/default/v2raya">
-                                        </div>
-                                        <div class="lg:col-span-2 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
-                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">订阅链接</label>
-                                            <div class="relative">
-                                                <input v-if="!showPwd.sub_url" readonly :value="maskValue(config.clash_proxy_pool.sub_url)"
-                                                       class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm">
-                                                <input v-else type="text" v-model="config.clash_proxy_pool.sub_url" autocomplete="off"
-                                                       class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm"
-                                                       placeholder="如 https://example.com/subscription">
-                                                <button @click="showPwd.sub_url = !showPwd.sub_url" class="absolute right-3 top-1/2 -translate-y-1/2 text-lg text-slate-400 hover:text-fuchsia-600">
-                                                    {{ showPwd.sub_url ? '👁️' : '🙈' }}
-                                                </button>
-                                            </div>
-                                        </div>
                                         </div>
 
-                                        <div v-if="v2rayARuntime" class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-5 mt-5 border-t border-slate-200/80">
-                                            <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
-                                                <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">运行场景</div>
-                                                <div class="text-sm font-bold text-slate-800 mt-2">{{ v2rayARuntime.runtime_mode === 'local' ? '本地模式' : '服务器模式' }}</div>
+                                        <div v-if="v2rayARuntime" class="rounded-[24px] border border-slate-200 bg-white/90 shadow-[0_1px_2px_rgba(15,23,42,0.03),0_10px_24px_rgba(15,23,42,0.04)] p-5 md:p-6">
+                                            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                                                <div>
+                                                    <div class="text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">Runtime</div>
+                                                    <h4 class="mt-1 text-base md:text-lg font-black text-slate-900">运行时快照</h4>
+                                                </div>
+                                                <div class="text-[11px] text-slate-500 font-medium">这里展示后端最终解析出的模式与地址，方便区分本地和服务器环境。</div>
+                                            </div>
+                                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+                                                <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
+                                                    <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">运行场景</div>
+                                                    <div class="text-sm font-bold text-slate-800 mt-2">{{ v2rayARuntime.runtime_mode === 'local' ? '本地模式' : '服务器模式' }}</div>
                                                 <div class="text-[11px] text-slate-500 mt-2">当前后端实际使用的 API 地址：{{ v2rayARuntime.resolved_api_url || '未解析' }}</div>
                                             </div>
                                             <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
@@ -2555,10 +2596,11 @@
                                                 <div class="text-sm font-bold text-slate-800 mt-2">{{ v2rayARuntime.api_auth?.username ? v2rayARuntime.api_auth.username : '未配置' }}</div>
                                                 <div class="text-[11px] text-slate-500 mt-2">{{ v2rayARuntime.api_auth?.password_configured ? '密码已配置' : '密码未配置' }}</div>
                                             </div>
-                                        </div>
-                                        <div v-if="v2rayARuntime && v2rayARuntime.issues && v2rayARuntime.issues.length" class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-4 font-medium mt-4">
-                                            <div class="font-black mb-2">待确认项</div>
-                                            <div v-for="issue in v2rayARuntime.issues" :key="issue">{{ issue }}</div>
+                                            </div>
+                                            <div v-if="v2rayARuntime.issues && v2rayARuntime.issues.length" class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-4 font-medium mt-4">
+                                                <div class="font-black mb-2">待确认项</div>
+                                                <div v-for="issue in v2rayARuntime.issues" :key="issue">{{ issue }}</div>
+                                            </div>
                                         </div>
                                     </div>
 
