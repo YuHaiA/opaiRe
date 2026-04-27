@@ -121,9 +121,12 @@ def _build_v2raya_runtime_snapshot() -> dict:
     config_data = _read_current_yaml_config()
     clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
 
+    runtime_mode = _normalize_v2raya_runtime_mode(clash_conf.get("v2raya_runtime_mode", "server"))
     panel_url = str(clash_conf.get("v2raya_url", "") or "").strip()
     api_url = str(clash_conf.get("v2raya_api_url", "") or "").strip()
+    local_api_url = str(clash_conf.get("v2raya_local_api_url", "") or "").strip()
     browser_panel_url = str(clash_conf.get("v2raya_panel_url", "") or "").strip()
+    local_panel_url = str(clash_conf.get("v2raya_local_panel_url", "") or "").strip()
     username = str(clash_conf.get("v2raya_username", "") or "").strip()
     password = str(clash_conf.get("v2raya_password", "") or "").strip()
     xray_bin = str(clash_conf.get("v2raya_xray_bin", "") or "").strip()
@@ -146,11 +149,12 @@ def _build_v2raya_runtime_snapshot() -> dict:
 
     env_xray_bin = str(env_map.get("V2RAYA_V2RAY_BIN", "") or "").strip()
     env_assets_dir = str(env_map.get("V2RAYA_V2RAY_ASSETSDIR", "") or "").strip()
+    resolved_settings = _build_v2raya_api_settings(config_data)
 
     issues = []
     if not default_proxy:
         issues.append("未配置 default_proxy")
-    if not panel_url:
+    if not resolved_settings.get("panel_url"):
         issues.append("未配置 v2rayA 面板地址")
     if (username and not password) or (password and not username):
         issues.append("v2rayA API 登录名和密码需要同时填写")
@@ -167,9 +171,14 @@ def _build_v2raya_runtime_snapshot() -> dict:
 
     return {
         "client_type": str(clash_conf.get("client_type", "") or "").strip(),
+        "runtime_mode": runtime_mode,
         "panel_url": panel_url,
         "api_url": api_url,
+        "local_api_url": local_api_url,
         "browser_panel_url": browser_panel_url,
+        "local_panel_url": local_panel_url,
+        "resolved_api_url": resolved_settings.get("panel_url", ""),
+        "resolved_browser_panel_url": resolved_settings.get("browser_panel_url", ""),
         "subscription_url": subscription_url,
         "default_proxy": default_proxy,
         "os_name": os.name,
@@ -205,6 +214,11 @@ def _normalize_v2raya_panel_url(panel_url: str) -> str:
     if raw.endswith("/api"):
         raw = raw[:-4]
     return raw
+
+
+def _normalize_v2raya_runtime_mode(value: Any) -> str:
+    mode = str(value or "").strip().lower()
+    return mode if mode in {"server", "local"} else "server"
 
 
 def _stringify_v2raya(value: Any) -> str:
@@ -284,9 +298,17 @@ def _build_v2raya_api_settings(config_data: dict | None = None) -> dict:
     config_data = config_data or _read_current_yaml_config()
     clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
     legacy_url = str(clash_conf.get("v2raya_url", "") or "").strip()
+    runtime_mode = _normalize_v2raya_runtime_mode(clash_conf.get("v2raya_runtime_mode", "server"))
+    if runtime_mode == "local":
+        api_candidate = clash_conf.get("v2raya_local_api_url", "") or clash_conf.get("v2raya_api_url", "") or legacy_url
+        panel_candidate = clash_conf.get("v2raya_local_panel_url", "") or clash_conf.get("v2raya_panel_url", "") or legacy_url
+    else:
+        api_candidate = clash_conf.get("v2raya_api_url", "") or legacy_url
+        panel_candidate = clash_conf.get("v2raya_panel_url", "") or legacy_url
     return {
-        "panel_url": _normalize_v2raya_panel_url(clash_conf.get("v2raya_api_url", "") or legacy_url),
-        "browser_panel_url": _normalize_v2raya_panel_url(clash_conf.get("v2raya_panel_url", "") or legacy_url),
+        "runtime_mode": runtime_mode,
+        "panel_url": _normalize_v2raya_panel_url(api_candidate),
+        "browser_panel_url": _normalize_v2raya_panel_url(panel_candidate),
         "username": str(clash_conf.get("v2raya_username", "") or "").strip(),
         "password": str(clash_conf.get("v2raya_password", "") or "").strip(),
     }

@@ -39,6 +39,7 @@ class ProxyManagerV2RayAApiUrlTests(unittest.TestCase):
             "clash_proxy_pool": {
                 "enable": True,
                 "client_type": "v2raya",
+                "v2raya_runtime_mode": "server",
                 "v2raya_url": "https://panel.example.com/v2raya",
                 "v2raya_api_url": "http://127.0.0.1:2017/api",
             }
@@ -49,6 +50,26 @@ class ProxyManagerV2RayAApiUrlTests(unittest.TestCase):
         ), patch.object(self.proxy_manager.yaml, "safe_load", return_value=config):
             self.proxy_manager.reload_proxy_config()
 
+        self.assertEqual("http://127.0.0.1:2017", self.proxy_manager.V2RAYA_PANEL_URL)
+
+    def test_reload_proxy_config_prefers_local_api_url_in_local_mode(self):
+        config = {
+            "clash_proxy_pool": {
+                "enable": True,
+                "client_type": "v2raya",
+                "v2raya_runtime_mode": "local",
+                "v2raya_url": "https://panel.example.com/v2raya",
+                "v2raya_api_url": "http://10.0.0.9:2017",
+                "v2raya_local_api_url": "http://127.0.0.1:2017/api",
+            }
+        }
+
+        with patch.object(self.proxy_manager.os.path, "exists", return_value=True), patch(
+            "builtins.open", mock_open(read_data="ignored")
+        ), patch.object(self.proxy_manager.yaml, "safe_load", return_value=config):
+            self.proxy_manager.reload_proxy_config()
+
+        self.assertEqual("local", self.proxy_manager.V2RAYA_RUNTIME_MODE)
         self.assertEqual("http://127.0.0.1:2017", self.proxy_manager.V2RAYA_PANEL_URL)
 
 

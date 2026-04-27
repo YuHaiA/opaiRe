@@ -813,7 +813,12 @@ createApp({
                     this.config.sub2api_mode.use_proxy = false;
                 }
                 if (this.config.clash_proxy_pool.client_type === undefined) this.config.clash_proxy_pool.client_type = 'clash';
+                if (this.config.clash_proxy_pool.v2raya_runtime_mode === undefined) this.config.clash_proxy_pool.v2raya_runtime_mode = 'server';
                 if (this.config.clash_proxy_pool.v2raya_url === undefined) this.config.clash_proxy_pool.v2raya_url = '';
+                if (this.config.clash_proxy_pool.v2raya_api_url === undefined) this.config.clash_proxy_pool.v2raya_api_url = '';
+                if (this.config.clash_proxy_pool.v2raya_local_api_url === undefined) this.config.clash_proxy_pool.v2raya_local_api_url = 'http://127.0.0.1:2017';
+                if (this.config.clash_proxy_pool.v2raya_panel_url === undefined) this.config.clash_proxy_pool.v2raya_panel_url = '';
+                if (this.config.clash_proxy_pool.v2raya_local_panel_url === undefined) this.config.clash_proxy_pool.v2raya_local_panel_url = 'http://127.0.0.1:2017';
                 if (this.config.clash_proxy_pool.v2raya_username === undefined) this.config.clash_proxy_pool.v2raya_username = '';
                 if (this.config.clash_proxy_pool.v2raya_password === undefined) this.config.clash_proxy_pool.v2raya_password = '';
                 if (this.config.clash_proxy_pool.v2raya_xray_bin === undefined) this.config.clash_proxy_pool.v2raya_xray_bin = '';
@@ -1029,8 +1034,20 @@ createApp({
                 this.isV2raynSubscriptionUpdating = false;
             }
         },
+        setV2rayARuntimeMode(mode) {
+            if (!this.config?.clash_proxy_pool) return;
+            this.config.clash_proxy_pool.v2raya_runtime_mode = mode === 'local' ? 'local' : 'server';
+        },
+        getResolvedV2rayABrowserUrl() {
+            const clashProxyPool = this.config?.clash_proxy_pool || {};
+            const mode = String(clashProxyPool.v2raya_runtime_mode || 'server').trim().toLowerCase();
+            if (mode === 'local') {
+                return String(clashProxyPool.v2raya_local_panel_url || clashProxyPool.v2raya_panel_url || clashProxyPool.v2raya_url || '').trim();
+            }
+            return String(clashProxyPool.v2raya_panel_url || clashProxyPool.v2raya_url || '').trim();
+        },
         openV2rayAPanel() {
-            const url = (this.config?.clash_proxy_pool?.v2raya_panel_url || this.config?.clash_proxy_pool?.v2raya_url || '').trim();
+            const url = this.getResolvedV2rayABrowserUrl();
             if (!url) {
                 this.showToast('请先填写 v2rayA 面板地址', 'warning');
                 return;

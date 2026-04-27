@@ -18,6 +18,7 @@ CLASH_API_URL = ""
 LOCAL_PROXY_URL = ""
 ENABLE_NODE_SWITCH = False
 PROXY_CLIENT_TYPE = "clash"
+V2RAYA_RUNTIME_MODE = "server"
 V2RAYA_PANEL_URL = ""
 V2RAYA_USERNAME = ""
 V2RAYA_PASSWORD = ""
@@ -162,9 +163,24 @@ def _normalize_v2raya_api_base_url(url: str) -> str:
     return value
 
 
+def _normalize_v2raya_runtime_mode(value: str) -> str:
+    mode = str(value or "").strip().lower()
+    return mode if mode in {"server", "local"} else "server"
+
+
+def _resolve_v2raya_api_base_url(clash_conf: dict) -> str:
+    legacy_url = clash_conf.get("v2raya_url", "") or ""
+    runtime_mode = _normalize_v2raya_runtime_mode(clash_conf.get("v2raya_runtime_mode", "server"))
+    if runtime_mode == "local":
+        candidate = clash_conf.get("v2raya_local_api_url", "") or clash_conf.get("v2raya_api_url", "") or legacy_url
+    else:
+        candidate = clash_conf.get("v2raya_api_url", "") or legacy_url
+    return _normalize_v2raya_api_base_url(candidate)
+
+
 def reload_proxy_config():
     global CLASH_API_URL, LOCAL_PROXY_URL, ENABLE_NODE_SWITCH, PROXY_CLIENT_TYPE
-    global V2RAYA_PANEL_URL, V2RAYA_USERNAME, V2RAYA_PASSWORD
+    global V2RAYA_RUNTIME_MODE, V2RAYA_PANEL_URL, V2RAYA_USERNAME, V2RAYA_PASSWORD
     global V2RAYN_BASE_DIR, V2RAYN_GUI_CONFIG_PATH, V2RAYN_DB_PATH, V2RAYN_EXE_PATH
     global V2RAYN_RESTART_WAIT_SEC, V2RAYN_HIDE_WINDOW_ON_RESTART, V2RAYN_PRECHECK_ON_START
     global V2RAYN_PRECHECK_CACHE_MINUTES, V2RAYN_PRECHECK_MAX_NODES, V2RAYN_LIVE_POOL_LIMIT
@@ -185,9 +201,8 @@ def reload_proxy_config():
     PROXY_CLIENT_TYPE = str(clash_conf.get("client_type", "clash") or "clash").strip().lower()
     if PROXY_CLIENT_TYPE not in {"clash", "v2rayn", "v2raya"}:
         PROXY_CLIENT_TYPE = "clash"
-    V2RAYA_PANEL_URL = _normalize_v2raya_api_base_url(
-        clash_conf.get("v2raya_api_url", "") or clash_conf.get("v2raya_url", "")
-    )
+    V2RAYA_RUNTIME_MODE = _normalize_v2raya_runtime_mode(clash_conf.get("v2raya_runtime_mode", "server"))
+    V2RAYA_PANEL_URL = _resolve_v2raya_api_base_url(clash_conf)
     V2RAYA_USERNAME = str(clash_conf.get("v2raya_username", "") or "").strip()
     V2RAYA_PASSWORD = str(clash_conf.get("v2raya_password", "") or "").strip()
     V2RAYN_BASE_DIR = str(clash_conf.get("v2rayn_base_dir", "") or "").strip()
@@ -247,6 +262,7 @@ def reload_proxy_config():
         _v2rayn_runtime_signature = new_v2rayn_runtime_signature
     new_v2raya_runtime_signature = (
         PROXY_CLIENT_TYPE,
+        V2RAYA_RUNTIME_MODE,
         V2RAYA_PANEL_URL,
         V2RAYA_USERNAME,
         V2RAYA_PASSWORD,

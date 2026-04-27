@@ -151,7 +151,17 @@ clash_proxy_pool:
   cluster_count: 5
   # 订阅链接存储
   sub_url: ""
-  # v2rayA 面板地址（client_type=v2raya 时使用）
+  # v2rayA 运行场景: server=服务器后端优先使用服务器地址；local=本机运行时优先使用本地地址
+  v2raya_runtime_mode: "server"
+  # v2rayA API 地址（服务器后端调用）
+  v2raya_api_url: "http://127.0.0.1:2017"
+  # v2rayA 面板地址（服务器/远程浏览器打开）
+  v2raya_panel_url: "https://your-domain.com/v2raya"
+  # v2rayA API 地址（本机运行项目时优先使用）
+  v2raya_local_api_url: "http://127.0.0.1:2017"
+  # v2rayA 面板地址（本地浏览器打开）
+  v2raya_local_panel_url: "http://127.0.0.1:2017"
+  # v2rayA 旧兼容地址；未填写新字段时会回退到这里
   v2raya_url: "http://127.0.0.1:2017"
   # v2rayA API 登录用户名
   v2raya_username: ""
