@@ -1098,15 +1098,15 @@ async def api_v2raya_delete_subscription(req: V2rayASwitchReq, token: str = Depe
                 client,
                 resolved_panel_url,
                 "DELETE",
-                "subscription",
+                "touch",
                 auth_values=auth_values,
-                json_body={"id": subscription_id, "_type": "subscription"},
+                json_body={"touches": [{"id": subscription_id, "_type": "subscription"}]},
             )
             if resp is None or not _v2raya_payload_ok(body, resp.status_code):
                 last_message = ""
                 if isinstance(body, dict):
                     last_message = _first_v2raya_text(body.get("message"), body.get("error"), last_message)
-                return {"status": "error", "message": last_message or "删除 v2rayA 订阅组失败，请检查面板登录态。"}
+                return {"status": "error", "message": last_message or "删除 v2rayA 订阅组失败，请检查订阅组状态或面板接口兼容性。"}
         await asyncio.sleep(0.8)
         service_status = await _load_v2raya_service_status()
         if not service_status.get("running"):
