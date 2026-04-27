@@ -2457,9 +2457,20 @@
                                             <div class="text-[11px] text-slate-500 font-medium">先配面板、认证与订阅，再做服务与节点操作。</div>
                                         </div>
                                         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-5">
-                                        <div class="lg:col-span-2">
-                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">v2rayA 面板地址</label>
-                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_url" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 http://127.0.0.1:2017">
+                                        <div class="lg:col-span-2 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">v2rayA API 地址（服务端）</label>
+                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_api_url" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 http://127.0.0.1:2017">
+                                            <div class="text-[11px] text-slate-500 mt-2">给服务器后端请求 v2rayA API 用；远程部署建议填服务器本机可直连地址。</div>
+                                        </div>
+                                        <div class="lg:col-span-2 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">v2rayA 面板地址（浏览器）</label>
+                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_panel_url" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 https://mycodexy.duckdns.org/v2raya">
+                                            <div class="text-[11px] text-slate-500 mt-2">给“打开 v2rayA 面板”按钮用；本地和远程可以填不同地址。</div>
+                                        </div>
+                                        <div class="lg:col-span-2 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">兼容旧地址</label>
+                                            <input type="text" v-model="config.clash_proxy_pool.v2raya_url" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="旧配置兼容字段，可留空">
+                                            <div class="text-[11px] text-slate-500 mt-2">不填新字段时会回退到这里，保留是为了兼容你现有的本地/远程配置。</div>
                                         </div>
                                             <div class="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
                                                 <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">API 用户名</label>

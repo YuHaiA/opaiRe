@@ -1030,7 +1030,7 @@ createApp({
             }
         },
         openV2rayAPanel() {
-            const url = (this.config?.clash_proxy_pool?.v2raya_url || '').trim();
+            const url = (this.config?.clash_proxy_pool?.v2raya_panel_url || this.config?.clash_proxy_pool?.v2raya_url || '').trim();
             if (!url) {
                 this.showToast('请先填写 v2rayA 面板地址', 'warning');
                 return;

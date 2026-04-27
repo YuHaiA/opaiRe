@@ -122,6 +122,8 @@ def _build_v2raya_runtime_snapshot() -> dict:
     clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
 
     panel_url = str(clash_conf.get("v2raya_url", "") or "").strip()
+    api_url = str(clash_conf.get("v2raya_api_url", "") or "").strip()
+    browser_panel_url = str(clash_conf.get("v2raya_panel_url", "") or "").strip()
     username = str(clash_conf.get("v2raya_username", "") or "").strip()
     password = str(clash_conf.get("v2raya_password", "") or "").strip()
     xray_bin = str(clash_conf.get("v2raya_xray_bin", "") or "").strip()
@@ -166,6 +168,8 @@ def _build_v2raya_runtime_snapshot() -> dict:
     return {
         "client_type": str(clash_conf.get("client_type", "") or "").strip(),
         "panel_url": panel_url,
+        "api_url": api_url,
+        "browser_panel_url": browser_panel_url,
         "subscription_url": subscription_url,
         "default_proxy": default_proxy,
         "os_name": os.name,
@@ -269,8 +273,10 @@ def _v2raya_payload_ok(payload: Any, status_code: int) -> bool:
 def _build_v2raya_api_settings(config_data: dict | None = None) -> dict:
     config_data = config_data or _read_current_yaml_config()
     clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
+    legacy_url = str(clash_conf.get("v2raya_url", "") or "").strip()
     return {
-        "panel_url": _normalize_v2raya_panel_url(clash_conf.get("v2raya_url", "")),
+        "panel_url": _normalize_v2raya_panel_url(clash_conf.get("v2raya_api_url", "") or legacy_url),
+        "browser_panel_url": _normalize_v2raya_panel_url(clash_conf.get("v2raya_panel_url", "") or legacy_url),
         "username": str(clash_conf.get("v2raya_username", "") or "").strip(),
         "password": str(clash_conf.get("v2raya_password", "") or "").strip(),
     }
@@ -286,6 +292,12 @@ def _build_v2raya_panel_candidates(panel_url: str) -> list[str]:
         parsed = urlsplit(base)
         hostname = (parsed.hostname or "").strip().lower()
         port = parsed.port
+        path = str(parsed.path or "").strip().lower()
+        if path.endswith("/v2raya") or path == "/v2raya":
+            candidates.extend([
+                "http://127.0.0.1:2017",
+                "http://localhost:2017",
+            ])
         if hostname and hostname not in {"127.0.0.1", "localhost", "::1"}:
             for local_host in ("127.0.0.1", "localhost"):
                 netloc = f"{local_host}:{port}" if port else local_host

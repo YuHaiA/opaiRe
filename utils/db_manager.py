@@ -179,20 +179,29 @@ def delete_accounts_by_emails(emails: list) -> bool:
         return False
 
 
-def get_accounts_page(page: int = 1, page_size: int = 50, hide_reg: str = "0") -> dict:
+def get_accounts_page(page: int = 1, page_size: int = 50, hide_reg: str = "0", search: str | None = None) -> dict:
     try:
         with get_db_conn() as conn:
             c = get_cursor(conn)
-            where_clause = ""
+            where_parts = []
+            params: list[Any] = []
             if hide_reg == "1":
-                where_clause = " WHERE token_data NOT LIKE '%\"仅注册成功\"%'"
+                where_parts.append("token_data NOT LIKE '%\"仅注册成功\"%'")
+            search_text = str(search or "").strip()
+            if search_text:
+                where_parts.append("(email LIKE ? OR password LIKE ?)")
+                like_value = f"%{search_text}%"
+                params.extend([like_value, like_value])
+
+            where_clause = f" WHERE {' AND '.join(where_parts)}" if where_parts else ""
             count_sql = f"SELECT COUNT(1) FROM accounts{where_clause}"
-            execute_sql(c, count_sql)
+            execute_sql(c, count_sql, tuple(params))
             total = c.fetchone()[0]
 
             offset = (page - 1) * page_size
             data_sql = f"SELECT email, password, created_at, token_data FROM accounts{where_clause} ORDER BY id DESC LIMIT ? OFFSET ?"
-            execute_sql(c, data_sql, (page_size, offset))
+            data_params = tuple(params + [page_size, offset])
+            execute_sql(c, data_sql, data_params)
             rows = c.fetchall()
 
             data = [
