@@ -151,6 +151,18 @@ clash_proxy_pool:
   cluster_count: 5
   # 订阅链接存储
   sub_url: ""
+  # v2rayA 面板地址（client_type=v2raya 时使用）
+  v2raya_url: "http://127.0.0.1:2017"
+  # v2rayA API 登录用户名
+  v2raya_username: ""
+  # v2rayA API 登录密码
+  v2raya_password: ""
+  # v2rayA 使用的 Xray 可执行文件路径
+  v2raya_xray_bin: ""
+  # v2rayA 使用的 geodata 目录
+  v2raya_assets_dir: ""
+  # v2rayA 环境变量文件路径
+  v2raya_env_file: ""
   # 你机场包含所有节点的策略组名称，带有 Emoji 也没关系
   group_name: "节点选择"
   # Clash 的外部控制鉴权秘钥 (Secret)

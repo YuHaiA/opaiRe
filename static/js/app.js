@@ -3,7 +3,7 @@ const { createApp } = Vue;
 createApp({
     data() {
         return {
-            appVersion: 'v11.0.2',
+            appVersion: 'v11.0.3',
             versionPageUrl: 'https://github.com/YuHaiA/opaiRe/releases/latest',
             isLoggedIn: !!localStorage.getItem('auth_token'),
             loginPassword: '',
@@ -81,11 +81,16 @@ createApp({
             isProjectUpdateChecking: false,
             isProjectUpdating: false,
             isV2rayAInspecting: false,
+            isV2rayAServiceLoading: false,
+            isV2rayAServiceMutating: false,
             isV2rayANodesLoading: false,
             isV2rayALatencyLoading: false,
+            isV2rayAImportingSubscription: false,
             isV2rayAInvalidMutating: false,
+            deletingV2rayASubscriptionKey: '',
             switchingV2rayANodeKey: '',
             v2rayARuntime: null,
+            v2rayAServiceStatus: null,
             v2rayANodes: [],
             v2rayAStatusMessage: '',
             v2rayADuplicateGroups: [],
@@ -346,6 +351,7 @@ createApp({
                     nodeCount: 0,
                     currentCount: 0,
                     bestLatency: null,
+                    subscriptionId: String(node.subscription_id || ''),
                 };
                 existing.nodeCount += 1;
                 if (node.is_current) {
@@ -369,6 +375,9 @@ createApp({
             const currentPage = Math.min(Math.max(1, this.v2rayAGroupPage), this.v2rayAGroupTotalPages);
             const start = (currentPage - 1) * this.v2rayAGroupPageSize;
             return (this.v2rayAGroupedSubscriptions || []).slice(start, start + this.v2rayAGroupPageSize);
+        },
+        isV2rayAServiceRunning() {
+            return !!this.v2rayAServiceStatus?.running;
         }
     },
     methods: {
@@ -934,7 +943,7 @@ createApp({
             }
             if (tabId === 'v2raya') {
                 this.inspectV2rayAEnvironment(false);
-                this.fetchV2rayANodes(false, false);
+                this.fetchV2rayAServiceStatus(false, true);
             }
         },
         loadProxyTabData() {
@@ -944,7 +953,7 @@ createApp({
             }
             if (this.proxySubTab === 'v2raya') {
                 this.inspectV2rayAEnvironment(false);
-                this.fetchV2rayANodes(false, false);
+                this.fetchV2rayAServiceStatus(false, true);
             }
         },
         handleProxyClientTypeChange() {
@@ -1028,9 +1037,138 @@ createApp({
             }
             window.open(url, '_blank');
         },
+        applyV2rayAServiceStatus(payload = {}) {
+            this.v2rayAServiceStatus = payload || null;
+            if (payload?.runtime) {
+                this.v2rayARuntime = payload.runtime;
+            }
+            if (!payload?.running) {
+                this.v2rayANodes = [];
+                this.v2rayADuplicateGroups = [];
+                this.v2rayAInvalidKeys = [];
+                this.v2rayAPage = 1;
+                this.v2rayAGroupPage = 1;
+            }
+        },
+        async fetchV2rayAServiceStatus(showToast = true, autoLoadNodes = false) {
+            if (!this.config?.clash_proxy_pool || this.config.clash_proxy_pool.client_type !== 'v2raya') {
+                if (showToast) {
+                    this.showToast('当前不是 v2rayA 模式', 'warning');
+                }
+                return;
+            }
+            this.isV2rayAServiceLoading = true;
+            try {
+                await this.saveConfig(false);
+                const res = await this.authFetch('/api/proxy/v2raya/status');
+                const data = await res.json();
+                if (data.status === 'success' || data.status === 'warning') {
+                    this.applyV2rayAServiceStatus(data.data || {});
+                    this.v2rayAStatusMessage = data.message || this.v2rayAStatusMessage;
+                    if (showToast) {
+                        this.showToast(data.message || 'v2rayA 服务状态已刷新', data.status === 'success' ? 'success' : 'warning');
+                    }
+                    if ((data.data || {}).running && autoLoadNodes) {
+                        await this.fetchV2rayANodes(false, false);
+                    }
+                } else if (showToast) {
+                    this.showToast(data.message || '读取 v2rayA 服务状态失败', 'error');
+                }
+            } catch (e) {
+                if (showToast) {
+                    this.showToast('读取 v2rayA 服务状态失败', 'error');
+                }
+            } finally {
+                this.isV2rayAServiceLoading = false;
+            }
+        },
+        async startV2rayAService() {
+            if (!this.config?.clash_proxy_pool || this.config.clash_proxy_pool.client_type !== 'v2raya') {
+                this.showToast('当前不是 v2rayA 模式', 'warning');
+                return;
+            }
+            this.isV2rayAServiceMutating = true;
+            try {
+                await this.saveConfig(false);
+                const res = await this.authFetch('/api/proxy/v2raya/start_service', { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'success' || data.status === 'warning') {
+                    this.applyV2rayAServiceStatus(data.data || {});
+                    this.v2rayAStatusMessage = data.message || this.v2rayAStatusMessage;
+                    const level = data.status === 'success' ? 'success' : 'warning';
+                    this.showToast(data.message || '已启动 v2rayA 服务', level);
+                    if ((data.data || {}).running) {
+                        await this.fetchV2rayANodes(false, false);
+                    }
+                } else {
+                    this.showToast(data.message || '启动 v2rayA 服务失败', 'error');
+                }
+            } catch (e) {
+                this.showToast('启动 v2rayA 服务失败', 'error');
+            } finally {
+                this.isV2rayAServiceMutating = false;
+            }
+        },
+        async importV2rayASubscription() {
+            if (!this.config?.clash_proxy_pool || this.config.clash_proxy_pool.client_type !== 'v2raya') {
+                this.showToast('当前不是 v2rayA 模式', 'warning');
+                return;
+            }
+            const subUrl = String(this.config.clash_proxy_pool.sub_url || '').trim();
+            if (!subUrl) {
+                this.showToast('请先填写 v2rayA 订阅链接', 'warning');
+                return;
+            }
+            this.isV2rayAImportingSubscription = true;
+            try {
+                await this.saveConfig(false);
+                const res = await this.authFetch('/api/proxy/v2raya/import_subscription', { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'success' || data.status === 'warning') {
+                    const payload = data.data || {};
+                    this.applyV2rayANodesPayload({ ...payload, message: payload.message || this.v2rayAStatusMessage });
+                    const level = data.status === 'success' ? 'success' : 'warning';
+                    this.showToast(data.message || '已提交 v2rayA 订阅导入', level);
+                } else {
+                    this.showToast(data.message || '导入 v2rayA 订阅失败', 'error');
+                }
+            } catch (e) {
+                this.showToast('导入 v2rayA 订阅失败', 'error');
+            } finally {
+                this.isV2rayAImportingSubscription = false;
+            }
+        },
+        async stopV2rayAService() {
+            if (!this.config?.clash_proxy_pool || this.config.clash_proxy_pool.client_type !== 'v2raya') {
+                this.showToast('当前不是 v2rayA 模式', 'warning');
+                return;
+            }
+            this.isV2rayAServiceMutating = true;
+            try {
+                await this.saveConfig(false);
+                const res = await this.authFetch('/api/proxy/v2raya/stop_service', { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'success' || data.status === 'warning') {
+                    this.applyV2rayAServiceStatus(data.data || {});
+                    this.v2rayAStatusMessage = data.message || this.v2rayAStatusMessage;
+                    const level = data.status === 'success' ? 'success' : 'warning';
+                    this.showToast(data.message || '已关闭 v2rayA 服务', level);
+                } else {
+                    this.showToast(data.message || '关闭 v2rayA 服务失败', 'error');
+                }
+            } catch (e) {
+                this.showToast('关闭 v2rayA 服务失败', 'error');
+            } finally {
+                this.isV2rayAServiceMutating = false;
+            }
+        },
         async testV2rayACurrentProxy() {
             if (!this.config?.clash_proxy_pool || this.config.clash_proxy_pool.client_type !== 'v2raya') {
                 this.showToast('当前不是 v2rayA 模式', 'warning');
+                return;
+            }
+            if (!this.isV2rayAServiceRunning) {
+                this.showToast('v2rayA 未运行，无法检测当前链路', 'warning');
                 return;
             }
             this.isV2rayATesting = true;
@@ -1136,6 +1274,9 @@ createApp({
             this.v2rayAInvalidKeys = Array.isArray(payload.invalid_keys) ? payload.invalid_keys : [];
             this.v2rayAPage = 1;
             this.v2rayAGroupPage = 1;
+            if (payload.service_status) {
+                this.applyV2rayAServiceStatus(payload.service_status);
+            }
             if (this.v2rayAGroupFilter !== 'all' && !this.v2rayASubscriptionTabs.some(item => item.key === this.v2rayAGroupFilter)) {
                 this.v2rayAGroupFilter = 'all';
             }
@@ -1148,6 +1289,15 @@ createApp({
             if (!this.config?.clash_proxy_pool || this.config.clash_proxy_pool.client_type !== 'v2raya') {
                 if (showToast) {
                     this.showToast('当前不是 v2rayA 模式', 'warning');
+                }
+                return;
+            }
+            if (!this.isV2rayAServiceRunning) {
+                this.v2rayANodes = [];
+                this.v2rayADuplicateGroups = [];
+                this.v2rayAInvalidKeys = [];
+                if (showToast) {
+                    this.showToast('v2rayA 未运行，启动后才能读取节点', 'warning');
                 }
                 return;
             }
@@ -1186,6 +1336,10 @@ createApp({
                 this.showToast('当前不是 v2rayA 模式', 'warning');
                 return;
             }
+            if (!this.isV2rayAServiceRunning) {
+                this.showToast('v2rayA 未运行，无法切换节点', 'warning');
+                return;
+            }
             const nodeKey = this.getV2rayANodeKey(node);
             this.switchingV2rayANodeKey = nodeKey;
             try {
@@ -1212,6 +1366,44 @@ createApp({
                 this.showToast('v2rayA 节点切换失败', 'error');
             } finally {
                 this.switchingV2rayANodeKey = '';
+            }
+        },
+        async deleteV2rayASubscription(group) {
+            if (!group?.subscriptionId) {
+                this.showToast('该分组缺少订阅 ID，无法删除', 'warning');
+                return;
+            }
+            if (!this.isV2rayAServiceRunning) {
+                this.showToast('v2rayA 未运行，无法删除订阅组', 'warning');
+                return;
+            }
+            const confirmed = await this.customConfirm(`确认删除订阅组「${group.name || group.subscriptionId}」吗？这会删除该组下的全部节点。`);
+            if (!confirmed) return;
+            this.deletingV2rayASubscriptionKey = group.key;
+            try {
+                await this.saveConfig(false);
+                const res = await this.authFetch('/api/proxy/v2raya/delete_subscription', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        node_id: group.subscriptionId,
+                        subscription_id: group.subscriptionId,
+                        node_type: 'subscription',
+                        node_name: group.name || '',
+                    })
+                });
+                const data = await res.json();
+                if (data.status === 'success' || data.status === 'warning') {
+                    if (data.data) {
+                        this.applyV2rayANodesPayload(data.data);
+                    }
+                    this.showToast(data.message || '已删除 v2rayA 订阅组', data.status === 'success' ? 'success' : 'warning');
+                } else {
+                    this.showToast(data.message || '删除 v2rayA 订阅组失败', 'error');
+                }
+            } catch (e) {
+                this.showToast('删除 v2rayA 订阅组失败', 'error');
+            } finally {
+                this.deletingV2rayASubscriptionKey = '';
             }
         },
         async markV2rayANodeInvalid(node) {

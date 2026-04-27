@@ -2435,29 +2435,37 @@
                                 </div>
                             </div>
 
-                            <div v-if="config.clash_proxy_pool && proxySubTab === 'v2raya'" class="bg-white p-6 md:p-8 rounded-2xl border border-slate-200 shadow-sm">
-                                <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-slate-100 pb-5 mb-6">
+                            <div v-if="config.clash_proxy_pool && proxySubTab === 'v2raya'" class="bg-gradient-to-br from-white via-slate-50/70 to-fuchsia-50/40 p-6 md:p-8 rounded-[28px] border border-slate-200/90 shadow-[0_1px_2px_rgba(15,23,42,0.03),0_14px_28px_rgba(15,23,42,0.05)]">
+                                <div class="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-5 border-b border-slate-200/80 pb-6 mb-7">
                                     <div>
-                                        <h3 class="text-lg md:text-xl font-black text-slate-900 tracking-tight flex items-center gap-2"><span>🧩</span> v2rayA 配置与节点管理</h3>
-                                        <p class="text-xs text-slate-500 mt-2 font-medium">连接 v2rayA 面板，读取节点、延迟和当前链路状态。</p>
+                                        <div class="inline-flex items-center gap-2 rounded-full border border-fuchsia-200 bg-fuchsia-50/80 px-3 py-1 text-[11px] font-black tracking-[0.22em] text-fuchsia-700 uppercase">v2rayA Console</div>
+                                        <h3 class="mt-3 text-xl md:text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2"><span>🧩</span> v2rayA 配置与节点管理</h3>
+                                        <p class="text-sm text-slate-600 mt-2 font-medium max-w-2xl leading-relaxed">把服务开关、订阅导入、节点读取和分组维护放到同一块控制台里，减少来回跳转。</p>
                                     </div>
-                                    <div v-if="config.clash_proxy_pool.client_type !== 'v2raya'" class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 font-bold">
+                                    <div v-if="config.clash_proxy_pool.client_type !== 'v2raya'" class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 font-bold shadow-sm">
                                         当前客户端类型不是 <code class="font-mono">v2raya</code>。先切到 v2rayA 模式，下面的读取与切换能力才会生效。
                                     </div>
                                 </div>
 
-                                <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.85fr)] gap-6">
-                                    <div class="space-y-4">
-                                        <div>
+                                <div class="grid grid-cols-1 2xl:grid-cols-[minmax(0,1.55fr)_420px] gap-6 xl:gap-7 items-start">
+                                    <div class="rounded-[24px] border border-slate-200 bg-white/90 shadow-[0_1px_2px_rgba(15,23,42,0.03),0_10px_24px_rgba(15,23,42,0.04)] p-5 md:p-6">
+                                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
+                                            <div>
+                                                <div class="text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">Config</div>
+                                                <h4 class="mt-1 text-base md:text-lg font-black text-slate-900">基础接入配置</h4>
+                                            </div>
+                                            <div class="text-[11px] text-slate-500 font-medium">先配面板、认证与订阅，再做服务与节点操作。</div>
+                                        </div>
+                                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-5">
+                                        <div class="lg:col-span-2">
                                             <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">v2rayA 面板地址</label>
                                             <input type="text" v-model="config.clash_proxy_pool.v2raya_url" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 http://127.0.0.1:2017">
                                         </div>
-                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <div>
+                                            <div class="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
                                                 <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">API 用户名</label>
                                                 <input type="text" v-model="config.clash_proxy_pool.v2raya_username" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm text-sm" placeholder="如启用登录保护可填写">
                                             </div>
-                                            <div>
+                                            <div class="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
                                                 <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">API 密码</label>
                                                 <div class="relative">
                                                     <input :type="showPwd.v2raya_password ? 'text' : 'password'" v-model="config.clash_proxy_pool.v2raya_password" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 pr-10 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm text-sm">
@@ -2466,77 +2474,128 @@
                                                     </button>
                                                 </div>
                                             </div>
-                                        </div>
-                                        <div>
+                                        <div class="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
                                             <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">Xray 可执行文件</label>
                                             <input type="text" v-model="config.clash_proxy_pool.v2raya_xray_bin" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 /usr/local/bin/xray">
                                         </div>
-                                        <div>
+                                        <div class="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
                                             <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">geodata 目录</label>
                                             <input type="text" v-model="config.clash_proxy_pool.v2raya_assets_dir" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 /usr/share/xray">
                                         </div>
-                                        <div>
+                                        <div class="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
                                             <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">环境变量文件</label>
                                             <input type="text" v-model="config.clash_proxy_pool.v2raya_env_file" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm" placeholder="如 /etc/default/v2raya">
                                         </div>
-
-                                        <div v-if="v2rayARuntime" class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                                            <div class="bg-white border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
-                                                <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">面板地址</div>
-                                                <div class="text-xs font-mono text-slate-700 break-all mt-2">{{ v2rayARuntime.panel_url || '未填写' }}</div>
+                                        <div class="lg:col-span-2 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4">
+                                            <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">订阅链接</label>
+                                            <div class="relative">
+                                                <input v-if="!showPwd.sub_url" readonly :value="maskValue(config.clash_proxy_pool.sub_url)"
+                                                       class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm">
+                                                <input v-else type="text" v-model="config.clash_proxy_pool.sub_url" autocomplete="off"
+                                                       class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/20 focus:border-fuchsia-500 transition-colors shadow-sm font-mono text-sm"
+                                                       placeholder="如 https://example.com/subscription">
+                                                <button @click="showPwd.sub_url = !showPwd.sub_url" class="absolute right-3 top-1/2 -translate-y-1/2 text-lg text-slate-400 hover:text-fuchsia-600">
+                                                    {{ showPwd.sub_url ? '👁️' : '🙈' }}
+                                                </button>
                                             </div>
-                                            <div class="bg-white border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
+                                        </div>
+                                        </div>
+
+                                        <div v-if="v2rayARuntime" class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-5 mt-5 border-t border-slate-200/80">
+                                            <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
+                                                <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">面板地址</div>
+                                                <div class="text-sm font-mono text-slate-800 break-all mt-2">{{ v2rayARuntime.panel_url || '未填写' }}</div>
+                                            </div>
+                                            <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
                                                 <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">API 登录</div>
-                                                <div class="text-sm font-bold text-slate-700 mt-2">{{ v2rayARuntime.api_auth?.username ? v2rayARuntime.api_auth.username : '未配置' }}</div>
+                                                <div class="text-sm font-bold text-slate-800 mt-2">{{ v2rayARuntime.api_auth?.username ? v2rayARuntime.api_auth.username : '未配置' }}</div>
                                                 <div class="text-[11px] text-slate-500 mt-2">{{ v2rayARuntime.api_auth?.password_configured ? '密码已配置' : '密码未配置' }}</div>
                                             </div>
                                         </div>
-                                        <div v-if="v2rayARuntime && v2rayARuntime.issues && v2rayARuntime.issues.length" class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-4 font-medium">
+                                        <div v-if="v2rayARuntime && v2rayARuntime.issues && v2rayARuntime.issues.length" class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-4 font-medium mt-4">
                                             <div class="font-black mb-2">待确认项</div>
                                             <div v-for="issue in v2rayARuntime.issues" :key="issue">{{ issue }}</div>
                                         </div>
                                     </div>
 
                                         <div class="space-y-4">
-                                            <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 md:p-5 shadow-sm">
+                                            <div class="rounded-[24px] border border-slate-200 bg-white p-5 md:p-6 shadow-[0_1px_2px_rgba(15,23,42,0.03),0_10px_24px_rgba(15,23,42,0.04)]">
+                                                <div class="flex items-start justify-between gap-3">
+                                                    <div>
+                                                        <div class="text-[11px] font-black uppercase tracking-[0.24em] text-slate-400">Service</div>
+                                                        <h4 class="mt-1 text-base md:text-lg font-black text-slate-900">v2rayA 服务控制</h4>
+                                                        <p class="mt-2 text-xs text-slate-500 font-medium">
+                                                            {{ v2rayAServiceStatus?.message || '先读取服务状态，再决定是否启动或关闭。' }}
+                                                        </p>
+                                                    </div>
+                                                    <span class="inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[11px] font-black border"
+                                                          :class="isV2rayAServiceRunning ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'">
+                                                        <span class="w-2 h-2 rounded-full" :class="isV2rayAServiceRunning ? 'bg-emerald-500' : 'bg-amber-500'"></span>
+                                                        {{ isV2rayAServiceRunning ? '运行中' : '未运行' }}
+                                                    </span>
+                                                </div>
+                                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
+                                                    <button @click="fetchV2rayAServiceStatus(true, false)" :disabled="isV2rayAServiceLoading || isV2rayAServiceMutating" class="bg-white border border-slate-200 text-slate-700 px-4 py-2.5 rounded-2xl hover:bg-slate-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                        <span v-if="isV2rayAServiceLoading" class="animate-spin">⏳</span>
+                                                        <span v-else>🔄</span>
+                                                        刷新服务状态
+                                                    </button>
+                                                    <button v-if="!isV2rayAServiceRunning" @click="startV2rayAService" :disabled="isV2rayAServiceMutating" class="bg-emerald-600 text-white px-4 py-2.5 rounded-2xl hover:bg-emerald-700 active:scale-95 transition-all shadow-md shadow-emerald-500/20 font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                        <span v-if="isV2rayAServiceMutating" class="animate-spin">⏳</span>
+                                                        <span v-else>▶️</span>
+                                                        启动 v2rayA
+                                                    </button>
+                                                    <button v-else @click="stopV2rayAService" :disabled="isV2rayAServiceMutating" class="bg-rose-600 text-white px-4 py-2.5 rounded-2xl hover:bg-rose-700 active:scale-95 transition-all shadow-md shadow-rose-500/20 font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                        <span v-if="isV2rayAServiceMutating" class="animate-spin">⏳</span>
+                                                        <span v-else>⏹️</span>
+                                                        关闭 v2rayA
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="rounded-[24px] border border-slate-200 bg-white/95 p-5 md:p-6 shadow-[0_1px_2px_rgba(15,23,42,0.03),0_10px_24px_rgba(15,23,42,0.04)]">
                                                 <div class="flex items-center justify-between gap-3 mb-4">
                                                     <div>
                                                         <div class="text-[11px] font-black uppercase tracking-[0.24em] text-slate-400">Actions</div>
                                                         <h4 class="mt-1 text-base md:text-lg font-black text-slate-900">节点工具</h4>
                                                     </div>
-                                                    <div class="hidden md:flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-500 shadow-sm">
+                                                    <div class="hidden md:flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-bold text-slate-500 shadow-sm">
                                                         <span class="w-2 h-2 rounded-full" :class="config.clash_proxy_pool.enable && config.clash_proxy_pool.client_type === 'v2raya' ? 'bg-emerald-500' : 'bg-slate-300'"></span>
                                                         {{ config.clash_proxy_pool.enable && config.clash_proxy_pool.client_type === 'v2raya' ? '自动切点已接管' : '当前未接管' }}
                                                     </div>
                                                 </div>
 
                                                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                                <button @click="fetchV2rayANodes(true, true)" :disabled="isV2rayALatencyLoading" class="sm:col-span-2 bg-slate-900 text-white px-4 py-3 rounded-2xl hover:bg-slate-800 active:scale-95 transition-all shadow-md shadow-slate-900/20 font-black disabled:opacity-50 flex items-center justify-center gap-2">
+                                                <button @click="fetchV2rayANodes(true, true)" :disabled="isV2rayALatencyLoading || !isV2rayAServiceRunning" class="sm:col-span-2 bg-slate-900 text-white px-4 py-3 rounded-2xl hover:bg-slate-800 active:scale-95 transition-all shadow-md shadow-slate-900/20 font-black disabled:opacity-50 flex items-center justify-center gap-2">
                                                     <span v-if="isV2rayALatencyLoading" class="animate-spin">⏳</span>
                                                     <span v-else>📶</span>
                                                     刷新全部延迟
                                                 </button>
-                                                <button @click="markV2rayANodesWithoutLatencyInvalid" :disabled="isV2rayAInvalidMutating || isV2rayALatencyLoading" class="bg-white border border-rose-200 text-rose-700 px-4 py-3 rounded-2xl hover:bg-rose-50 active:scale-95 transition-all shadow-sm font-black disabled:opacity-50 flex items-center justify-center gap-2">
+                                                <button @click="markV2rayANodesWithoutLatencyInvalid" :disabled="isV2rayAInvalidMutating || isV2rayALatencyLoading || !isV2rayAServiceRunning" class="bg-white border border-rose-200 text-rose-700 px-4 py-3 rounded-2xl hover:bg-rose-50 active:scale-95 transition-all shadow-sm font-black disabled:opacity-50 flex items-center justify-center gap-2">
                                                     <span v-if="isV2rayAInvalidMutating" class="animate-spin">⏳</span>
                                                     <span v-else>🚫</span>
                                                     标记所有无延迟节点失效
                                                 </button>
-                                                <button @click="testV2rayACurrentProxy" :disabled="isV2rayATesting" class="bg-white border border-fuchsia-200 text-fuchsia-700 px-4 py-2.5 rounded-2xl hover:bg-fuchsia-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                <button @click="testV2rayACurrentProxy" :disabled="isV2rayATesting || !isV2rayAServiceRunning" class="bg-white border border-fuchsia-200 text-fuchsia-700 px-4 py-2.5 rounded-2xl hover:bg-fuchsia-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
                                                     <span v-if="isV2rayATesting" class="animate-spin">⏳</span>
                                                     <span v-else>⚡</span>
                                                     检测当前链路
                                                 </button>
-                                                <button @click="dedupeV2rayANodes" :disabled="isV2rayAInvalidMutating" class="bg-amber-50/80 border border-amber-200 text-amber-700 px-4 py-2.5 rounded-2xl hover:bg-amber-100 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                <button @click="importV2rayASubscription" :disabled="isV2rayAImportingSubscription" class="bg-white border border-cyan-200 text-cyan-700 px-4 py-2.5 rounded-2xl hover:bg-cyan-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                    <span v-if="isV2rayAImportingSubscription" class="animate-spin">⏳</span>
+                                                    <span v-else>📥</span>
+                                                    导入订阅
+                                                </button>
+                                                <button @click="dedupeV2rayANodes" :disabled="isV2rayAInvalidMutating || !isV2rayAServiceRunning" class="bg-amber-50/80 border border-amber-200 text-amber-700 px-4 py-2.5 rounded-2xl hover:bg-amber-100 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
                                                     <span v-if="isV2rayAInvalidMutating" class="animate-spin">⏳</span>
                                                     <span v-else>🧹</span>
                                                     移除重复
                                                 </button>
-                                                <button @click="clearV2rayAInvalidMarks" :disabled="isV2rayAInvalidMutating" class="bg-white border border-rose-200 text-rose-700 px-4 py-2.5 rounded-2xl hover:bg-rose-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                <button @click="clearV2rayAInvalidMarks" :disabled="isV2rayAInvalidMutating || !isV2rayAServiceRunning" class="bg-white border border-rose-200 text-rose-700 px-4 py-2.5 rounded-2xl hover:bg-rose-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
                                                     <span v-if="isV2rayAInvalidMutating" class="animate-spin">⏳</span>
                                                     <span v-else>♻️</span>
                                                     清空失效标记
                                                 </button>
-                                                <button @click="fetchV2rayANodes(false, true)" :disabled="isV2rayANodesLoading" class="bg-white border border-slate-200 text-slate-700 px-4 py-2.5 rounded-2xl hover:bg-slate-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                                                <button @click="fetchV2rayANodes(false, true)" :disabled="isV2rayANodesLoading || !isV2rayAServiceRunning" class="bg-white border border-slate-200 text-slate-700 px-4 py-2.5 rounded-2xl hover:bg-slate-50 active:scale-95 transition-all shadow-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
                                                     <span v-if="isV2rayANodesLoading" class="animate-spin">⏳</span>
                                                     <span v-else>📋</span>
                                                     读取节点列表
@@ -2553,11 +2612,11 @@
                                             </div>
 
                                             <div v-if="v2rayARuntime" class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                                                <div class="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                                                <div class="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4 shadow-sm">
                                                     <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">Xray 路径</div>
                                                     <div class="text-xs font-mono text-slate-700 break-all mt-2">{{ v2rayARuntime.xray_bin?.path || '未填写' }}</div>
                                                 </div>
-                                                <div class="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                                                <div class="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4 shadow-sm">
                                                     <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">默认代理</div>
                                                     <div class="text-xs font-mono text-slate-700 break-all mt-2">{{ v2rayARuntime.default_proxy || '未填写' }}</div>
                                                 </div>
@@ -2567,36 +2626,37 @@
                                     </div>
                                 </div>
 
-                                <div class="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                                    <div class="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                                <div class="mt-7 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                                    <div class="rounded-[24px] border border-slate-200 bg-white px-5 py-5 shadow-[0_1px_2px_rgba(15,23,42,0.03),0_8px_20px_rgba(15,23,42,0.04)]">
                                         <label class="block text-[11px] text-fuchsia-700 font-black mb-2 uppercase tracking-wider">当前接管状态</label>
                                         <div class="text-sm text-slate-700 font-bold leading-relaxed">{{ config.clash_proxy_pool.enable && config.clash_proxy_pool.client_type === 'v2raya' ? '已启用 v2rayA 自动切点' : '当前未启用 v2rayA 自动切点' }}</div>
                                         <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">只要上方已开启 <code class="font-mono">智能切点</code> 且 <code class="font-mono">client_type=v2raya</code>，业务运行时就会自动切换；下方按钮只是手动指定覆盖。</div>
                                     </div>
-                                    <div class="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                                    <div class="rounded-[24px] border border-slate-200 bg-white px-5 py-5 shadow-[0_1px_2px_rgba(15,23,42,0.03),0_8px_20px_rgba(15,23,42,0.04)]">
                                         <label class="block text-[11px] text-slate-500 font-black mb-2 uppercase tracking-wider">节点缓存</label>
-                                        <div class="text-2xl font-black text-slate-900">{{ v2rayANodes.length }}</div>
+                                        <div class="text-3xl font-black text-slate-900 tracking-tight">{{ v2rayANodes.length }}</div>
                                         <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">{{ v2rayAStatusMessage || 'v2rayA 节点列表已刷新。' }}</div>
                                     </div>
-                                    <div class="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm md:col-span-2 xl:col-span-1">
+                                    <div class="rounded-[24px] border border-slate-200 bg-white px-5 py-5 shadow-[0_1px_2px_rgba(15,23,42,0.03),0_8px_20px_rgba(15,23,42,0.04)] md:col-span-2 xl:col-span-1">
                                         <label class="block text-[11px] text-amber-700 font-black mb-2 uppercase tracking-wider">节点整理状态</label>
                                         <div class="text-sm text-slate-700 font-bold leading-relaxed">失效 {{ v2rayAInvalidKeys.length }} 个 · 重复组 {{ v2rayADuplicateGroups.length }} 个</div>
                                         <div class="text-[11px] text-slate-500 mt-2 leading-relaxed">“移除重复”会把重复节点标记为失效，自动切点时会跳过它们。</div>
                                     </div>
                                 </div>
 
-                                <div class="mt-6">
-                                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+                                <div class="mt-8">
+                                    <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3 mb-5">
                                         <div>
-                                            <h4 class="text-lg font-black text-slate-800">节点列表</h4>
+                                            <div class="text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">Nodes</div>
+                                            <h4 class="mt-1 text-lg md:text-xl font-black text-slate-900">节点列表</h4>
                                             <p class="text-xs text-slate-500 mt-1">支持“全部节点”和“订阅分组”两种视图，运行时会按活节点池自动切换。</p>
                                         </div>
-                                        <div class="text-[11px] text-slate-500 font-medium">
+                                        <div class="text-[11px] text-slate-500 font-medium rounded-full border border-slate-200 bg-white px-4 py-2 shadow-sm">
                                             固定高度表格视图，支持内部滚动和分页；延迟数据来自 v2rayA API。
                                         </div>
                                     </div>
 
-                                    <div v-if="v2rayANodes.length > 0" class="space-y-4">
+                                    <div v-if="isV2rayAServiceRunning && v2rayANodes.length > 0" class="space-y-4">
                                         <div class="bg-white border border-slate-200 rounded-2xl p-3 shadow-sm">
                                             <div class="flex flex-wrap gap-2">
                                                 <button @click="changeV2rayAListMode('all')" class="px-4 py-2 rounded-xl border text-sm font-black transition-all"
@@ -2715,7 +2775,6 @@
                                                 </div>
                                             </div>
                                         </div>
-
                                         <div v-else class="rounded-2xl border border-slate-200 shadow-sm bg-white overflow-hidden">
                                             <div class="h-[520px] overflow-auto">
                                                 <table class="min-w-full text-sm">
@@ -2726,7 +2785,7 @@
                                                             <th class="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-500 w-28">节点数</th>
                                                             <th class="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-500 w-28">当前节点</th>
                                                             <th class="px-4 py-3 text-left text-[11px] font-black uppercase tracking-wider text-slate-500 w-28">最佳延迟</th>
-                                                            <th class="px-4 py-3 text-right text-[11px] font-black uppercase tracking-wider text-slate-500 w-44">操作</th>
+                                                            <th class="px-4 py-3 text-right text-[11px] font-black uppercase tracking-wider text-slate-500 w-72">操作</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody>
@@ -2748,9 +2807,16 @@
                                                                 {{ group.bestLatency === null ? '--' : formatV2rayALatency({ latency_ms: group.bestLatency }) }}
                                                             </td>
                                                             <td class="px-4 py-3 align-top text-right">
-                                                                <button @click="selectV2rayAGroupFilter(group.key)" class="inline-flex min-w-[120px] items-center justify-center gap-2 px-3 py-2 rounded-xl bg-white border border-fuchsia-200 text-fuchsia-700 text-xs font-black hover:bg-fuchsia-50 transition-all">
-                                                                    查看本组
-                                                                </button>
+                                                                <div class="flex items-center justify-end gap-2">
+                                                                    <button @click="selectV2rayAGroupFilter(group.key)" class="inline-flex min-w-[120px] items-center justify-center gap-2 px-3 py-2 rounded-xl bg-white border border-fuchsia-200 text-fuchsia-700 text-xs font-black hover:bg-fuchsia-50 transition-all">
+                                                                        查看本组
+                                                                    </button>
+                                                                    <button @click="deleteV2rayASubscription(group)" :disabled="deletingV2rayASubscriptionKey === group.key || !group.subscriptionId" class="inline-flex min-w-[120px] items-center justify-center gap-2 px-3 py-2 rounded-xl bg-rose-600 text-white text-xs font-black hover:bg-rose-700 transition-all shadow-md shadow-rose-500/20 disabled:opacity-50">
+                                                                        <span v-if="deletingV2rayASubscriptionKey === group.key" class="animate-spin">⏳</span>
+                                                                        <span v-else>🗑️</span>
+                                                                        删除订阅组
+                                                                    </button>
+                                                                </div>
                                                             </td>
                                                         </tr>
                                                     </tbody>
@@ -2771,6 +2837,9 @@
                                                 </div>
                                             </div>
                                         </div>
+                                    </div>
+                                    <div v-else-if="v2rayAServiceStatus && !isV2rayAServiceRunning" class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-6 font-medium">
+                                        v2rayA 当前未运行。先点击上面的“启动 v2rayA”，启动成功后才能读取节点、刷新延迟和手动切换。
                                     </div>
                                     <div v-else class="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-6 font-medium">
                                         还没有读取到 v2rayA 节点。先确认面板地址与登录信息，再点击“读取节点列表”。

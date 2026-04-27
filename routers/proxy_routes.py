@@ -129,6 +129,7 @@ def _build_v2raya_runtime_snapshot() -> dict:
     env_file = str(
         clash_conf.get("v2raya_env_file", "") or ("/etc/default/v2raya" if os.name != "nt" else "")
     ).strip()
+    subscription_url = str(clash_conf.get("sub_url", "") or "").strip()
     default_proxy = str(config_data.get("default_proxy", "") or "").strip()
 
     xray_status = _build_path_status(xray_bin, expected="file")
@@ -165,6 +166,7 @@ def _build_v2raya_runtime_snapshot() -> dict:
     return {
         "client_type": str(clash_conf.get("client_type", "") or "").strip(),
         "panel_url": panel_url,
+        "subscription_url": subscription_url,
         "default_proxy": default_proxy,
         "os_name": os.name,
         "api_auth": {
@@ -802,6 +804,50 @@ def _build_v2raya_switch_payloads(req: V2rayASwitchReq) -> list[dict]:
     return deduped
 
 
+async def _load_v2raya_service_status() -> dict:
+    config_data = _read_current_yaml_config()
+    settings = _build_v2raya_api_settings(config_data)
+    panel_url = settings.get("panel_url", "")
+    runtime = _build_v2raya_runtime_snapshot()
+    if not panel_url:
+        return {
+            "configured": False,
+            "running": False,
+            "panel_url": "",
+            "runtime": runtime,
+            "message": "请先填写 v2rayA 面板地址。",
+        }
+    async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+        resolved_panel_url, auth_values, _ = await _v2raya_login_any(
+            client, panel_url, settings.get("username", ""), settings.get("password", "")
+        )
+        resp, body, _ = await _v2raya_request(
+            client,
+            resolved_panel_url,
+            "GET",
+            "touch",
+            auth_values=auth_values,
+        )
+        if resp is None or not _v2raya_payload_ok(body, resp.status_code):
+            message = ""
+            if isinstance(body, dict):
+                message = _first_v2raya_text(body.get("message"), body.get("error"), message)
+            raise RuntimeError(message or "读取 v2rayA 服务状态失败。")
+        touch_data = _v2raya_unwrap_payload(body)
+        if not isinstance(touch_data, dict):
+            touch_data = {}
+        running = bool(touch_data.get("running"))
+        return {
+            "configured": True,
+            "running": running,
+            "panel_url": resolved_panel_url,
+            "runtime": runtime,
+            "connected_server": touch_data.get("connectedServer"),
+            "touch": touch_data,
+            "message": "v2rayA 服务正在运行。" if running else "v2rayA 服务当前未运行。",
+        }
+
+
 @router.post("/api/proxy/v2raya/test_current")
 async def api_v2raya_test_current(token: str = Depends(verify_token)):
     proxy_url = getattr(core_engine.cfg, "DEFAULT_PROXY", None)
@@ -832,10 +878,39 @@ async def api_v2raya_inspect(token: str = Depends(verify_token)):
         return {"status": "error", "message": f"v2rayA 环境检测失败: {e}"}
 
 
+@router.get("/api/proxy/v2raya/status")
+async def api_v2raya_status(token: str = Depends(verify_token)):
+    try:
+        data = await _load_v2raya_service_status()
+        if not data.get("configured"):
+            return {"status": "warning", "message": data.get("message") or "请先填写 v2rayA 面板地址。", "data": data}
+        return {
+            "status": "success" if data.get("running") else "warning",
+            "message": data.get("message") or ("v2rayA 服务正在运行。" if data.get("running") else "v2rayA 服务当前未运行。"),
+            "data": data,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"读取 v2rayA 服务状态失败: {e}"}
+
+
 @router.get("/api/proxy/v2raya/nodes")
 async def api_v2raya_nodes(with_latency: bool = Query(False), token: str = Depends(verify_token)):
     try:
+        service_status = await _load_v2raya_service_status()
+        if not service_status.get("configured"):
+            return {
+                "status": "warning",
+                "message": service_status.get("message") or "请先填写 v2rayA 面板地址。",
+                "data": {"nodes": [], "runtime": service_status.get("runtime"), "service_status": service_status},
+            }
+        if not service_status.get("running"):
+            return {
+                "status": "warning",
+                "message": "v2rayA 服务当前未运行，启动后才能读取节点。",
+                "data": {"nodes": [], "runtime": service_status.get("runtime"), "service_status": service_status},
+            }
         data = _build_v2raya_nodes_response_data(await _load_v2raya_nodes_snapshot(with_latency=with_latency))
+        data["service_status"] = service_status
         runtime = data.get("runtime") or {}
         issues = runtime.get("issues", []) if isinstance(runtime, dict) else []
         status = "success" if not issues else "warning"
@@ -895,6 +970,160 @@ async def api_v2raya_switch(req: V2rayASwitchReq, token: str = Depends(verify_to
         }
     except Exception as e:
         return {"status": "error", "message": f"切换 v2rayA 节点失败: {e}"}
+
+
+@router.post("/api/proxy/v2raya/stop_service")
+async def api_v2raya_stop_service(token: str = Depends(verify_token)):
+    try:
+        settings = _build_v2raya_api_settings()
+        panel_url = settings.get("panel_url", "")
+        if not panel_url:
+            return {"status": "error", "message": "请先填写 v2rayA 面板地址。"}
+        async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+            resolved_panel_url, auth_values, _ = await _v2raya_login_any(
+                client, panel_url, settings.get("username", ""), settings.get("password", "")
+            )
+            resp, body, _ = await _v2raya_request(
+                client,
+                resolved_panel_url,
+                "DELETE",
+                "v2ray",
+                auth_values=auth_values,
+            )
+            if resp is None or not _v2raya_payload_ok(body, resp.status_code):
+                last_message = ""
+                if isinstance(body, dict):
+                    last_message = _first_v2raya_text(body.get("message"), body.get("error"), last_message)
+                return {"status": "error", "message": last_message or "关闭 v2rayA 服务失败，请检查面板登录态或服务状态。"}
+        await asyncio.sleep(0.8)
+        data = await _load_v2raya_service_status()
+        return {
+            "status": "success",
+            "message": "已关闭 v2rayA 服务。",
+            "data": data,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"关闭 v2rayA 服务失败: {e}"}
+
+
+@router.post("/api/proxy/v2raya/start_service")
+async def api_v2raya_start_service(token: str = Depends(verify_token)):
+    try:
+        settings = _build_v2raya_api_settings()
+        panel_url = settings.get("panel_url", "")
+        if not panel_url:
+            return {"status": "error", "message": "请先填写 v2rayA 面板地址。"}
+        async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+            resolved_panel_url, auth_values, _ = await _v2raya_login_any(
+                client, panel_url, settings.get("username", ""), settings.get("password", "")
+            )
+            resp, body, _ = await _v2raya_request(
+                client,
+                resolved_panel_url,
+                "POST",
+                "v2ray",
+                auth_values=auth_values,
+            )
+            if resp is None or not _v2raya_payload_ok(body, resp.status_code):
+                last_message = ""
+                if isinstance(body, dict):
+                    last_message = _first_v2raya_text(body.get("message"), body.get("error"), last_message)
+                return {"status": "error", "message": last_message or "启动 v2rayA 服务失败，请检查面板登录态或服务状态。"}
+        await asyncio.sleep(1.0)
+        data = await _load_v2raya_service_status()
+        return {
+            "status": "success",
+            "message": "已启动 v2rayA 服务。",
+            "data": data,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"启动 v2rayA 服务失败: {e}"}
+
+
+@router.post("/api/proxy/v2raya/import_subscription")
+async def api_v2raya_import_subscription(token: str = Depends(verify_token)):
+    try:
+        config_data = _read_current_yaml_config()
+        settings = _build_v2raya_api_settings(config_data)
+        panel_url = settings.get("panel_url", "")
+        if not panel_url:
+            return {"status": "error", "message": "请先填写 v2rayA 面板地址。"}
+        clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
+        subscription_url = str(clash_conf.get("sub_url", "") or "").strip()
+        if not subscription_url:
+            return {"status": "error", "message": "请先填写订阅链接。"}
+        async with httpx.AsyncClient(timeout=18.0, follow_redirects=True) as client:
+            resolved_panel_url, auth_values, _ = await _v2raya_login_any(
+                client, panel_url, settings.get("username", ""), settings.get("password", "")
+            )
+            resp, body, _ = await _v2raya_request(
+                client,
+                resolved_panel_url,
+                "POST",
+                "import",
+                auth_values=auth_values,
+                json_body={"url": subscription_url},
+            )
+            if resp is None or not _v2raya_payload_ok(body, resp.status_code):
+                last_message = ""
+                if isinstance(body, dict):
+                    last_message = _first_v2raya_text(body.get("message"), body.get("error"), last_message)
+                return {"status": "error", "message": last_message or "导入 v2rayA 订阅失败，请检查订阅链接或面板登录态。"}
+        await asyncio.sleep(1.0)
+        data = _build_v2raya_nodes_response_data(await _load_v2raya_nodes_snapshot(with_latency=False))
+        return {
+            "status": "success",
+            "message": "已提交 v2rayA 订阅导入/更新。",
+            "data": data,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"导入 v2rayA 订阅失败: {e}"}
+
+
+@router.post("/api/proxy/v2raya/delete_subscription")
+async def api_v2raya_delete_subscription(req: V2rayASwitchReq, token: str = Depends(verify_token)):
+    try:
+        settings = _build_v2raya_api_settings()
+        panel_url = settings.get("panel_url", "")
+        if not panel_url:
+            return {"status": "error", "message": "请先填写 v2rayA 面板地址。"}
+        subscription_id = str(req.subscription_id or req.node_id or "").strip()
+        if not subscription_id:
+            return {"status": "error", "message": "缺少订阅组 ID，无法删除。"}
+        async with httpx.AsyncClient(timeout=18.0, follow_redirects=True) as client:
+            resolved_panel_url, auth_values, _ = await _v2raya_login_any(
+                client, panel_url, settings.get("username", ""), settings.get("password", "")
+            )
+            resp, body, _ = await _v2raya_request(
+                client,
+                resolved_panel_url,
+                "DELETE",
+                "subscription",
+                auth_values=auth_values,
+                json_body={"id": subscription_id, "_type": "subscription"},
+            )
+            if resp is None or not _v2raya_payload_ok(body, resp.status_code):
+                last_message = ""
+                if isinstance(body, dict):
+                    last_message = _first_v2raya_text(body.get("message"), body.get("error"), last_message)
+                return {"status": "error", "message": last_message or "删除 v2rayA 订阅组失败，请检查面板登录态。"}
+        await asyncio.sleep(0.8)
+        service_status = await _load_v2raya_service_status()
+        if not service_status.get("running"):
+            return {
+                "status": "success",
+                "message": "订阅组已删除；当前 v2rayA 未运行，节点列表保持为空。",
+                "data": {"nodes": [], "runtime": service_status.get("runtime"), "service_status": service_status},
+            }
+        data = _build_v2raya_nodes_response_data(await _load_v2raya_nodes_snapshot(with_latency=False))
+        data["service_status"] = service_status
+        return {
+            "status": "success",
+            "message": "已删除 v2rayA 订阅组。",
+            "data": data,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"删除 v2rayA 订阅组失败: {e}"}
 
 
 @router.post("/api/proxy/v2raya/mark_invalid")
