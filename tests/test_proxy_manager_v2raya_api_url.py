@@ -72,6 +72,32 @@ class ProxyManagerV2RayAApiUrlTests(unittest.TestCase):
         self.assertEqual("local", self.proxy_manager.V2RAYA_RUNTIME_MODE)
         self.assertEqual("http://127.0.0.1:2017", self.proxy_manager.V2RAYA_PANEL_URL)
 
+    def test_extract_v2raya_nodes_inherits_subscription_id_from_subscription_container(self):
+        payload = {
+            "subscriptions": [
+                {
+                    "type": "subscription",
+                    "id": "3",
+                    "name": "app.sublink.works",
+                    "servers": [
+                        {
+                            "_type": "subscriptionServer",
+                            "id": "118",
+                            "name": "德国DE 779",
+                            "address": "de.example.com:443",
+                        }
+                    ],
+                }
+            ]
+        }
+
+        nodes = self.proxy_manager._extract_v2raya_nodes(payload)
+
+        self.assertEqual(1, len(nodes))
+        self.assertEqual("subscriptionServer:3:118", nodes[0]["key"])
+        self.assertEqual("3", nodes[0]["subscription_id"])
+        self.assertEqual("app.sublink.works", nodes[0]["subscription_name"])
+
 
 if __name__ == "__main__":
     unittest.main()

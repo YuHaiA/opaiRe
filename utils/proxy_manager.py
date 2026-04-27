@@ -730,6 +730,8 @@ def _build_v2raya_node_candidate(obj: dict, ctx: dict):
     if not node_type:
         node_type = "subscriptionServer" if subscription_id else "server"
     lower_type = node_type.lower()
+    if lower_type == "subscription":
+        return None
     if "sub" in lower_type and "server" in lower_type:
         node_type = "subscriptionServer"
     elif "server" in lower_type:
@@ -754,6 +756,7 @@ def _walk_v2raya_nodes(value, nodes: dict[str, dict], current_refs: set[str], ct
     ctx = dict(ctx or {})
     if isinstance(value, dict):
         _collect_v2raya_current_refs(value, current_refs)
+        raw_type = _first_v2raya_text(value.get("_type"), value.get("type")).lower()
         candidate = _build_v2raya_node_candidate(value, ctx)
         if candidate:
             existing = nodes.get(candidate["key"])
@@ -764,11 +767,30 @@ def _walk_v2raya_nodes(value, nodes: dict[str, dict], current_refs: set[str], ct
             else:
                 nodes[candidate["key"]] = candidate
         next_ctx = dict(ctx)
+        if raw_type == "subscription":
+            next_ctx["subscription_id"] = _first_v2raya_text(
+                value.get("id"),
+                value.get("ID"),
+                value.get("Id"),
+                value.get("sub"),
+                value.get("subId"),
+                value.get("subid"),
+                value.get("subscriptionId"),
+                next_ctx.get("subscription_id"),
+            )
+            next_ctx["subscription_name"] = _first_v2raya_text(
+                value.get("name"),
+                value.get("remarks"),
+                value.get("title"),
+                value.get("host"),
+                value.get("address"),
+                next_ctx.get("subscription_name"),
+            )
         container_name = _first_v2raya_text(value.get("name"), value.get("remarks"), value.get("title"))
         container_sub_id = _first_v2raya_text(value.get("sub"), value.get("subId"), value.get("subid"), value.get("subscriptionId"))
         if container_sub_id:
             next_ctx["subscription_id"] = container_sub_id
-        if container_name and not candidate:
+        if container_name and (not candidate or raw_type == "subscription"):
             next_ctx["subscription_name"] = container_name
         for key, child in value.items():
             child_ctx = dict(next_ctx)
