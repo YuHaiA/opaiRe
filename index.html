@@ -2573,35 +2573,6 @@
                                             </div>
                                         </div>
 
-                                        <div v-if="v2rayARuntime" class="rounded-[24px] border border-slate-200 bg-white/90 shadow-[0_1px_2px_rgba(15,23,42,0.03),0_10px_24px_rgba(15,23,42,0.04)] p-5 md:p-6">
-                                            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-                                                <div>
-                                                    <div class="text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">Runtime</div>
-                                                    <h4 class="mt-1 text-base md:text-lg font-black text-slate-900">运行时快照</h4>
-                                                </div>
-                                                <div class="text-[11px] text-slate-500 font-medium">这里展示后端最终解析出的模式与地址，方便区分本地和服务器环境。</div>
-                                            </div>
-                                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
-                                                <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
-                                                    <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">运行场景</div>
-                                                    <div class="text-sm font-bold text-slate-800 mt-2">{{ v2rayARuntime.runtime_mode === 'local' ? '本地模式' : '服务器模式' }}</div>
-                                                <div class="text-[11px] text-slate-500 mt-2">当前后端实际使用的 API 地址：{{ v2rayARuntime.resolved_api_url || '未解析' }}</div>
-                                            </div>
-                                            <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
-                                                <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">面板地址</div>
-                                                <div class="text-sm font-mono text-slate-800 break-all mt-2">{{ v2rayARuntime.resolved_browser_panel_url || v2rayARuntime.browser_panel_url || v2rayARuntime.panel_url || '未填写' }}</div>
-                                            </div>
-                                            <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
-                                                <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">API 登录</div>
-                                                <div class="text-sm font-bold text-slate-800 mt-2">{{ v2rayARuntime.api_auth?.username ? v2rayARuntime.api_auth.username : '未配置' }}</div>
-                                                <div class="text-[11px] text-slate-500 mt-2">{{ v2rayARuntime.api_auth?.password_configured ? '密码已配置' : '密码未配置' }}</div>
-                                            </div>
-                                            </div>
-                                            <div v-if="v2rayARuntime.issues && v2rayARuntime.issues.length" class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-4 font-medium mt-4">
-                                                <div class="font-black mb-2">待确认项</div>
-                                                <div v-for="issue in v2rayARuntime.issues" :key="issue">{{ issue }}</div>
-                                            </div>
-                                        </div>
                                     </div>
 
                                         <div class="space-y-4">
@@ -2696,19 +2667,48 @@
                                                     打开 v2rayA 面板
                                                 </button>
                                             </div>
-
-                                            <div v-if="v2rayARuntime" class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                                                <div class="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4 shadow-sm">
-                                                    <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">Xray 路径</div>
-                                                    <div class="text-xs font-mono text-slate-700 break-all mt-2">{{ v2rayARuntime.xray_bin?.path || '未填写' }}</div>
-                                                </div>
-                                                <div class="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4 shadow-sm">
-                                                    <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">默认代理</div>
-                                                    <div class="text-xs font-mono text-slate-700 break-all mt-2">{{ v2rayARuntime.default_proxy || '未填写' }}</div>
-                                                </div>
-                                            </div>
                                         </div>
 
+                                    </div>
+                                </div>
+
+                                <div v-if="v2rayARuntime" class="mt-7 rounded-[24px] border border-slate-200 bg-white/90 shadow-[0_1px_2px_rgba(15,23,42,0.03),0_10px_24px_rgba(15,23,42,0.04)] p-5 md:p-6">
+                                    <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3 mb-5">
+                                        <div>
+                                            <div class="text-[11px] font-black uppercase tracking-[0.22em] text-slate-400">Runtime</div>
+                                            <h4 class="mt-1 text-base md:text-lg font-black text-slate-900">运行时快照</h4>
+                                            <p class="text-xs text-slate-500 mt-2 font-medium">这里展示后端最终解析出的模式、地址和关键运行路径，方便区分本地与服务器环境。</p>
+                                        </div>
+                                        <div class="text-[11px] text-slate-500 font-medium rounded-full border border-slate-200 bg-slate-50 px-4 py-2 shadow-sm">
+                                            当前后端实际使用的 API 地址：{{ v2rayARuntime.resolved_api_url || '未解析' }}
+                                        </div>
+                                    </div>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+                                        <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
+                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">运行场景</div>
+                                            <div class="text-sm font-bold text-slate-800 mt-2">{{ v2rayARuntime.runtime_mode === 'local' ? '本地模式' : '服务器模式' }}</div>
+                                        </div>
+                                        <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
+                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">面板地址</div>
+                                            <div class="text-sm font-mono text-slate-800 break-all mt-2">{{ v2rayARuntime.resolved_browser_panel_url || v2rayARuntime.browser_panel_url || v2rayARuntime.panel_url || '未填写' }}</div>
+                                        </div>
+                                        <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
+                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">API 登录</div>
+                                            <div class="text-sm font-bold text-slate-800 mt-2">{{ v2rayARuntime.api_auth?.username ? v2rayARuntime.api_auth.username : '未配置' }}</div>
+                                            <div class="text-[11px] text-slate-500 mt-2">{{ v2rayARuntime.api_auth?.password_configured ? '密码已配置' : '密码未配置' }}</div>
+                                        </div>
+                                        <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
+                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">Xray 路径</div>
+                                            <div class="text-xs font-mono text-slate-700 break-all mt-2">{{ v2rayARuntime.xray_bin?.path || '未填写' }}</div>
+                                        </div>
+                                        <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
+                                            <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">默认代理</div>
+                                            <div class="text-xs font-mono text-slate-700 break-all mt-2">{{ v2rayARuntime.default_proxy || '未填写' }}</div>
+                                        </div>
+                                    </div>
+                                    <div v-if="v2rayARuntime.issues && v2rayARuntime.issues.length" class="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-4 font-medium mt-4">
+                                        <div class="font-black mb-2">待确认项</div>
+                                        <div v-for="issue in v2rayARuntime.issues" :key="issue">{{ issue }}</div>
                                     </div>
                                 </div>
 
