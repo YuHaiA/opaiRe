@@ -213,6 +213,16 @@ def _stringify_v2raya(value: Any) -> str:
     return str(value).strip()
 
 
+def _coerce_v2raya_id(value: Any) -> Any:
+    text = _stringify_v2raya(value)
+    if text.isdigit():
+        try:
+            return int(text)
+        except Exception:
+            return text
+    return text
+
+
 def _first_v2raya_text(*values: Any) -> str:
     for value in values:
         text = _stringify_v2raya(value)
@@ -1113,8 +1123,9 @@ async def api_v2raya_delete_subscription(req: V2rayASwitchReq, token: str = Depe
         panel_url = settings.get("panel_url", "")
         if not panel_url:
             return {"status": "error", "message": "请先填写 v2rayA 面板地址。"}
-        subscription_id = str(req.subscription_id or req.node_id or "").strip()
-        if not subscription_id:
+        subscription_id = _coerce_v2raya_id(req.subscription_id or req.node_id or "")
+        subscription_id_text = _stringify_v2raya(subscription_id)
+        if not subscription_id_text:
             return {"status": "error", "message": "缺少订阅组 ID，无法删除。"}
         async with httpx.AsyncClient(timeout=18.0, follow_redirects=True) as client:
             resolved_panel_url, auth_values, _ = await _v2raya_login_any(
@@ -1142,7 +1153,7 @@ async def api_v2raya_delete_subscription(req: V2rayASwitchReq, token: str = Depe
                 "data": {"nodes": [], "runtime": service_status.get("runtime"), "service_status": service_status},
             }
         data = _build_v2raya_nodes_response_data(
-            await _load_v2raya_nodes_until_subscription_removed(subscription_id, retries=6, delay_sec=0.7)
+            await _load_v2raya_nodes_until_subscription_removed(subscription_id_text, retries=6, delay_sec=0.7)
         )
         data["service_status"] = service_status
         return {
