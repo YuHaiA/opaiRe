@@ -762,6 +762,20 @@ async def _load_v2raya_nodes_snapshot(with_latency: bool = False) -> dict:
         }
 
 
+async def _load_v2raya_nodes_until_subscription_removed(subscription_id: str, retries: int = 5, delay_sec: float = 0.6) -> dict:
+    target = str(subscription_id or "").strip()
+    last_snapshot = {"nodes": [], "runtime": _build_v2raya_runtime_snapshot(), "message": ""}
+    for idx in range(max(1, retries)):
+        last_snapshot = await _load_v2raya_nodes_snapshot(with_latency=False)
+        nodes = last_snapshot.get("nodes") or []
+        still_exists = any(str(item.get("subscription_id") or "").strip() == target for item in nodes if isinstance(item, dict))
+        if not still_exists:
+            return last_snapshot
+        if idx < retries - 1:
+            await asyncio.sleep(delay_sec)
+    return last_snapshot
+
+
 def _build_v2raya_nodes_response_data(data: dict) -> dict:
     payload = dict(data or {})
     annotated_nodes, duplicate_groups, invalid_keys = _annotate_v2raya_nodes(payload.get("nodes") or [])
@@ -1115,7 +1129,9 @@ async def api_v2raya_delete_subscription(req: V2rayASwitchReq, token: str = Depe
                 "message": "订阅组已删除；当前 v2rayA 未运行，节点列表保持为空。",
                 "data": {"nodes": [], "runtime": service_status.get("runtime"), "service_status": service_status},
             }
-        data = _build_v2raya_nodes_response_data(await _load_v2raya_nodes_snapshot(with_latency=False))
+        data = _build_v2raya_nodes_response_data(
+            await _load_v2raya_nodes_until_subscription_removed(subscription_id, retries=6, delay_sec=0.7)
+        )
         data["service_status"] = service_status
         return {
             "status": "success",

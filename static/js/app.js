@@ -1397,6 +1397,7 @@ createApp({
                         this.applyV2rayANodesPayload(data.data);
                     }
                     this.showToast(data.message || '已删除 v2rayA 订阅组', data.status === 'success' ? 'success' : 'warning');
+                    await this.fetchV2rayANodes(false, false);
                 } else {
                     this.showToast(data.message || '删除 v2rayA 订阅组失败', 'error');
                 }
