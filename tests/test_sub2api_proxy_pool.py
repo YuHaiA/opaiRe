@@ -36,6 +36,7 @@ class Sub2APIProxyPoolTests(unittest.TestCase):
             put=None,
             patch=None,
             delete=None,
+            Session=object,
             Response=object,
             exceptions=types.SimpleNamespace(ConnectionError=Exception, Timeout=TimeoutError),
         )
@@ -47,7 +48,7 @@ class Sub2APIProxyPoolTests(unittest.TestCase):
             sys.modules.pop(module_name, None)
 
         sys.modules["curl_cffi"] = types.SimpleNamespace(requests=fake_requests_module)
-        sys.modules["requests"] = types.SimpleNamespace(get=None, put=None)
+        sys.modules["requests"] = types.SimpleNamespace(get=None, put=None, Session=object)
         sys.modules["yaml"] = _yaml_module
 
         self.cfg = importlib.import_module("utils.config")

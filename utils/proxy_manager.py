@@ -155,6 +155,13 @@ def format_docker_url(url: str) -> str:
     return url
 
 
+def _normalize_v2raya_api_base_url(url: str) -> str:
+    value = str(url or "").strip().rstrip("/")
+    if value.endswith("/api"):
+        return value[:-4]
+    return value
+
+
 def reload_proxy_config():
     global CLASH_API_URL, LOCAL_PROXY_URL, ENABLE_NODE_SWITCH, PROXY_CLIENT_TYPE
     global V2RAYA_PANEL_URL, V2RAYA_USERNAME, V2RAYA_PASSWORD
@@ -178,9 +185,9 @@ def reload_proxy_config():
     PROXY_CLIENT_TYPE = str(clash_conf.get("client_type", "clash") or "clash").strip().lower()
     if PROXY_CLIENT_TYPE not in {"clash", "v2rayn", "v2raya"}:
         PROXY_CLIENT_TYPE = "clash"
-    V2RAYA_PANEL_URL = str(clash_conf.get("v2raya_url", "") or "").strip().rstrip("/")
-    if V2RAYA_PANEL_URL.endswith("/api"):
-        V2RAYA_PANEL_URL = V2RAYA_PANEL_URL[:-4]
+    V2RAYA_PANEL_URL = _normalize_v2raya_api_base_url(
+        clash_conf.get("v2raya_api_url", "") or clash_conf.get("v2raya_url", "")
+    )
     V2RAYA_USERNAME = str(clash_conf.get("v2raya_username", "") or "").strip()
     V2RAYA_PASSWORD = str(clash_conf.get("v2raya_password", "") or "").strip()
     V2RAYN_BASE_DIR = str(clash_conf.get("v2rayn_base_dir", "") or "").strip()
