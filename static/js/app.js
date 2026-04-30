@@ -142,7 +142,7 @@ createApp({
             gitSync: {
                 status: null,
                 loading: false,
-                actionLoading: '',
+                actionLoading: null,
                 outputTail: []
             },
             sub2apiGroups: [],
@@ -2003,7 +2003,7 @@ createApp({
             } catch (e) {
                 this.showToast('Git 操作执行失败', 'error');
             } finally {
-                this.gitSync.actionLoading = '';
+                this.gitSync.actionLoading = null;
             }
         },
         async promptUpdate() {

@@ -3737,19 +3737,19 @@
                                         <p class="text-[12px] text-slate-500 font-medium mt-2">直接在前端查看当前分支、远端差异，并执行 fetch / pull / 强制同步。更新代码后可选择自动重启项目。</p>
                                     </div>
                                     <div class="flex flex-wrap gap-3">
-                                        <button @click="fetchGitStatus(true)" :disabled="gitSync.loading || gitSync.actionLoading" class="text-sm bg-white border border-emerald-200 text-emerald-700 px-4 py-3 rounded-xl hover:bg-emerald-50 active:scale-95 transition-all shadow-sm font-black disabled:opacity-50 flex items-center gap-2">
+                                        <button @click="fetchGitStatus(true)" :disabled="gitSync.loading || !!gitSync.actionLoading" class="text-sm bg-white border border-emerald-200 text-emerald-700 px-4 py-3 rounded-xl hover:bg-emerald-50 active:scale-95 transition-all shadow-sm font-black disabled:opacity-50 flex items-center gap-2">
                                             <span v-if="gitSync.loading" class="animate-spin">⏳</span>
                                             <span v-else>🔄</span> 刷新状态
                                         </button>
-                                        <button @click="runGitUpdate('fetch', false)" :disabled="gitSync.loading || gitSync.actionLoading" class="text-sm bg-white border border-slate-200 text-slate-700 px-4 py-3 rounded-xl hover:bg-slate-50 active:scale-95 transition-all shadow-sm font-black disabled:opacity-50 flex items-center gap-2">
+                                        <button @click="runGitUpdate('fetch', false)" :disabled="gitSync.loading || !!gitSync.actionLoading" class="text-sm bg-white border border-slate-200 text-slate-700 px-4 py-3 rounded-xl hover:bg-slate-50 active:scale-95 transition-all shadow-sm font-black disabled:opacity-50 flex items-center gap-2">
                                             <span v-if="gitSync.actionLoading === 'fetch'" class="animate-spin">⏳</span>
                                             <span v-else>📡</span> 抓取远端
                                         </button>
-                                        <button @click="runGitUpdate('pull_ff', false)" :disabled="gitSync.loading || gitSync.actionLoading" class="text-sm bg-indigo-600 text-white px-4 py-3 rounded-xl hover:bg-indigo-700 active:scale-95 transition-all shadow-md shadow-indigo-500/20 font-black disabled:opacity-50 flex items-center gap-2">
+                                        <button @click="runGitUpdate('pull_ff', false)" :disabled="gitSync.loading || !!gitSync.actionLoading" class="text-sm bg-indigo-600 text-white px-4 py-3 rounded-xl hover:bg-indigo-700 active:scale-95 transition-all shadow-md shadow-indigo-500/20 font-black disabled:opacity-50 flex items-center gap-2">
                                             <span v-if="gitSync.actionLoading === 'pull_ff'" class="animate-spin">⏳</span>
                                             <span v-else>⬇️</span> 快进更新
                                         </button>
-                                        <button @click="runGitUpdate('reset_hard', true)" :disabled="gitSync.loading || gitSync.actionLoading" class="text-sm bg-rose-600 text-white px-4 py-3 rounded-xl hover:bg-rose-700 active:scale-95 transition-all shadow-md shadow-rose-500/20 font-black disabled:opacity-50 flex items-center gap-2">
+                                        <button @click="runGitUpdate('reset_hard', true)" :disabled="gitSync.loading || !!gitSync.actionLoading" class="text-sm bg-rose-600 text-white px-4 py-3 rounded-xl hover:bg-rose-700 active:scale-95 transition-all shadow-md shadow-rose-500/20 font-black disabled:opacity-50 flex items-center gap-2">
                                             <span v-if="gitSync.actionLoading === 'reset_hard'" class="animate-spin">⏳</span>
                                             <span v-else>🧨</span> 强制同步并重启
                                         </button>
