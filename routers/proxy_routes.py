@@ -166,7 +166,8 @@ def _build_v2raya_runtime_snapshot() -> dict:
     config_data = _read_current_yaml_config()
     clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
 
-    panel_url = str(clash_conf.get("v2raya_url", "") or "").strip()
+    api_url = str(clash_conf.get("v2raya_api_url", "") or clash_conf.get("v2raya_url", "") or "").strip()
+    panel_url = str(clash_conf.get("v2raya_panel_url", "") or api_url or clash_conf.get("v2raya_url", "") or "").strip()
     username = str(clash_conf.get("v2raya_username", "") or "").strip()
     password = str(clash_conf.get("v2raya_password", "") or "").strip()
     xray_bin = str(clash_conf.get("v2raya_xray_bin", "") or "").strip()
@@ -198,9 +199,11 @@ def _build_v2raya_runtime_snapshot() -> dict:
     elif not local_proxy.get("reachable"):
         listener_host = local_proxy.get("host") or "127.0.0.1"
         listener_port = local_proxy.get("port") or "UNKNOWN"
-        issues.append(f"default_proxy 对应本地端口未监听: {listener_host}:{listener_port}")
+        issues.append(f"default_proxy 对应服务器代理端口未监听: {listener_host}:{listener_port}")
+    if not api_url:
+        issues.append("未配置 v2rayA 服务器 API 地址")
     if not panel_url:
-        issues.append("未配置 v2rayA 面板地址")
+        issues.append("未配置 v2rayA 服务器面板地址")
     if (username and not password) or (password and not username):
         issues.append("v2rayA API 登录名和密码需要同时填写")
     if xray_bin and not xray_status["matches"]:
@@ -216,6 +219,7 @@ def _build_v2raya_runtime_snapshot() -> dict:
 
     return {
         "client_type": str(clash_conf.get("client_type", "") or "").strip(),
+        "api_url": api_url,
         "panel_url": panel_url,
         "default_proxy": default_proxy,
         "effective_proxy": runtime_default_proxy,
@@ -445,7 +449,7 @@ async def api_v2raya_test_current(token: str = Depends(verify_token)):
     diagnostics = proxy_manager.get_local_proxy_diagnostics(proxy_url)
     return {
         "status": "success" if ok else "warning",
-        "message": "v2rayA 当前代理链路可用。" if ok else "v2rayA 当前代理链路不可用，请检查 v2rayA 面板里的节点、订阅或本地代理端口。",
+        "message": "v2rayA 当前代理链路可用。" if ok else "v2rayA 当前代理链路不可用，请检查服务器 v2rayA 节点、订阅或代理端口。",
         "data": {
             "proxy_url": proxy_url,
             "client_type": proxy_manager.PROXY_CLIENT_TYPE,
@@ -461,7 +465,7 @@ async def api_v2raya_align_proxy(persist: bool = Query(True), token: str = Depen
     runtime = _build_v2raya_runtime_snapshot()
     return {
         "status": "success" if result.get("ok") else "warning",
-        "message": result.get("message") or "v2rayA 本地代理端口对齐完成。",
+        "message": result.get("message") or "v2rayA 服务器代理端口对齐完成。",
         "data": {
             **result,
             "runtime": runtime,
@@ -481,12 +485,12 @@ async def api_v2raya_recover_panel(token: str = Depends(verify_token)):
     if result.get("ok"):
         if local_proxy.get("reachable"):
             status = "success"
-            message = "v2rayA 恢复脚本执行完成，本地代理端口已恢复监听。"
+            message = "v2rayA 恢复脚本执行完成，服务器代理端口已恢复监听。"
         else:
             listener_host = local_proxy.get("host") or "127.0.0.1"
             listener_port = local_proxy.get("port") or "UNKNOWN"
             status = "warning"
-            message = f"v2rayA 恢复脚本已执行，但本地代理端口仍未监听: {listener_host}:{listener_port}"
+            message = f"v2rayA 恢复脚本已执行，但服务器代理端口仍未监听: {listener_host}:{listener_port}"
     else:
         status = "error"
         message = result.get("error") or "执行 v2rayA 恢复脚本失败。"

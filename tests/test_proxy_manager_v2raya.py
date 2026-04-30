@@ -41,6 +41,22 @@ class ProxyManagerV2rayATests(unittest.TestCase):
 
         self.assertEqual("http://127.0.0.1:20171", proxy_manager.LOCAL_PROXY_URL)
 
+    def test_reload_proxy_config_prefers_v2raya_api_url_over_legacy_url(self):
+        fake_config = {
+            "clash_proxy_pool": {
+                "enable": True,
+                "client_type": "v2raya",
+                "v2raya_api_url": "http://10.0.0.9:2017/api",
+                "v2raya_url": "http://127.0.0.1:2017",
+            },
+        }
+        mocked_open = mock_open(read_data=yaml.safe_dump(fake_config, allow_unicode=True, sort_keys=False))
+
+        with patch("utils.proxy_manager.os.path.exists", return_value=True), patch("builtins.open", mocked_open):
+            proxy_manager.reload_proxy_config()
+
+        self.assertEqual("http://10.0.0.9:2017", proxy_manager.V2RAYA_PANEL_URL)
+
     def test_get_local_proxy_diagnostics_reports_reachable_listener(self):
         with patch("utils.proxy_manager.socket.create_connection", return_value=_DummySocket()):
             data = proxy_manager.get_local_proxy_diagnostics("http://127.0.0.1:20171")

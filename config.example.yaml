@@ -143,7 +143,11 @@ clash_proxy_pool:
   enable: false
   # 代理客户端类型：clash=Clash/Mihomo 控制 API 切点；v2rayn=自动切换当前选中节点；v2raya=通过 v2rayA API 管理节点
   client_type: "clash"
-  # v2rayA Web 面板地址（当 client_type=v2raya 时建议填写）
+  # v2rayA 服务器 API 地址（后端读取节点、切换节点固定走这里）
+  v2raya_api_url: ""
+  # v2rayA 服务器面板地址（浏览器点击“打开面板”时会打开这里）
+  v2raya_panel_url: ""
+  # 旧兼容字段：未填写 v2raya_api_url / v2raya_panel_url 时回退到这里
   v2raya_url: ""
   # 如果 v2rayA 面板开启了登录保护，可填写下列账号供本项目读取节点与切换
   v2raya_username: ""

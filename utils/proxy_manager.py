@@ -164,7 +164,9 @@ def reload_proxy_config():
     if PROXY_CLIENT_TYPE not in {"clash", "v2rayn", "v2raya"}:
         PROXY_CLIENT_TYPE = "clash"
 
-    V2RAYA_PANEL_URL = str(clash_conf.get("v2raya_url", "") or "").strip().rstrip("/")
+    V2RAYA_PANEL_URL = str(
+        clash_conf.get("v2raya_api_url", "") or clash_conf.get("v2raya_url", "") or ""
+    ).strip().rstrip("/")
     if V2RAYA_PANEL_URL.endswith("/api"):
         V2RAYA_PANEL_URL = V2RAYA_PANEL_URL[:-4]
     V2RAYA_USERNAME = str(clash_conf.get("v2raya_username", "") or "").strip()

@@ -139,6 +139,12 @@ createApp({
             toastId: 0,
             confirmModal: { show: false, message: '', resolve: null },
             updateInfo: { hasUpdate: false, version: '', url: '', changelog: '' },
+            gitSync: {
+                status: null,
+                loading: false,
+                actionLoading: '',
+                outputTail: []
+            },
             sub2apiGroups: [],
             gmailOAuth: {
                 authUrl: '',
@@ -521,6 +527,7 @@ createApp({
             this.initSSE();
             this.startStatsPolling();
             this.checkUpdate();
+            this.fetchGitStatus(false);
             this.fetchInventoryStats();
             if (this.config && this.config.reg_mode === 'extension') {
                 this.listenToExtension();
@@ -547,6 +554,10 @@ createApp({
             }
             if (tabId === 'proxy' && (force || !this.tabDataLoaded.proxy)) {
                 this.loadProxyTools();
+                return;
+            }
+            if (tabId === 'concurrency' && (force || !this.gitSync.status)) {
+                this.fetchGitStatus(false);
             }
         },
         startStatsPolling() {
@@ -756,6 +767,12 @@ createApp({
                 }
                 if (this.config.clash_proxy_pool.v2raya_url === undefined) {
                     this.config.clash_proxy_pool.v2raya_url = '';
+                }
+                if (this.config.clash_proxy_pool.v2raya_api_url === undefined) {
+                    this.config.clash_proxy_pool.v2raya_api_url = this.config.clash_proxy_pool.v2raya_url || '';
+                }
+                if (this.config.clash_proxy_pool.v2raya_panel_url === undefined) {
+                    this.config.clash_proxy_pool.v2raya_panel_url = this.config.clash_proxy_pool.v2raya_url || '';
                 }
                 if (this.config.clash_proxy_pool.v2raya_username === undefined) {
                     this.config.clash_proxy_pool.v2raya_username = '';
@@ -1923,6 +1940,70 @@ createApp({
                 }
             } catch (e) {
                 if (isManual) this.showToast("检查更新请求失败，请检查网络", "error");
+            }
+        },
+        async fetchGitStatus(showToast = false) {
+            this.gitSync.loading = true;
+            try {
+                const res = await this.authFetch('/api/system/git_status');
+                const data = await res.json();
+                if (data.data) {
+                    this.gitSync.status = data.data;
+                }
+                if (showToast) {
+                    this.showToast(data.message || 'Git 状态已刷新', data.status || 'info');
+                }
+            } catch (e) {
+                if (showToast) {
+                    this.showToast('Git 状态读取失败', 'error');
+                }
+            } finally {
+                this.gitSync.loading = false;
+            }
+        },
+        async runGitUpdate(action, restartAfter = false) {
+            const labels = {
+                fetch: '抓取远端状态',
+                pull_ff: '快进更新',
+                reset_hard: '强制同步'
+            };
+            const actionName = labels[action] || action;
+            let prompt = `确定执行「${actionName}」吗？`;
+            if (action === 'pull_ff') {
+                prompt += '\n\n这会在当前分支上执行 git pull --ff-only。';
+            }
+            if (action === 'reset_hard') {
+                prompt += '\n\n⚠️ 危险操作：这会丢弃本地未提交改动，并直接 reset --hard 到远端跟踪分支。';
+            }
+            if (restartAfter) {
+                prompt += '\n\n操作完成后会自动重启当前项目。';
+            }
+            const confirmed = await this.customConfirm(prompt);
+            if (!confirmed) return;
+
+            this.gitSync.actionLoading = action;
+            try {
+                const res = await this.authFetch('/api/system/git_update', {
+                    method: 'POST',
+                    body: JSON.stringify({ action, restart_after: restartAfter })
+                });
+                const data = await res.json();
+                if (data.data) {
+                    this.gitSync.outputTail = data.data.output_tail || [];
+                    if (data.data.after) {
+                        this.gitSync.status = data.data.after;
+                    }
+                }
+                this.showToast(data.message || 'Git 操作已完成', data.status || 'info');
+                if (data.status === 'success' && data.data && data.data.restart_scheduled) {
+                    setTimeout(() => window.location.reload(), 6000);
+                    return;
+                }
+                await this.fetchGitStatus(false);
+            } catch (e) {
+                this.showToast('Git 操作执行失败', 'error');
+            } finally {
+                this.gitSync.actionLoading = '';
             }
         },
         async promptUpdate() {
@@ -3145,9 +3226,13 @@ createApp({
             }
         },
         openV2rayAPanel() {
-            const url = String(this.config?.clash_proxy_pool?.v2raya_url || '').trim();
+            const url = String(
+                this.config?.clash_proxy_pool?.v2raya_panel_url ||
+                this.config?.clash_proxy_pool?.v2raya_url ||
+                ''
+            ).trim();
             if (!url) {
-                this.showToast('请先填写 v2rayA 面板地址', 'warning');
+                this.showToast('请先填写服务器可访问的 v2rayA 面板地址', 'warning');
                 return;
             }
             window.open(url, '_blank');
