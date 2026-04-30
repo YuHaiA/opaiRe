@@ -1,0 +1,31 @@
+# Python 缓存文件
+__pycache__/
+*.py[cod]
+*$py.class
+.gitignore
+utils/__pycache__/
+routers/__pycache__/
+luckmail/__pycache__/
+# IDE 配置文件
+.idea/
+.vscode/
+
+# 本地数据库和日志
+data/
+*.db
+*.log
+
+# 本地备份配置
+*副本*.yaml
+config.yaml
+utils/sentinel.py
+
+data
+utils/auth_core/
+!utils/auth_core.pyd
+test.py
+test_register.py
+test_register2.py
+test_register3.py
+aitest.py
+register.py.bak

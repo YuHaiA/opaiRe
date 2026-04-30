@@ -1,0 +1,29 @@
+[project]
+name = "openai-cpa"
+version = "0.1.0"
+description = "OpenAI CPA management panel with proxy orchestration."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "PyYAML",
+    "pydantic",
+    "websockets",
+    "requests",
+    "httpx[socks]",
+    "curl_cffi",
+    "PySocks",
+    "cloudflare",
+    "google-api-python-client",
+    "google-auth-httplib2",
+    "google-auth-oauthlib",
+    "docker",
+    "pymysql",
+    "cryptography",
+    "cachetools>=7.0.6",
+    "dnspython",
+]
+
+[tool.uv]
+package = false
