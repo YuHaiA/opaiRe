@@ -212,9 +212,16 @@ def reload_proxy_config():
     POOL_MODE = bool(clash_conf.get("pool_mode", False))
     FASTEST_MODE = bool(clash_conf.get("fastest_mode", False))
     CLASH_API_URL = format_docker_url(str(clash_conf.get("api_url", "http://127.0.0.1:9090") or "").strip())
-    raw_local_proxy = str(clash_conf.get("test_proxy_url", "") or "").strip()
-    if not raw_local_proxy:
+    if PROXY_CLIENT_TYPE == "v2raya":
         raw_local_proxy = str(conf_data.get("default_proxy", "") or "").strip()
+        if not raw_local_proxy:
+            raw_local_proxy = str(conf_data.get("test_proxy_url", "") or "").strip()
+        if not raw_local_proxy:
+            raw_local_proxy = str(clash_conf.get("test_proxy_url", "") or "").strip()
+    else:
+        raw_local_proxy = str(clash_conf.get("test_proxy_url", "") or "").strip()
+        if not raw_local_proxy:
+            raw_local_proxy = str(conf_data.get("default_proxy", "") or "").strip()
     if not raw_local_proxy and PROXY_CLIENT_TYPE == "clash":
         raw_local_proxy = "http://127.0.0.1:7890"
     LOCAL_PROXY_URL = format_docker_url(raw_local_proxy)

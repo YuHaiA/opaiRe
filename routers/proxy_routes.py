@@ -44,15 +44,104 @@ def _tail_output_lines(text: str, limit: int = 12) -> list[str]:
     return lines[-limit:]
 
 
-def _run_v2raya_recover_script(wait_seconds: int = 12) -> dict:
-    if os.name != "nt":
+def _run_command_capture(command: list[str], timeout_sec: int = 90) -> dict:
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=BASE_DIR,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=max(5, int(timeout_sec or 5)),
+            check=False,
+        )
+    except subprocess.TimeoutExpired as e:
+        output = "\n".join(part for part in [(e.stdout or "").strip(), (e.stderr or "").strip()] if part).strip()
         return {
             "ok": False,
             "returncode": -1,
-            "error": "当前宿主机不是 Windows，无法执行 v2rayA PowerShell 恢复脚本。",
-            "output": "",
-            "output_tail": [],
+            "stdout": e.stdout or "",
+            "stderr": e.stderr or "",
+            "output": output,
+            "error": "命令执行超时",
         }
+    except Exception as e:
+        return {
+            "ok": False,
+            "returncode": -1,
+            "stdout": "",
+            "stderr": "",
+            "output": "",
+            "error": str(e),
+        }
+
+    output = "\n".join(part for part in [(completed.stdout or "").strip(), (completed.stderr or "").strip()] if part).strip()
+    return {
+        "ok": completed.returncode == 0,
+        "returncode": int(completed.returncode),
+        "stdout": completed.stdout or "",
+        "stderr": completed.stderr or "",
+        "output": output,
+        "error": "" if completed.returncode == 0 else output or f"命令执行失败 (exit {completed.returncode})",
+    }
+
+
+def _run_v2raya_recover_linux(wait_seconds: int = 12) -> dict:
+    service_name = "v2raya"
+    outputs: list[str] = []
+
+    restart_result = _run_command_capture(["sudo", "systemctl", "restart", service_name], timeout_sec=60)
+    outputs.append("$ sudo systemctl restart v2raya")
+    if restart_result.get("output"):
+        outputs.append(str(restart_result.get("output") or "").strip())
+    if not restart_result.get("ok"):
+        joined = "\n".join(part for part in outputs if part).strip()
+        return {
+            "ok": False,
+            "returncode": restart_result.get("returncode", -1),
+            "error": restart_result.get("error") or "执行 v2rayA 服务重启失败。",
+            "output": joined,
+            "output_tail": _tail_output_lines(joined),
+        }
+
+    time.sleep(min(max(2, int(wait_seconds or 12)), 15))
+
+    active_result = _run_command_capture(["systemctl", "is-active", service_name], timeout_sec=15)
+    outputs.append("$ systemctl is-active v2raya")
+    if active_result.get("output"):
+        outputs.append(str(active_result.get("output") or "").strip())
+
+    listener_result = _run_command_capture(["ss", "-lntp"], timeout_sec=15)
+    outputs.append("$ ss -lntp")
+    if listener_result.get("stdout"):
+        relevant = [
+            line for line in str(listener_result.get("stdout") or "").splitlines()
+            if any(token in line for token in [":2017", ":20170", ":20171", ":20172"])
+        ]
+        if relevant:
+            outputs.extend(relevant)
+
+    touch_result = _run_command_capture(
+        ["curl", "-sS", "--max-time", "8", "http://127.0.0.1:2017/api/touch"],
+        timeout_sec=15,
+    )
+    outputs.append("$ curl -sS --max-time 8 http://127.0.0.1:2017/api/touch")
+    if touch_result.get("output"):
+        outputs.append(str(touch_result.get("output") or "").strip())
+
+    joined = "\n".join(part for part in outputs if part).strip()
+    return {
+        "ok": active_result.get("ok") and str(active_result.get("stdout") or "").strip() == "active",
+        "returncode": 0 if active_result.get("ok") else active_result.get("returncode", -1),
+        "error": "" if active_result.get("ok") else (active_result.get("error") or "v2rayA 服务未处于 active 状态。"),
+        "output": joined,
+        "output_tail": _tail_output_lines(joined),
+    }
+
+
+def _run_v2raya_recover_script(wait_seconds: int = 12) -> dict:
+    if os.name != "nt":
+        return _run_v2raya_recover_linux(wait_seconds=wait_seconds)
 
     if not os.path.exists(V2RAYA_RECOVER_SCRIPT_PATH):
         return {
@@ -493,7 +582,7 @@ async def api_v2raya_recover_panel(token: str = Depends(verify_token)):
             message = f"v2rayA 恢复脚本已执行，但服务器代理端口仍未监听: {listener_host}:{listener_port}"
     else:
         status = "error"
-        message = result.get("error") or "执行 v2rayA 恢复脚本失败。"
+        message = result.get("error") or "执行 v2rayA 恢复流程失败。"
 
     return {
         "status": status,
