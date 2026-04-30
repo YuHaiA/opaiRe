@@ -26,10 +26,8 @@ createApp({
             isLoggedIn: !!localStorage.getItem('auth_token'),
             loginPassword: '',
             currentTab: window.location.hash.replace('#', '') || 'console',
-            proxySubTab: 'general',
             isDarkMode: localStorage.getItem('ui_theme_mode') === 'dark',
 			showAccountsPlaintext: false,
-            showMailboxesPlaintext: false,
             isRunning: false,
             tabs: [
                 { id: 'console', name: '运行主页', icon: '💻' },
@@ -46,20 +44,6 @@ createApp({
                 { id: 'notify', name: '消息通知', icon: '📢' },
                 { id: 'concurrency', name: '并发与系统', icon: '⚙️' }
             ],
-            proxySubTabs: [
-                { id: 'general', name: '通用', icon: '🧭' },
-                { id: 'clash', name: 'Clash', icon: '🛰️' },
-                { id: 'v2rayn', name: 'v2rayN', icon: '🪟' },
-                { id: 'v2raya', name: 'v2rayA', icon: '🧩' },
-                { id: 'httpDynamic', name: 'HTTP 动态', icon: '🚪' }
-            ],
-            tabDataLoaded: {
-                accounts: false,
-                cloud: false,
-                mailboxes: false,
-                team_accounts: false,
-                proxy: false
-            },
 			cfGlobalStatus: null,
 			isLoadingSync: false,
             luckmailManualQty: 1,
@@ -92,7 +76,6 @@ createApp({
             blacklistStr: "",
             warpListStr: "",
             rawProxyListStr: "",
-            httpDynamicListStr: "",
             accounts: [],
             selectedAccounts: [],
             hideRegisterOnlyAccounts: false,
@@ -128,7 +111,7 @@ createApp({
                 tmailor_token: false,
                 fvia_token: false,
                 subUrl: false,
-                v2raya_password: false,
+                showMailboxesPlaintext: false,
                 db_pass: false,
                 master_rt: false,
                 image2api_url: true,
@@ -193,42 +176,6 @@ createApp({
                 instances: [],
                 groups: []
             },
-            isV2rayNNodesLoading: false,
-            isV2rayNPrechecking: false,
-            isV2rayNSubscriptionUpdating: false,
-            isV2rayNInvalidMutating: false,
-            isV2rayAInspecting: false,
-            isV2rayAServiceLoading: false,
-            isV2rayANodesLoading: false,
-            isV2rayALatencyLoading: false,
-            isV2rayAPrechecking: false,
-            isV2rayATesting: false,
-            isV2rayAProxyAligning: false,
-            isV2rayAPanelRecovering: false,
-            isV2rayAInvalidMutating: false,
-            switchingV2rayANodeKey: '',
-            v2rayNNodes: [],
-            v2rayNStatusMessage: '',
-            v2rayNIncludeInvalid: true,
-            v2rayNCurrentIndexId: '',
-            v2rayNLiveCount: 0,
-            v2rayNInvalidCount: 0,
-            v2rayNPage: 1,
-            v2rayNPageSize: 12,
-            switchingV2rayNIndexId: '',
-            v2rayAServiceStatus: null,
-            v2rayARuntime: null,
-            v2rayANodes: [],
-            v2rayASubscriptions: [],
-            v2rayAStatusMessage: '',
-            v2rayADuplicateGroups: [],
-            v2rayAInvalidKeys: [],
-            v2rayAListMode: 'all',
-            v2rayAGroupFilter: 'all',
-            v2rayAPage: 1,
-            v2rayAPageSize: 12,
-            v2rayAGroupPage: 1,
-            v2rayAGroupPageSize: 10,
             gmail_oauth_mode: {
                 master_email: '',
                 fission_enable: false,
@@ -329,118 +276,6 @@ createApp({
         },
         mailboxTotalPages() {
             return Math.ceil(this.totalMailboxes / this.mailboxPageSize) || 1;
-        },
-        v2rayNTotalPages() {
-            return Math.max(1, Math.ceil((this.v2rayNNodes || []).length / this.v2rayNPageSize));
-        },
-        v2rayNPagedNodes() {
-            const currentPage = Math.min(Math.max(1, this.v2rayNPage), this.v2rayNTotalPages);
-            const start = (currentPage - 1) * this.v2rayNPageSize;
-            return (this.v2rayNNodes || []).slice(start, start + this.v2rayNPageSize);
-        },
-        v2rayASubscriptionTabs() {
-            const groups = new Map();
-            for (const subscription of (this.v2rayASubscriptions || [])) {
-                const key = String(subscription.id || subscription.host || subscription.address || 'ungrouped');
-                if (!key || key === 'ungrouped') {
-                    continue;
-                }
-                groups.set(key, {
-                    key,
-                    name: String(subscription.host || subscription.address || subscription.id || '未分组'),
-                    count: Number(subscription.node_count) || 0,
-                });
-            }
-            for (const node of (this.v2rayANodes || [])) {
-                const key = String(node.subscription_id || node.subscription_name || 'ungrouped');
-                const existing = groups.get(key) || {
-                    key,
-                    name: String(node.subscription_name || node.subscription_id || '未分组'),
-                    count: 0,
-                };
-                existing.count += 1;
-                if ((!existing.name || existing.name === '未分组') && (node.subscription_name || node.subscription_id)) {
-                    existing.name = String(node.subscription_name || node.subscription_id);
-                }
-                groups.set(key, existing);
-            }
-            return Array.from(groups.values())
-                .filter(item => item.key !== 'ungrouped')
-                .sort((a, b) => {
-                    if (b.count !== a.count) return b.count - a.count;
-                    return String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN');
-                });
-        },
-        v2rayAFilteredNodes() {
-            if (this.v2rayAGroupFilter === 'all') {
-                return this.v2rayANodes || [];
-            }
-            return (this.v2rayANodes || []).filter(node => {
-                const key = String(node.subscription_id || node.subscription_name || 'ungrouped');
-                return key === this.v2rayAGroupFilter;
-            });
-        },
-        v2rayATotalPages() {
-            return Math.max(1, Math.ceil((this.v2rayAFilteredNodes || []).length / this.v2rayAPageSize));
-        },
-        v2rayAPagedNodes() {
-            const currentPage = Math.min(Math.max(1, this.v2rayAPage), this.v2rayATotalPages);
-            const start = (currentPage - 1) * this.v2rayAPageSize;
-            return (this.v2rayAFilteredNodes || []).slice(start, start + this.v2rayAPageSize);
-        },
-        v2rayAGroupedSubscriptions() {
-            const groups = new Map();
-            for (const subscription of (this.v2rayASubscriptions || [])) {
-                const key = String(subscription.id || subscription.host || subscription.address || 'ungrouped');
-                if (!key || key === 'ungrouped') {
-                    continue;
-                }
-                groups.set(key, {
-                    key,
-                    name: String(subscription.host || subscription.address || subscription.id || '未分组'),
-                    nodeCount: Number(subscription.node_count) || 0,
-                    currentCount: Number(subscription.current_count) || 0,
-                    bestLatency: null,
-                    subscriptionId: String(subscription.id || ''),
-                });
-            }
-            for (const node of (this.v2rayANodes || [])) {
-                const key = String(node.subscription_id || node.subscription_name || 'ungrouped');
-                const existing = groups.get(key) || {
-                    key,
-                    name: String(node.subscription_name || node.subscription_id || '未分组'),
-                    nodeCount: 0,
-                    currentCount: 0,
-                    bestLatency: null,
-                    subscriptionId: String(node.subscription_id || ''),
-                };
-                existing.nodeCount += 1;
-                if (node.is_current) {
-                    existing.currentCount += 1;
-                }
-                const latency = Number(node.latency_ms);
-                if (Number.isFinite(latency) && latency >= 0) {
-                    existing.bestLatency = existing.bestLatency === null ? latency : Math.min(existing.bestLatency, latency);
-                }
-                if ((!existing.name || existing.name === '未分组') && (node.subscription_name || node.subscription_id)) {
-                    existing.name = String(node.subscription_name || node.subscription_id);
-                }
-                groups.set(key, existing);
-            }
-            return Array.from(groups.values())
-                .filter(item => item.key !== 'ungrouped')
-                .sort((a, b) => {
-                    if (b.nodeCount !== a.nodeCount) return b.nodeCount - a.nodeCount;
-                    return String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN');
-                });
-        },
-        v2rayAGroupTotalPages() {
-            return Math.max(1, Math.ceil((this.v2rayAGroupedSubscriptions || []).length / this.v2rayAGroupPageSize));
-        },
-        v2rayAPagedGroups() {
-            const currentPage = Math.min(Math.max(1, this.v2rayAGroupPage), this.v2rayAGroupTotalPages);
-            const start = (currentPage - 1) * this.v2rayAGroupPageSize;
-            return (this.v2rayAGroupedSubscriptions || []).slice(start, start + this.v2rayAGroupPageSize);
         }
     },
     methods: {
@@ -510,13 +345,6 @@ createApp({
             this.isLoggedIn = false;
             this.loginPassword = '';
 			this.logs = [];
-            this.tabDataLoaded = {
-                accounts: false,
-                cloud: false,
-                mailboxes: false,
-                team_accounts: false,
-                proxy: false
-            };
             Object.keys(this.showPwd).forEach(k => this.showPwd[k] = false);
 			if(this.evtSource) {
                 this.evtSource.close();
@@ -527,6 +355,10 @@ createApp({
         async initApp() {
             await this.fetchConfig();
             this.initSSE();
+            this.fetchAccounts();
+            this.fetchCloudAccounts();
+            this.fetchTeamAccounts();
+            this.fetchMailboxes();
             this.startStatsPolling();
             this.checkUpdate();
             this.fetchGitStatus(false);
@@ -534,32 +366,8 @@ createApp({
             if (this.config && this.config.reg_mode === 'extension') {
                 this.listenToExtension();
             }
-            await this.ensureTabDataLoaded(this.currentTab);
-        },
-        async ensureTabDataLoaded(tabId, force = false) {
-            if (!this.isLoggedIn) return;
-            if (tabId === 'accounts' && (force || !this.tabDataLoaded.accounts)) {
-                await this.fetchAccounts();
-                return;
-            }
-            if (tabId === 'cloud' && (force || !this.tabDataLoaded.cloud)) {
-                await this.fetchCloudAccounts();
-                return;
-            }
-            if (tabId === 'mailboxes' && (force || !this.tabDataLoaded.mailboxes)) {
-                await this.fetchMailboxes();
-                return;
-            }
-            if (tabId === 'team_accounts' && (force || !this.tabDataLoaded.team_accounts)) {
-                await this.fetchTeamAccounts();
-                return;
-            }
-            if (tabId === 'proxy' && (force || !this.tabDataLoaded.proxy)) {
-                this.loadProxyTools();
-                return;
-            }
-            if (tabId === 'concurrency' && (force || !this.gitSync.status)) {
-                this.fetchGitStatus(false);
+            if (this.currentTab === 'proxy') {
+                this.fetchClashPool();
             }
         },
         startStatsPolling() {
@@ -755,66 +563,6 @@ createApp({
                 } else {
                     this.blacklistStr = '';
                 }
-                if (!this.config.clash_proxy_pool || typeof this.config.clash_proxy_pool !== 'object' || Array.isArray(this.config.clash_proxy_pool)) {
-                    this.config.clash_proxy_pool = {};
-                }
-                if (this.config.clash_proxy_pool.client_type === undefined) {
-                    this.config.clash_proxy_pool.client_type = 'clash';
-                }
-                if (this.config.clash_proxy_pool.v2rayn_base_dir === undefined) {
-                    this.config.clash_proxy_pool.v2rayn_base_dir = '';
-                }
-                if (this.config.clash_proxy_pool.v2rayn_subscription_update_command === undefined) {
-                    this.config.clash_proxy_pool.v2rayn_subscription_update_command = '';
-                }
-                if (this.config.clash_proxy_pool.v2raya_url === undefined) {
-                    this.config.clash_proxy_pool.v2raya_url = '';
-                }
-                if (this.config.clash_proxy_pool.v2raya_api_url === undefined) {
-                    this.config.clash_proxy_pool.v2raya_api_url = this.config.clash_proxy_pool.v2raya_url || '';
-                }
-                if (this.config.clash_proxy_pool.v2raya_panel_url === undefined) {
-                    this.config.clash_proxy_pool.v2raya_panel_url = this.config.clash_proxy_pool.v2raya_url || '';
-                }
-                if (this.config.clash_proxy_pool.v2raya_username === undefined) {
-                    this.config.clash_proxy_pool.v2raya_username = '';
-                }
-                if (this.config.clash_proxy_pool.v2raya_password === undefined) {
-                    this.config.clash_proxy_pool.v2raya_password = '';
-                }
-                if (this.config.clash_proxy_pool.v2raya_xray_bin === undefined) {
-                    this.config.clash_proxy_pool.v2raya_xray_bin = '';
-                }
-                if (this.config.clash_proxy_pool.v2raya_assets_dir === undefined) {
-                    this.config.clash_proxy_pool.v2raya_assets_dir = '';
-                }
-                if (this.config.clash_proxy_pool.v2raya_env_file === undefined) {
-                    this.config.clash_proxy_pool.v2raya_env_file = '';
-                }
-                if (this.config.clash_proxy_pool.v2rayn_restart_wait_sec === undefined) {
-                    this.config.clash_proxy_pool.v2rayn_restart_wait_sec = 15;
-                }
-                if (this.config.clash_proxy_pool.v2rayn_hide_window_on_restart === undefined) {
-                    this.config.clash_proxy_pool.v2rayn_hide_window_on_restart = true;
-                }
-                if (this.config.clash_proxy_pool.v2rayn_precheck_on_start === undefined) {
-                    this.config.clash_proxy_pool.v2rayn_precheck_on_start = false;
-                }
-                if (this.config.clash_proxy_pool.v2rayn_precheck_cache_minutes === undefined) {
-                    this.config.clash_proxy_pool.v2rayn_precheck_cache_minutes = 30;
-                }
-                if (this.config.clash_proxy_pool.v2rayn_precheck_max_nodes === undefined) {
-                    this.config.clash_proxy_pool.v2rayn_precheck_max_nodes = 50;
-                }
-                if (this.config.clash_proxy_pool.v2rayn_live_pool_limit === undefined) {
-                    this.config.clash_proxy_pool.v2rayn_live_pool_limit = 50;
-                }
-                if (this.config.clash_proxy_pool.v2rayn_subscription_update_enabled === undefined) {
-                    this.config.clash_proxy_pool.v2rayn_subscription_update_enabled = false;
-                }
-                if (this.config.clash_proxy_pool.v2rayn_subscription_update_interval_minutes === undefined) {
-                    this.config.clash_proxy_pool.v2rayn_subscription_update_interval_minutes = 180;
-                }
                 if (this.config.clash_proxy_pool.cluster_count !== undefined) {
                     this.clashPool.count = parseInt(this.config.clash_proxy_pool.cluster_count) || 5;
                 }
@@ -835,35 +583,7 @@ createApp({
                     this.config.warp_proxy_list = [];
                     this.warpListStr = '';
                 }
-                if (!this.config.http_dynamic_proxy || typeof this.config.http_dynamic_proxy !== 'object' || Array.isArray(this.config.http_dynamic_proxy)) {
-                    this.config.http_dynamic_proxy = { enable: false, pool_size: 3, proxy_list: [] };
-                } else {
-                    this.config.http_dynamic_proxy.enable = normalizeBooleanLike(this.config.http_dynamic_proxy.enable, false);
-                    if (this.config.http_dynamic_proxy.pool_size === undefined) {
-                        this.config.http_dynamic_proxy.pool_size = 3;
-                    }
-                    if (!Array.isArray(this.config.http_dynamic_proxy.proxy_list)) {
-                        this.config.http_dynamic_proxy.proxy_list = [];
-                    }
-                }
-                if (!this.config.http_dynamic_proxy_runtime || typeof this.config.http_dynamic_proxy_runtime !== 'object' || Array.isArray(this.config.http_dynamic_proxy_runtime)) {
-                    this.config.http_dynamic_proxy_runtime = {
-                        configured_pool_size: Number(this.config.http_dynamic_proxy.pool_size || 0),
-                        loaded_channels: 0,
-                        source_count: this.config.http_dynamic_proxy.proxy_list.length,
-                        queue_owner: this.config.clash_proxy_pool?.enable ? 'clash' : 'http_dynamic',
-                        queue_ready: false,
-                        using_default_fallback: false,
-                        single_source_cloned: false,
-                        message: '保存配置后可查看最新运行态。',
-                        error: ''
-                    };
-                }
                 this.rawProxyListStr = this.config.raw_proxy_pool.proxy_list.join('\n');
-                this.httpDynamicListStr = this.config.http_dynamic_proxy.proxy_list.join('\n');
-                if (!this.proxySubTabs.some(item => item.id === this.proxySubTab)) {
-                    this.proxySubTab = this.getProxyClientTab(this.config?.clash_proxy_pool?.client_type);
-                }
                 if (this.config.cluster_node_name === undefined) this.config.cluster_node_name = '';
                 if (this.config.cluster_master_url === undefined) this.config.cluster_master_url = '';
                 if (this.config.cluster_secret === undefined) this.config.cluster_secret = 'wenfxl666';
@@ -875,8 +595,6 @@ createApp({
                     this.config.clash_proxy_pool.blacklist = this.blacklistStr.split('\n').map(s => s.trim()).filter(s => s);
                     this.config.clash_proxy_pool.cluster_count = parseInt(this.clashPool.count) || 5;
                     this.config.clash_proxy_pool.sub_url = this.clashPool.subUrl;
-                    const clientType = String(this.config.clash_proxy_pool.client_type || 'clash').trim().toLowerCase();
-                    this.config.clash_proxy_pool.client_type = ['clash', 'v2rayn', 'v2raya'].includes(clientType) ? clientType : 'clash';
                 }
                 if (this.config?.sub2api_mode) {
                     this.config.sub2api_mode.default_proxy = String(this.config.sub2api_mode.default_proxy || '')
@@ -905,12 +623,6 @@ createApp({
                 }
                 this.config.raw_proxy_pool.enable = normalizeBooleanLike(this.config.raw_proxy_pool.enable, false);
                 this.config.raw_proxy_pool.proxy_list = this.rawProxyListStr.split('\n').map(s => s.trim()).filter(s => s);
-                if (!this.config.http_dynamic_proxy || typeof this.config.http_dynamic_proxy !== 'object' || Array.isArray(this.config.http_dynamic_proxy)) {
-                    this.config.http_dynamic_proxy = { enable: false, pool_size: 3, proxy_list: [] };
-                }
-                this.config.http_dynamic_proxy.enable = normalizeBooleanLike(this.config.http_dynamic_proxy.enable, false);
-                this.config.http_dynamic_proxy.pool_size = Math.max(1, parseInt(this.config.http_dynamic_proxy.pool_size, 10) || 3);
-                this.config.http_dynamic_proxy.proxy_list = this.httpDynamicListStr.split('\n').map(s => s.trim()).filter(s => s);
                 const res = await this.authFetch('/api/config', {
                     method: 'POST', body: JSON.stringify(this.config)
                 });
@@ -958,7 +670,7 @@ createApp({
                     } else {
                         this.totalAccounts = this.accounts.length;
                     }
-                    this.tabDataLoaded.accounts = true;
+                    
                     this.selectedAccounts = []; 
                     if (isManual) this.showToast("账号列表已刷新！", "success");
                 }
@@ -984,22 +696,39 @@ createApp({
             
             this.fetchAccounts(false);
         },
-        async switchTab(tabId) {
+        switchTab(tabId) {
             if (!this.isLoggedIn) return;
             this.currentTab = tabId;
             window.location.hash = tabId;
 			if (tabId === 'console') {
 				this.pollStats(); 
 			}
+            if (tabId === 'accounts') {
+                this.fetchAccounts();
+            }
 			if (tabId === 'email') {
 				this.fetchConfig();
+			}
+			if (tabId === 'cloud') {
+			    this.fetchCloudAccounts();
 			}
             if (tabId === 'cluster') {
                 this.initClusterWebSocket();
             } else {
                 if (this.clusterWs) this.clusterWs.close();
             }
-            await this.ensureTabDataLoaded(tabId);
+            if (tabId === 'mailboxes') {
+                this.fetchMailboxes();
+            }
+            if (tabId === 'proxy') {
+                this.fetchClashPool();
+            }
+            if (tabId === 'team_accounts') {
+                this.fetchTeamAccounts();
+            }
+            if (tabId === 'concurrency' && !this.gitSync.status) {
+                this.fetchGitStatus(false);
+            }
         },
         async exportSelectedAccounts() {
             if (this.selectedAccounts.length === 0) {
@@ -1997,8 +1726,7 @@ createApp({
                     }
                 }
                 this.showToast(data.message || 'Git 操作已完成', data.status || 'info');
-                if (data.status === 'success' && data.data && data.data.restart_scheduled) {
-                    setTimeout(() => window.location.reload(), 6000);
+                if (data.data && data.data.restart_scheduled) {
                     return;
                 }
                 await this.fetchGitStatus(false);
@@ -2207,7 +1935,6 @@ createApp({
                         _loading: null
                     }));
                     this.cloudTotal = data.total || 0;
-                    this.tabDataLoaded.cloud = true;
                     this.selectedCloud = [];
 
                     if (data.cloud_stats) {
@@ -2654,7 +2381,6 @@ createApp({
                 if(data.status === 'success') {
                     this.mailboxes = data.data;
                     this.totalMailboxes = data.total || this.mailboxes.length;
-                    this.tabDataLoaded.mailboxes = true;
                     this.selectedMailboxes = [];
                     if (isManual) this.showToast("邮箱库已刷新！", "success");
                 }
@@ -2861,433 +2587,6 @@ createApp({
             } catch (e) {
                 this.showToast("请求异常", "error");
             }
-        },
-        loadProxyTools() {
-            if (!this.proxySubTabs.some(item => item.id === this.proxySubTab)) {
-                this.proxySubTab = this.getProxyClientTab(this.config?.clash_proxy_pool?.client_type);
-            }
-            this.tabDataLoaded.proxy = true;
-            this.loadProxyTabData();
-        },
-        handleHttpDynamicToggle() {
-            if (!this.config || !this.config.http_dynamic_proxy) return;
-            if (this.config.http_dynamic_proxy.enable && this.config.clash_proxy_pool?.enable) {
-                this.config.clash_proxy_pool.enable = false;
-                this.showToast('已自动关闭 Clash 智能切点，避免与 HTTP 动态代理池同时开启', 'warning');
-            }
-        },
-        getProxyClientTab(clientType) {
-            const key = String(clientType || '').trim().toLowerCase();
-            if (key === 'v2rayn') return 'v2rayn';
-            if (key === 'v2raya') return 'v2raya';
-            return 'clash';
-        },
-        switchProxySubTab(tabId) {
-            this.proxySubTab = tabId;
-            this.loadProxyTabData();
-        },
-        loadProxyTabData() {
-            if (!this.config?.clash_proxy_pool) return;
-            if (this.proxySubTab === 'clash') {
-                this.fetchClashPool();
-            }
-            if (this.proxySubTab === 'v2rayn' && !this.v2rayNStatusMessage) {
-                this.v2rayNStatusMessage = '为避免页面卡顿，v2rayN 节点列表改为手动加载。点击“读取节点列表”后再展开操作。';
-            }
-            if (this.proxySubTab === 'v2raya') {
-                this.fetchV2rayAServiceStatus(false);
-                this.inspectV2rayAEnvironment(false);
-                if (!this.v2rayAStatusMessage) {
-                    this.v2rayAStatusMessage = '为避免页面卡顿，v2rayA 节点列表改为手动加载。需要时点击“读取节点列表”。';
-                }
-            }
-        },
-        handleProxyClientTypeChange() {
-            if (!this.config?.clash_proxy_pool) return;
-            this.proxySubTab = this.getProxyClientTab(this.config.clash_proxy_pool.client_type);
-            this.loadProxyTabData();
-        },
-        applyV2rayNNodesPayload(payload = {}) {
-            this.v2rayNNodes = Array.isArray(payload.nodes) ? payload.nodes : [];
-            this.v2rayNCurrentIndexId = payload.current_index_id || '';
-            this.v2rayNLiveCount = Number(payload.live_count || 0);
-            this.v2rayNInvalidCount = Number(payload.invalid_count || 0);
-            this.v2rayNStatusMessage = payload.message || this.v2rayNStatusMessage || 'v2rayN 节点列表已刷新。';
-            this.v2rayNPage = 1;
-        },
-        changeV2rayNPage(nextPage) {
-            const target = Math.min(this.v2rayNTotalPages, Math.max(1, Number(nextPage) || 1));
-            this.v2rayNPage = target;
-        },
-        applyV2rayANodesPayload(payload = {}) {
-            this.v2rayANodes = Array.isArray(payload.nodes) ? payload.nodes : [];
-            this.v2rayASubscriptions = Array.isArray(payload.subscriptions) ? payload.subscriptions : [];
-            this.v2rayADuplicateGroups = Array.isArray(payload.duplicate_groups) ? payload.duplicate_groups : [];
-            this.v2rayAInvalidKeys = Array.isArray(payload.invalid_keys) ? payload.invalid_keys : [];
-            this.v2rayAPage = 1;
-            this.v2rayAGroupPage = 1;
-            if (this.v2rayAGroupFilter !== 'all' && !this.v2rayASubscriptionTabs.some(item => item.key === this.v2rayAGroupFilter)) {
-                this.v2rayAGroupFilter = 'all';
-            }
-            this.v2rayAStatusMessage = payload.message || this.v2rayAStatusMessage || 'v2rayA 节点列表已刷新。';
-            if (payload.runtime) {
-                this.v2rayARuntime = payload.runtime;
-            }
-        },
-        changeV2rayAPage(nextPage) {
-            const target = Math.min(this.v2rayATotalPages, Math.max(1, Number(nextPage) || 1));
-            this.v2rayAPage = target;
-        },
-        changeV2rayAGroupPage(nextPage) {
-            const target = Math.min(this.v2rayAGroupTotalPages, Math.max(1, Number(nextPage) || 1));
-            this.v2rayAGroupPage = target;
-        },
-        changeV2rayAListMode(mode) {
-            this.v2rayAListMode = mode === 'grouped' ? 'grouped' : 'all';
-            this.v2rayAPage = 1;
-            this.v2rayAGroupPage = 1;
-        },
-        selectV2rayAGroupFilter(groupKey) {
-            this.v2rayAGroupFilter = groupKey || 'all';
-            this.v2rayAListMode = 'all';
-            this.v2rayAPage = 1;
-        },
-        async fetchV2rayNNodes(showToast = true) {
-            this.isV2rayNNodesLoading = true;
-            try {
-                const res = await this.authFetch(`/api/proxy/v2rayn/nodes?include_invalid=${this.v2rayNIncludeInvalid ? 'true' : 'false'}`);
-                const data = await res.json();
-                if (data.status === 'success') {
-                    this.applyV2rayNNodesPayload(data);
-                    if (showToast) this.showToast(this.v2rayNStatusMessage, 'success');
-                } else {
-                    this.showToast(data.message || '读取 v2rayN 节点失败', data.status === 'warning' ? 'warning' : 'error');
-                }
-            } catch (e) {
-                this.showToast('读取 v2rayN 节点失败', 'error');
-            } finally {
-                this.isV2rayNNodesLoading = false;
-            }
-        },
-        async runV2rayNPrecheck(refreshSubscription = false) {
-            this.isV2rayNPrechecking = true;
-            try {
-                const res = await this.authFetch(`/api/proxy/v2rayn/precheck?refresh_subscription=${refreshSubscription ? 'true' : 'false'}`, {
-                    method: 'POST'
-                });
-                const data = await res.json();
-                this.showToast(data.message || 'v2rayN 批量测活已完成', data.status || 'info');
-                await this.fetchV2rayNNodes(false);
-            } catch (e) {
-                this.showToast('v2rayN 批量测活失败', 'error');
-            } finally {
-                this.isV2rayNPrechecking = false;
-            }
-        },
-        async updateV2rayNSubscription() {
-            this.isV2rayNSubscriptionUpdating = true;
-            try {
-                const res = await this.authFetch('/api/proxy/v2rayn/update_subscription', { method: 'POST' });
-                const data = await res.json();
-                this.showToast(data.message || 'v2rayN 订阅更新完成', data.status || 'info');
-                await this.fetchV2rayNNodes(false);
-            } catch (e) {
-                this.showToast('v2rayN 订阅更新失败', 'error');
-            } finally {
-                this.isV2rayNSubscriptionUpdating = false;
-            }
-        },
-        async switchV2rayNNode(node) {
-            const indexId = String(node?.index_id || '');
-            this.switchingV2rayNIndexId = indexId;
-            try {
-                const res = await this.authFetch('/api/proxy/v2rayn/switch', {
-                    method: 'POST',
-                    body: JSON.stringify({ index_id: indexId })
-                });
-                const data = await res.json();
-                if (data.data) {
-                    this.applyV2rayNNodesPayload({ ...data.data, message: data.message || this.v2rayNStatusMessage });
-                }
-                this.showToast(data.message || 'v2rayN 节点切换完成', data.status || 'info');
-            } catch (e) {
-                this.showToast('v2rayN 节点切换失败', 'error');
-            } finally {
-                this.switchingV2rayNIndexId = '';
-            }
-        },
-        async markV2rayNNodeInvalid(indexId) {
-            this.isV2rayNInvalidMutating = true;
-            try {
-                const res = await this.authFetch('/api/proxy/v2rayn/mark_invalid', {
-                    method: 'POST',
-                    body: JSON.stringify({ index_ids: [indexId] })
-                });
-                const data = await res.json();
-                if (data.data) {
-                    this.applyV2rayNNodesPayload({ ...data.data, message: data.message || this.v2rayNStatusMessage });
-                }
-                this.showToast(data.message || '已标记 v2rayN 节点失效', data.status || 'info');
-            } catch (e) {
-                this.showToast('标记 v2rayN 节点失效失败', 'error');
-            } finally {
-                this.isV2rayNInvalidMutating = false;
-            }
-        },
-        async clearV2rayNInvalidMarks() {
-            this.isV2rayNInvalidMutating = true;
-            try {
-                const res = await this.authFetch('/api/proxy/v2rayn/clear_invalid', { method: 'POST' });
-                const data = await res.json();
-                if (data.data) {
-                    this.applyV2rayNNodesPayload({ ...data.data, message: data.message || this.v2rayNStatusMessage });
-                }
-                this.showToast(data.message || '已清空 v2rayN 失效标记', data.status || 'info');
-            } catch (e) {
-                this.showToast('清空 v2rayN 失效标记失败', 'error');
-            } finally {
-                this.isV2rayNInvalidMutating = false;
-            }
-        },
-        async inspectV2rayAEnvironment(showToast = true) {
-            this.isV2rayAInspecting = true;
-            try {
-                const res = await this.authFetch('/api/proxy/v2raya/inspect', { method: 'POST' });
-                const data = await res.json();
-                if (data.status === 'success' || data.status === 'warning') {
-                    this.v2rayARuntime = data.data || null;
-                    if (showToast) this.showToast(data.message || 'v2rayA 环境检测完成', data.status);
-                } else {
-                    this.showToast(data.message || 'v2rayA 环境检测失败', 'error');
-                }
-            } catch (e) {
-                this.showToast('v2rayA 环境检测失败', 'error');
-            } finally {
-                this.isV2rayAInspecting = false;
-            }
-        },
-        async fetchV2rayAServiceStatus(showToast = false) {
-            this.isV2rayAServiceLoading = true;
-            try {
-                const res = await this.authFetch('/api/proxy/v2raya/service');
-                const data = await res.json();
-                if (data.data) {
-                    this.v2rayAServiceStatus = data.data.service || null;
-                    if (data.data.runtime) {
-                        this.v2rayARuntime = data.data.runtime;
-                    }
-                }
-                if (showToast) {
-                    this.showToast(data.message || '已读取 v2rayA 服务状态', data.status || 'info');
-                }
-            } catch (e) {
-                this.showToast('读取 v2rayA 服务状态失败', 'error');
-            } finally {
-                this.isV2rayAServiceLoading = false;
-            }
-        },
-        async controlV2rayAService(action) {
-            this.isV2rayAServiceLoading = true;
-            try {
-                const res = await this.authFetch(`/api/proxy/v2raya/service/${encodeURIComponent(action)}`, {
-                    method: 'POST'
-                });
-                const data = await res.json();
-                if (data.data) {
-                    this.v2rayAServiceStatus = data.data.service || null;
-                    if (data.data.runtime) {
-                        this.v2rayARuntime = data.data.runtime;
-                    }
-                }
-                this.showToast(data.message || 'v2rayA 服务操作已完成', data.status || 'info');
-                await this.inspectV2rayAEnvironment(false);
-                await this.fetchV2rayANodes(false, false);
-            } catch (e) {
-                this.showToast('v2rayA 服务操作失败', 'error');
-            } finally {
-                this.isV2rayAServiceLoading = false;
-            }
-        },
-        async fetchV2rayANodes(withLatency = false, showToast = true) {
-            if (withLatency) {
-                this.isV2rayALatencyLoading = true;
-            } else {
-                this.isV2rayANodesLoading = true;
-            }
-            try {
-                const res = await this.authFetch(`/api/proxy/v2raya/nodes?with_latency=${withLatency ? 'true' : 'false'}`);
-                const data = await res.json();
-                if (data.status === 'success' || data.status === 'warning') {
-                    const payload = data.data || {};
-                    this.applyV2rayANodesPayload({ ...payload, message: data.message || payload.message });
-                    if (showToast) this.showToast(this.v2rayAStatusMessage, data.status);
-                } else {
-                    this.showToast(data.message || '读取 v2rayA 节点失败', 'error');
-                }
-            } catch (e) {
-                this.showToast('读取 v2rayA 节点失败', 'error');
-            } finally {
-                this.isV2rayANodesLoading = false;
-                this.isV2rayALatencyLoading = false;
-            }
-        },
-        async runV2rayAPrecheck() {
-            this.isV2rayAPrechecking = true;
-            try {
-                const res = await this.authFetch('/api/proxy/v2raya/precheck', { method: 'POST' });
-                const data = await res.json();
-                this.showToast(data.message || 'v2rayA 批量测活已完成', data.status || 'info');
-                await this.fetchV2rayANodes(false, false);
-            } catch (e) {
-                this.showToast('v2rayA 批量测活失败', 'error');
-            } finally {
-                this.isV2rayAPrechecking = false;
-            }
-        },
-        async testV2rayACurrentProxy() {
-            this.isV2rayATesting = true;
-            try {
-                const res = await this.authFetch('/api/proxy/v2raya/test_current', { method: 'POST' });
-                const data = await res.json();
-                this.showToast(data.message || 'v2rayA 当前链路检测完成', data.status || 'info');
-                await this.inspectV2rayAEnvironment(false);
-            } catch (e) {
-                this.showToast('v2rayA 当前链路检测失败', 'error');
-            } finally {
-                this.isV2rayATesting = false;
-            }
-        },
-        async alignV2rayAProxy(persist = true) {
-            this.isV2rayAProxyAligning = true;
-            try {
-                const res = await this.authFetch(`/api/proxy/v2raya/align_proxy?persist=${persist ? 'true' : 'false'}`, {
-                    method: 'POST'
-                });
-                const data = await res.json();
-                if (data.data && data.data.runtime) {
-                    this.v2rayARuntime = data.data.runtime;
-                }
-                this.showToast(data.message || 'v2rayA 本地代理端口对齐完成', data.status || 'info');
-            } catch (e) {
-                this.showToast('v2rayA 本地代理端口对齐失败', 'error');
-            } finally {
-                this.isV2rayAProxyAligning = false;
-            }
-        },
-        async recoverV2rayAPanel() {
-            this.isV2rayAPanelRecovering = true;
-            try {
-                const res = await this.authFetch('/api/proxy/v2raya/recover_panel', { method: 'POST' });
-                const data = await res.json();
-                if (data.data && data.data.runtime) {
-                    this.v2rayARuntime = data.data.runtime;
-                }
-                this.v2rayAStatusMessage = data.message || 'v2rayA 面板恢复脚本执行完成。';
-                this.showToast(this.v2rayAStatusMessage, data.status || 'info');
-                if (data.status === 'success' || data.status === 'warning') {
-                    await this.inspectV2rayAEnvironment(false);
-                }
-            } catch (e) {
-                this.showToast('v2rayA 面板恢复失败', 'error');
-            } finally {
-                this.isV2rayAPanelRecovering = false;
-            }
-        },
-        async switchV2rayANode(node) {
-            const nodeKey = String(node?.key || '');
-            if (node?.is_invalid) {
-                this.showToast('该节点已被标记为失效，请先清空失效标记或重新批量测活', 'warning');
-                return;
-            }
-            this.switchingV2rayANodeKey = nodeKey;
-            try {
-                const res = await this.authFetch('/api/proxy/v2raya/switch', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        node_key: node.key || '',
-                        node_id: node.node_id,
-                        node_type: node.node_type,
-                        subscription_id: node.subscription_id || '',
-                        node_name: node.name || node.node_id || ''
-                    })
-                });
-                const data = await res.json();
-                if (data.status === 'success' || data.status === 'warning') {
-                    this.applyV2rayANodesPayload(data.data || {});
-                }
-                this.showToast(data.message || 'v2rayA 节点切换完成', data.status || 'info');
-            } catch (e) {
-                this.showToast('v2rayA 节点切换失败', 'error');
-            } finally {
-                this.switchingV2rayANodeKey = '';
-            }
-        },
-        async markV2rayANodeInvalid(nodeKey) {
-            this.isV2rayAInvalidMutating = true;
-            try {
-                const res = await this.authFetch('/api/proxy/v2raya/mark_invalid', {
-                    method: 'POST',
-                    body: JSON.stringify({ node_keys: [nodeKey] })
-                });
-                const data = await res.json();
-                if (data.data) {
-                    this.applyV2rayANodesPayload(data.data);
-                }
-                this.showToast(data.message || '已标记节点失效', data.status || 'info');
-            } catch (e) {
-                this.showToast('标记 v2rayA 节点失效失败', 'error');
-            } finally {
-                this.isV2rayAInvalidMutating = false;
-            }
-        },
-        async clearV2rayAInvalidMarks() {
-            this.isV2rayAInvalidMutating = true;
-            try {
-                const res = await this.authFetch('/api/proxy/v2raya/clear_invalid', { method: 'POST' });
-                const data = await res.json();
-                if (data.data) {
-                    this.applyV2rayANodesPayload(data.data);
-                }
-                this.showToast(data.message || '已清空失效标记', data.status || 'info');
-            } catch (e) {
-                this.showToast('清空 v2rayA 失效标记失败', 'error');
-            } finally {
-                this.isV2rayAInvalidMutating = false;
-            }
-        },
-        async dedupeV2rayANodes() {
-            this.isV2rayAInvalidMutating = true;
-            try {
-                const res = await this.authFetch('/api/proxy/v2raya/dedupe', { method: 'POST' });
-                const data = await res.json();
-                if (data.data) {
-                    this.applyV2rayANodesPayload(data.data);
-                }
-                this.showToast(data.message || '重复节点处理完成', data.status || 'info');
-            } catch (e) {
-                this.showToast('处理 v2rayA 重复节点失败', 'error');
-            } finally {
-                this.isV2rayAInvalidMutating = false;
-            }
-        },
-        openV2rayAPanel() {
-            const url = String(
-                this.config?.clash_proxy_pool?.v2raya_panel_url ||
-                this.config?.clash_proxy_pool?.v2raya_url ||
-                ''
-            ).trim();
-            if (!url) {
-                this.showToast('请先填写服务器可访问的 v2rayA 面板地址', 'warning');
-                return;
-            }
-            try {
-                const panelUrl = new URL(url, window.location.origin);
-                const backendAddress = `${panelUrl.origin}${panelUrl.pathname.replace(/\/+$/, '')}`;
-                localStorage.setItem('backendAddress', backendAddress);
-            } catch (e) {
-                console.warn('无法预设 v2rayA backendAddress:', e);
-            }
-            window.open(url, '_blank');
         },
         async fetchClashPool() {
             this.clashPool.loading = true;
@@ -3649,7 +2948,6 @@ createApp({
                 if(data.status === 'success') {
                     this.teamAccounts = data.data;
                     this.totalTeamAccounts = data.total || this.teamAccounts.length;
-                    this.tabDataLoaded.team_accounts = true;
                     if (isManual) this.showToast("Team 库已刷新！", "success");
                 }
             } catch (e) {

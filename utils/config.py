@@ -169,7 +169,7 @@ def init_config():
             default_config = yaml.safe_load(f) or {}
 
         if deep_update_config(default_config, user_config):
-            print(f"[{ts()}] [系统] 检测到旧版配置缺失新参数，已自动补齐并生效！")
+            print(f"[{ts()}] [系统] 🛠️ 检测到旧版配置缺失新参数，已自动补齐并生效！")
             try:
                 with CONFIG_FILE_LOCK:
                     with open(config_path, "w", encoding="utf-8") as f:
@@ -178,7 +178,7 @@ def init_config():
                 print(f"[{ts()}] [WARNING] 自动补全配置文件写入失败: {e}")
 
     return user_config
-APP_VERSION = "v14.0.6"
+APP_VERSION = "v14.1.0"
 _c: dict = {}
 WEB_PASSWORD: str = "admin"
 RETAIN_REG_ONLY: bool = False

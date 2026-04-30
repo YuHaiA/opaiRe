@@ -188,10 +188,11 @@ def _worker_push_thread():
             await asyncio.sleep(3)
     asyncio.run(_ws_loop())
 
+threading.Thread(target=_worker_push_thread, daemon=True).start()
+
 if __name__ == "__main__":
     try: reload_all_configs()
     except: pass
-    threading.Thread(target=_worker_push_thread, daemon=True).start()
     print("=" * 65)
     print(f"[{core_engine.ts()}] [系统] OpenAI 全链路自动化生产与多维资源中转调度平台")
     print(f"[{core_engine.ts()}] [系统] Author: (wenfxl)轩灵")

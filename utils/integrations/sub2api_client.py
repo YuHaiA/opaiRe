@@ -113,7 +113,7 @@ class Sub2APIClient:
             "x-api-key": api_key,
         }
         self.request_kwargs = {
-            "timeout": 45,
+            "timeout": 15,
             "impersonate": "chrome110",
         }
 
@@ -214,31 +214,7 @@ class Sub2APIClient:
             logger.error("Get Sub2API accounts failed: %s", exc)
             return False, str(exc)
 
-    def get_account_total(self) -> Tuple[bool, Any]:
-        started_at = time.time()
-        ok, data = self.get_accounts(page=1, page_size=1)
-        if not ok:
-            return False, data
-
-        inner = data.get("data", {}) if isinstance(data, dict) else {}
-        total = inner.get("total", None)
-        if total is None:
-            items = inner.get("items", [])
-            total = len(items) if isinstance(items, list) else 0
-
-        try:
-            total = int(total)
-        except (TypeError, ValueError):
-            total = 0
-
-        logger.info(
-            "Fetched Sub2API account total=%s via lightweight summary in %.2fs",
-            total,
-            time.time() - started_at,
-        )
-        return True, total
-
-    def get_all_accounts(self, page_size: int = 50) -> Tuple[bool, Any]:
+    def get_all_accounts(self, page_size: int = 100) -> Tuple[bool, Any]:
         all_items: List[dict] = []
         page = 1
 

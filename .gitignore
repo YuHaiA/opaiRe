@@ -10,10 +10,6 @@ luckmail/__pycache__/
 .idea/
 .vscode/
 
-# Codex 本地项目说明与环境
-.codex/
-AGENTS.md
-
 # 本地数据库和日志
 data/
 *.db

@@ -141,43 +141,6 @@ reg_threads: 10
 clash_proxy_pool:
   # 【开关】是否在每次注册前自动通过 Clash 切换节点
   enable: false
-  # 代理客户端类型：clash=Clash/Mihomo 控制 API 切点；v2rayn=自动切换当前选中节点；v2raya=通过 v2rayA API 管理节点
-  client_type: "clash"
-  # v2rayA 服务器 API 地址（后端读取节点、切换节点固定走这里）
-  v2raya_api_url: ""
-  # v2rayA 服务器面板地址（浏览器点击“打开面板”时会打开这里）
-  v2raya_panel_url: ""
-  # 旧兼容字段：未填写 v2raya_api_url / v2raya_panel_url 时回退到这里
-  v2raya_url: ""
-  # 如果 v2rayA 面板开启了登录保护，可填写下列账号供本项目读取节点与切换
-  v2raya_username: ""
-  v2raya_password: ""
-  # v2rayA 使用的 Xray 可执行文件路径（Linux 例如 /usr/local/bin/xray）
-  v2raya_xray_bin: ""
-  # v2rayA 使用的 geodata 目录（Linux 例如 /usr/share/xray）
-  v2raya_assets_dir: ""
-  # v2rayA 环境变量文件路径（Linux 默认一般是 /etc/default/v2raya）
-  v2raya_env_file: ""
-  # v2rayN 根目录（当 client_type=v2rayn 时必填）
-  v2rayn_base_dir: ""
-  # v2rayN 切换节点后等待核心重启生效的秒数
-  v2rayn_restart_wait_sec: 15
-  # v2rayN 切点后自动隐藏主窗口，避免每次切换都弹出界面
-  v2rayn_hide_window_on_restart: true
-  # 启动业务前先批量测活，后续仅在存活节点池内切换
-  v2rayn_precheck_on_start: false
-  # 批量测活结果缓存分钟数；0 表示只在启动时预检一次，不按时间刷新
-  v2rayn_precheck_cache_minutes: 30
-  # 单次批量测活最多抽检多少个节点；0 表示测完整个候选池
-  v2rayn_precheck_max_nodes: 50
-  # 批量测活完成后，按延迟排序只保留前多少个活节点进入运行池
-  v2rayn_live_pool_limit: 50
-  # 是否定时执行“订阅更新命令”，更新后自动重新批量测活
-  v2rayn_subscription_update_enabled: false
-  # 订阅更新间隔（分钟）；仅在上方开关开启后生效
-  v2rayn_subscription_update_interval_minutes: 180
-  # 订阅更新命令（例如调用你本机现有的更新脚本、bat、powershell 命令）
-  v2rayn_subscription_update_command: ""
   # 【核心开关】true=服务器10容器独立推算模式；false=本地单机/单容器模式
   pool_mode: false
   # Clash 的外部控制 API 地址 (注意端口通常是 9090 或 9097)
