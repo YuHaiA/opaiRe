@@ -166,17 +166,38 @@ def _build_local_gui_status() -> dict:
     config_data = _read_runtime_config()
     clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
     groups = _collect_groups_from_config(MANUAL_CONFIG_PATH)
+    proxy_url = str(config_data.get("default_proxy") or "").strip()
+    api_url = str(clash_conf.get("api_url") or "").strip()
+    proxy_port = _extract_port_from_url(proxy_url, 7897)
+    api_port = _extract_port_from_url(api_url, 9097)
+    running = False
+    try:
+        res = requests.get(
+            f"http://127.0.0.1:{api_port}/version",
+            timeout=1.5,
+            headers={"Authorization": f"Bearer {clash_conf.get('secret')}" if clash_conf.get("secret") else ""},
+        )
+        running = res.status_code in {200, 401}
+    except Exception:
+        try:
+            import socket
+
+            with socket.create_connection(("127.0.0.1", proxy_port), 0.8):
+                running = True
+        except Exception:
+            running = False
     return {
         "mode": "local_gui",
         "instances": [
             {
                 "name": "local-gui",
-                "status": "external",
-                "ports": f"{config_data.get('default_proxy') or '-'} / {clash_conf.get('api_url') or '-'}",
+                "status": "running" if running else "external",
+                "ports": f"{proxy_url or '-'} / {api_url or '-'}",
             }
         ],
         "groups": groups,
-        "message": "当前未检测到 Docker，已切换为本地 GUI 模式。网页仅保存订阅链接与 YAML 配置，不直接接管 GUI 进程。",
+        "message": "当前未检测到 Docker，已切换为本地 GUI 模式。网页仅保存订阅链接与 YAML 配置，不直接接管 GUI 进程。"
+        + (" 已检测到本地 Clash/Mihomo 正在运行。" if running else " 暂未检测到本地 Clash/Mihomo 控制口或代理口。"),
     }
 
 
