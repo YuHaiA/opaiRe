@@ -3235,6 +3235,13 @@ createApp({
                 this.showToast('请先填写服务器可访问的 v2rayA 面板地址', 'warning');
                 return;
             }
+            try {
+                const panelUrl = new URL(url, window.location.origin);
+                const backendAddress = `${panelUrl.origin}${panelUrl.pathname.replace(/\/+$/, '')}`;
+                localStorage.setItem('backendAddress', backendAddress);
+            } catch (e) {
+                console.warn('无法预设 v2rayA backendAddress:', e);
+            }
             window.open(url, '_blank');
         },
         async fetchClashPool() {
