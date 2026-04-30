@@ -44,6 +44,66 @@ def _tail_output_lines(text: str, limit: int = 12) -> list[str]:
     return lines[-limit:]
 
 
+def _run_v2raya_service_command(action: str) -> dict:
+    service_name = "v2raya"
+    normalized = str(action or "").strip().lower()
+    if normalized not in {"start", "stop", "restart", "status"}:
+        return {
+            "ok": False,
+            "returncode": -1,
+            "status_text": "unknown",
+            "message": "不支持的 v2rayA 服务操作。",
+            "output_tail": [],
+        }
+
+    if normalized == "status":
+        active_result = _run_command_capture(["systemctl", "is-active", service_name], timeout_sec=15)
+        status_text = str(active_result.get("stdout") or "").strip() or ("active" if active_result.get("ok") else "inactive")
+        return {
+            "ok": active_result.get("ok", False),
+            "returncode": active_result.get("returncode", -1),
+            "status_text": status_text,
+            "message": f"v2rayA 服务当前状态：{status_text}",
+            "output_tail": _tail_output_lines(active_result.get("output") or status_text),
+        }
+
+    command_result = _run_command_capture(["sudo", "systemctl", normalized, service_name], timeout_sec=60)
+    time.sleep(2 if normalized == "start" else 1)
+    active_result = _run_command_capture(["systemctl", "is-active", service_name], timeout_sec=15)
+    status_text = str(active_result.get("stdout") or "").strip() or ("active" if active_result.get("ok") else "inactive")
+
+    joined_output = "\n".join(
+        part for part in [
+            f"$ sudo systemctl {normalized} {service_name}",
+            str(command_result.get("output") or "").strip(),
+            "$ systemctl is-active v2raya",
+            str(active_result.get("output") or "").strip(),
+        ] if part
+    ).strip()
+
+    ok = command_result.get("ok", False)
+    if normalized == "start":
+        ok = ok and status_text == "active"
+    elif normalized == "stop":
+        ok = ok and status_text != "active"
+    elif normalized == "restart":
+        ok = ok and status_text == "active"
+
+    message_map = {
+        "start": "已启动 v2rayA 服务。",
+        "stop": "已关闭 v2rayA 服务。",
+        "restart": "已重启 v2rayA 服务。",
+    }
+
+    return {
+        "ok": ok,
+        "returncode": 0 if ok else command_result.get("returncode", -1),
+        "status_text": status_text,
+        "message": message_map.get(normalized, "v2rayA 服务操作完成。"),
+        "output_tail": _tail_output_lines(joined_output),
+    }
+
+
 def _run_command_capture(command: list[str], timeout_sec: int = 90) -> dict:
     try:
         completed = subprocess.run(
@@ -606,6 +666,38 @@ async def api_v2raya_inspect(token: str = Depends(verify_token)):
         "status": "success" if not issues else "warning",
         "message": "v2rayA 环境检测通过。" if not issues else "v2rayA 环境检测完成，但仍有待确认项。",
         "data": data,
+    }
+
+
+@router.get("/api/proxy/v2raya/service")
+async def api_v2raya_service_status(token: str = Depends(verify_token)):
+    result = await asyncio.to_thread(_run_v2raya_service_command, "status")
+    runtime = _build_v2raya_runtime_snapshot()
+    return {
+        "status": "success" if result.get("ok") else "warning",
+        "message": result.get("message") or "已读取 v2rayA 服务状态。",
+        "data": {
+            "service": result,
+            "runtime": runtime,
+        },
+    }
+
+
+@router.post("/api/proxy/v2raya/service/{action}")
+async def api_v2raya_service_action(action: str, token: str = Depends(verify_token)):
+    if engine.is_running() and str(action or "").strip().lower() in {"stop", "restart"}:
+        return {"status": "warning", "message": "请先停止当前运行任务，再执行 v2rayA 服务停启。"}
+
+    result = await asyncio.to_thread(_run_v2raya_service_command, action)
+    runtime = _build_v2raya_runtime_snapshot()
+    status = "success" if result.get("ok") else "warning"
+    return {
+        "status": status,
+        "message": result.get("message") or "v2rayA 服务操作已完成。",
+        "data": {
+            "service": result,
+            "runtime": runtime,
+        },
     }
 
 

@@ -2638,6 +2638,18 @@
                                 </div>
 
                                 <div class="flex flex-wrap gap-3">
+                                    <button @click="fetchV2rayAServiceStatus(true)" :disabled="isV2rayAServiceLoading" class="text-sm bg-white border border-cyan-200 text-cyan-700 px-4 py-3 rounded-xl hover:bg-cyan-50 active:scale-95 transition-all shadow-sm font-black disabled:opacity-50 flex items-center gap-2">
+                                        <span v-if="isV2rayAServiceLoading" class="animate-spin">⏳</span>
+                                        <span v-else>🛰️</span> 服务状态
+                                    </button>
+                                    <button @click="controlV2rayAService('start')" :disabled="isV2rayAServiceLoading" class="text-sm bg-emerald-600 text-white px-4 py-3 rounded-xl hover:bg-emerald-700 active:scale-95 transition-all shadow-md shadow-emerald-500/20 font-black disabled:opacity-50 flex items-center gap-2">
+                                        <span v-if="isV2rayAServiceLoading" class="animate-spin">⏳</span>
+                                        <span v-else>▶️</span> 启动 v2rayA
+                                    </button>
+                                    <button @click="controlV2rayAService('stop')" :disabled="isV2rayAServiceLoading" class="text-sm bg-rose-600 text-white px-4 py-3 rounded-xl hover:bg-rose-700 active:scale-95 transition-all shadow-md shadow-rose-500/20 font-black disabled:opacity-50 flex items-center gap-2">
+                                        <span v-if="isV2rayAServiceLoading" class="animate-spin">⏳</span>
+                                        <span v-else>⏹️</span> 关闭 v2rayA
+                                    </button>
                                     <button @click="inspectV2rayAEnvironment(true)" :disabled="isV2rayAInspecting" class="text-sm bg-white border border-fuchsia-200 text-fuchsia-700 px-4 py-3 rounded-xl hover:bg-fuchsia-50 active:scale-95 transition-all shadow-sm font-black disabled:opacity-50 flex items-center gap-2">
                                         <span v-if="isV2rayAInspecting" class="animate-spin">⏳</span>
                                         <span v-else>🛠️</span> 环境检查
@@ -2678,6 +2690,15 @@
                                 </div>
 
                                 <div v-if="v2rayARuntime" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div class="bg-white border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
+                                        <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">服务状态</div>
+                                        <div class="mt-2 text-sm font-black" :class="v2rayAServiceStatus && v2rayAServiceStatus.status_text === 'active' ? 'text-emerald-600' : 'text-rose-600'">
+                                            {{ v2rayAServiceStatus ? (v2rayAServiceStatus.status_text || 'unknown') : '未读取' }}
+                                        </div>
+                                        <div class="mt-2 text-[11px] text-slate-400 font-medium">
+                                            {{ v2rayAServiceStatus ? (v2rayAServiceStatus.message || 'v2rayA 服务状态已读取') : '点击上方服务状态以读取当前 v2rayA 运行态' }}
+                                        </div>
+                                    </div>
                                     <div class="bg-white border border-slate-200 rounded-2xl px-4 py-4 shadow-sm">
                                         <div class="text-[11px] text-slate-500 font-black uppercase tracking-wider">当前链路</div>
                                         <div class="text-sm font-black text-slate-800 mt-2">{{ v2rayARuntime.default_proxy || '未配置 default_proxy' }}</div>

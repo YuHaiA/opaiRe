@@ -198,6 +198,7 @@ createApp({
             isV2rayNSubscriptionUpdating: false,
             isV2rayNInvalidMutating: false,
             isV2rayAInspecting: false,
+            isV2rayAServiceLoading: false,
             isV2rayANodesLoading: false,
             isV2rayALatencyLoading: false,
             isV2rayAPrechecking: false,
@@ -215,6 +216,7 @@ createApp({
             v2rayNPage: 1,
             v2rayNPageSize: 12,
             switchingV2rayNIndexId: '',
+            v2rayAServiceStatus: null,
             v2rayARuntime: null,
             v2rayANodes: [],
             v2rayASubscriptions: [],
@@ -2893,6 +2895,7 @@ createApp({
                 this.v2rayNStatusMessage = '为避免页面卡顿，v2rayN 节点列表改为手动加载。点击“读取节点列表”后再展开操作。';
             }
             if (this.proxySubTab === 'v2raya') {
+                this.fetchV2rayAServiceStatus(false);
                 this.inspectV2rayAEnvironment(false);
                 if (!this.v2rayAStatusMessage) {
                     this.v2rayAStatusMessage = '为避免页面卡顿，v2rayA 节点列表改为手动加载。需要时点击“读取节点列表”。';
@@ -3061,6 +3064,48 @@ createApp({
                 this.showToast('v2rayA 环境检测失败', 'error');
             } finally {
                 this.isV2rayAInspecting = false;
+            }
+        },
+        async fetchV2rayAServiceStatus(showToast = false) {
+            this.isV2rayAServiceLoading = true;
+            try {
+                const res = await this.authFetch('/api/proxy/v2raya/service');
+                const data = await res.json();
+                if (data.data) {
+                    this.v2rayAServiceStatus = data.data.service || null;
+                    if (data.data.runtime) {
+                        this.v2rayARuntime = data.data.runtime;
+                    }
+                }
+                if (showToast) {
+                    this.showToast(data.message || '已读取 v2rayA 服务状态', data.status || 'info');
+                }
+            } catch (e) {
+                this.showToast('读取 v2rayA 服务状态失败', 'error');
+            } finally {
+                this.isV2rayAServiceLoading = false;
+            }
+        },
+        async controlV2rayAService(action) {
+            this.isV2rayAServiceLoading = true;
+            try {
+                const res = await this.authFetch(`/api/proxy/v2raya/service/${encodeURIComponent(action)}`, {
+                    method: 'POST'
+                });
+                const data = await res.json();
+                if (data.data) {
+                    this.v2rayAServiceStatus = data.data.service || null;
+                    if (data.data.runtime) {
+                        this.v2rayARuntime = data.data.runtime;
+                    }
+                }
+                this.showToast(data.message || 'v2rayA 服务操作已完成', data.status || 'info');
+                await this.inspectV2rayAEnvironment(false);
+                await this.fetchV2rayANodes(false, false);
+            } catch (e) {
+                this.showToast('v2rayA 服务操作失败', 'error');
+            } finally {
+                this.isV2rayAServiceLoading = false;
             }
         },
         async fetchV2rayANodes(withLatency = false, showToast = true) {
