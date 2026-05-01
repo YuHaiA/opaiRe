@@ -1356,15 +1356,14 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                 print(f"[{ts()}] [INFO] 巡检结束，当前 Sub2API 仓库有效数: {valid_count}")
             else:
                 print(f"[{ts()}] [INFO] Sub2API 自动测活已关闭，直接读取云端列表进行补发判断...")
-                success, account_list = client.get_all_accounts()
+                success, total_files = client.get_total_count()
                 if not success:
-                    print(f"[{ts()}] [ERROR] 获取 Sub2API 全量库存失败: {account_list}")
+                    print(f"[{ts()}] [ERROR] 获取 Sub2API 总库存失败: {total_files}")
                     try:
                         await asyncio.wait_for(async_stop_event.wait(), timeout=60)
                     except asyncio.TimeoutError:
                         pass
                     continue
-                total_files = len(account_list)
                 valid_count = total_files
                 print(f"[{ts()}] [INFO] 当前云端总数: {total_files} (未开启自动巡检，默认全部视为有效)")
 
