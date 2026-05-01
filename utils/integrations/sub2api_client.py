@@ -128,6 +128,10 @@ class Sub2APIClient:
             )
         return msg
 
+    @staticmethod
+    def _is_dns_resolution_error(message: Any) -> bool:
+        return "Could not resolve host" in str(message or "")
+
     def _handle_response(
         self,
         response: cffi_requests.Response,
@@ -262,6 +266,12 @@ class Sub2APIClient:
 
                 if not ok:
                     last_error = attempt_error
+                    if self._is_dns_resolution_error(attempt_error):
+                        logger.warning(
+                            "Sub2API full inventory aborted because DNS resolution failed on page %s",
+                            page,
+                        )
+                        return False, attempt_error
                     if page == 1:
                         page_failed = True
                     else:
@@ -298,10 +308,12 @@ class Sub2APIClient:
                 )
                 return True, all_items
 
-            logger.warning(
-                "Retrying Sub2API full inventory with smaller page_size=%s after failure on first page",
-                current_page_size,
-            )
+            next_sizes = [size for size in strategies if size < current_page_size]
+            if next_sizes:
+                logger.warning(
+                    "Retrying Sub2API full inventory with smaller page_size=%s after failure on first page",
+                    next_sizes[0],
+                )
 
         return False, last_error
 
