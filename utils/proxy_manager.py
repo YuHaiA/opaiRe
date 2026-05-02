@@ -17,6 +17,7 @@ FASTEST_MODE = False
 PROXY_GROUP_NAME = "节点选择"
 CLASH_SECRET = ""
 NODE_BLACKLIST = []
+TESTED_NODES_MAP = {}
 _IS_IN_DOCKER = os.path.exists('/.dockerenv')
 _global_switch_lock = threading.Lock()
 _last_switch_time = 0
@@ -36,7 +37,7 @@ def format_docker_url(url: str) -> str:
 
 def reload_proxy_config():
     global CLASH_API_URL, LOCAL_PROXY_URL, ENABLE_NODE_SWITCH, POOL_MODE, \
-           FASTEST_MODE, PROXY_GROUP_NAME, CLASH_SECRET, NODE_BLACKLIST
+           FASTEST_MODE, PROXY_GROUP_NAME, CLASH_SECRET, NODE_BLACKLIST, TESTED_NODES_MAP
     config_dir = os.path.join(BASE_DIR, "data")
     config_path = os.path.join(config_dir, "config.yaml")
     if not os.path.exists(config_path):
@@ -56,6 +57,7 @@ def reload_proxy_config():
     PROXY_GROUP_NAME = clash_conf.get("group_name", "节点选择")
     CLASH_SECRET = clash_conf.get("secret", "")
     NODE_BLACKLIST = clash_conf.get("blacklist", ["港", "HK", "台", "TW", "中国", "CN"])
+    TESTED_NODES_MAP = clash_conf.get("tested_nodes", {}) if isinstance(clash_conf.get("tested_nodes", {}), dict) else {}
    
     print(f"[{ts()}] [系统] 代理管理模块配置已同步更新。")
 
@@ -184,6 +186,13 @@ def _do_smart_switch(proxy_url=None):
             n for n in all_nodes 
             if not any(kw.upper() in n.upper() for kw in NODE_BLACKLIST)
         ]
+
+        tested_candidates = TESTED_NODES_MAP.get(actual_group_name, [])
+        if isinstance(tested_candidates, list):
+            tested_candidates = [n for n in tested_candidates if n in valid_nodes]
+            if tested_candidates:
+                valid_nodes = tested_candidates
+                print(f"[{ts()}] [代理池] {display_name} 已锁定到测速通过节点池，共 {len(valid_nodes)} 个。")
         
         if not valid_nodes:
             print(f"[{ts()}] [ERROR] {display_name} 过滤后无可用节点，请检查黑名单。")

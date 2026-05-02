@@ -23,6 +23,9 @@ class LuckMailBulkBuyReq(BaseModel): quantity: int; auto_tag: bool; config: dict
 class GmailExchangeReq(BaseModel): code: str
 class ClashDeployReq(BaseModel): count: int
 class ClashUpdateReq(BaseModel): sub_url: str; target: str = "all"
+class ClashRuntimeReq(BaseModel): action: str
+class ClashSwitchReq(BaseModel): group_name: str; proxy_name: str; target: str = "all"
+class ClashDelayReq(BaseModel): group_name: str; target: str = "all"
 class TestTgReq(BaseModel):token: str; chat_id: str
 class GmailCredentialsReq(BaseModel):content: str
 
@@ -249,6 +252,23 @@ async def post_clash_deploy(req: ClashDeployReq, token: str = Depends(verify_tok
 async def post_clash_update(req: ClashUpdateReq, token: str = Depends(verify_token)):
     success, msg = clash_manager.patch_and_update(req.sub_url, req.target)
     return {"status": "success" if success else "error", "message": msg}
+
+@router.post("/api/clash/runtime")
+async def post_clash_runtime(req: ClashRuntimeReq, token: str = Depends(verify_token)):
+    success, msg = clash_manager.control_runtime(req.action)
+    return {"status": "success" if success else "error", "message": msg}
+
+@router.post("/api/clash/switch")
+async def post_clash_switch(req: ClashSwitchReq, token: str = Depends(verify_token)):
+    success, msg = clash_manager.switch_proxy_group(req.group_name, req.proxy_name, req.target)
+    return {"status": "success" if success else "error", "message": msg}
+
+@router.post("/api/clash/delay")
+async def post_clash_delay(req: ClashDelayReq, token: str = Depends(verify_token)):
+    success, result = clash_manager.test_group_latency(req.group_name, req.target)
+    if success:
+        return {"status": "success", "data": result, "message": f"已完成策略组 [{req.group_name}] 节点延迟测试"}
+    return {"status": "error", "message": str(result)}
 
 
 @router.post("/api/notify/test_tg")

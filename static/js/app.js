@@ -170,13 +170,18 @@ createApp({
             BUILTIN_CLIENT_ID: "7feada80-d946-4d06-b134-73afa3524fb7",
             clashPool: {
                 loading: false,
+                actionLoading: '',
                 subUrl: '',
                 target: 'all',
                 count: 5,
                 instances: [],
                 groups: [],
                 mode: '',
-                message: ''
+                message: '',
+                activeGroup: null,
+                latencyMap: {},
+                latencyLoading: false,
+                latencyTestUrl: ''
             },
             gmail_oauth_mode: {
                 master_email: '',
@@ -2605,12 +2610,34 @@ createApp({
                     this.clashPool.groups = d.data.groups;
                     this.clashPool.mode = d.data.mode || '';
                     this.clashPool.message = d.data.message || '';
+                    this.clashPool.latencyMap = {};
+                    this.clashPool.latencyTestUrl = '';
+                    if (this.clashPool.activeGroup) {
+                        const nextActive = this.clashPool.groups.find(g => g.name === this.clashPool.activeGroup.name);
+                        this.clashPool.activeGroup = nextActive || null;
+                    }
                     if (this.clashPool.instances.length > 0) {
                         this.clashPool.count = this.clashPool.instances.length;
                     }
                 }
             } catch (e) {}
             this.clashPool.loading = false;
+        },
+        async handleClashRuntime(action) {
+            this.clashPool.actionLoading = action;
+            try {
+                const res = await this.authFetch('/api/clash/runtime', {
+                    method: 'POST',
+                    body: JSON.stringify({ action })
+                });
+                const d = await res.json();
+                this.showToast(d.message, d.status);
+                await this.fetchClashPool();
+            } catch (e) {
+                this.showToast('网络错误', 'error');
+            } finally {
+                this.clashPool.actionLoading = '';
+            }
         },
         async handleClashDeploy() {
             this.showToast('正在调整实例规模...', 'info');
@@ -2642,6 +2669,83 @@ createApp({
             if (this.config && this.config.clash_proxy_pool) {
                 this.config.clash_proxy_pool.group_name = name;
                 this.showToast(`已自动填入策略组：${name}`, 'success');
+            }
+        },
+        openClashGroup(group) {
+            this.clashPool.activeGroup = group;
+            this.clashPool.latencyMap = {};
+            this.clashPool.latencyTestUrl = '';
+            this.fillProxyGroup(group.name);
+        },
+        closeClashGroup() {
+            this.clashPool.activeGroup = null;
+            this.clashPool.latencyMap = {};
+            this.clashPool.latencyTestUrl = '';
+        },
+        async testActiveClashGroupLatency() {
+            if (!this.clashPool.activeGroup) return;
+            this.clashPool.latencyLoading = true;
+            this.clashPool.latencyMap = {};
+            try {
+                const res = await this.authFetch('/api/clash/delay', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        group_name: this.clashPool.activeGroup.name,
+                        target: this.clashPool.target
+                    })
+                });
+                const d = await res.json();
+                if (d.status === 'success') {
+                    this.clashPool.latencyMap = d.data?.results || {};
+                    this.clashPool.latencyTestUrl = d.data?.test_url || '';
+                    this.showToast(d.message, 'success');
+                } else {
+                    this.showToast(d.message, 'error');
+                }
+            } catch (e) {
+                this.showToast('延迟测试失败', 'error');
+            } finally {
+                this.clashPool.latencyLoading = false;
+            }
+        },
+        getClashNodeLatency(nodeName) {
+            return this.clashPool.latencyMap?.[nodeName] || null;
+        },
+        getSortedActiveClashNodes() {
+            if (!this.clashPool.activeGroup || !Array.isArray(this.clashPool.activeGroup.nodes)) return [];
+            const nodes = [...this.clashPool.activeGroup.nodes];
+            const current = this.clashPool.activeGroup.current;
+            const latencies = this.clashPool.latencyMap || {};
+            return nodes.sort((a, b) => {
+                if (a === current) return -1;
+                if (b === current) return 1;
+                const la = latencies[a];
+                const lb = latencies[b];
+                const va = la && la.status === 'ok' ? la.delay : Number.POSITIVE_INFINITY;
+                const vb = lb && lb.status === 'ok' ? lb.delay : Number.POSITIVE_INFINITY;
+                if (va !== vb) return va - vb;
+                return a.localeCompare(b);
+            });
+        },
+        async switchClashNode(nodeName) {
+            if (!this.clashPool.activeGroup || !nodeName) return;
+            this.clashPool.actionLoading = `switch:${nodeName}`;
+            try {
+                const res = await this.authFetch('/api/clash/switch', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        group_name: this.clashPool.activeGroup.name,
+                        proxy_name: nodeName,
+                        target: this.clashPool.target
+                    })
+                });
+                const d = await res.json();
+                this.showToast(d.message, d.status);
+                await this.fetchClashPool();
+            } catch (e) {
+                this.showToast('节点切换失败', 'error');
+            } finally {
+                this.clashPool.actionLoading = '';
             }
         },
         syncClusterToPool() {

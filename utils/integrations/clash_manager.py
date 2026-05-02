@@ -5,6 +5,7 @@ import socket
 import subprocess
 import time
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import docker
 import requests
@@ -53,6 +54,20 @@ def _persist_sub_url(url: str) -> None:
     cfg.reload_all_configs(new_config_dict=config_data)
 
 
+def _persist_tested_nodes(group_name: str, healthy_nodes: list[str]) -> None:
+    config_data = _read_runtime_config()
+    clash_conf = config_data.get("clash_proxy_pool", {})
+    if not isinstance(clash_conf, dict):
+        clash_conf = {}
+    tested_map = clash_conf.get("tested_nodes", {})
+    if not isinstance(tested_map, dict):
+        tested_map = {}
+    tested_map[str(group_name)] = healthy_nodes
+    clash_conf["tested_nodes"] = tested_map
+    config_data["clash_proxy_pool"] = clash_conf
+    cfg.reload_all_configs(new_config_dict=config_data)
+
+
 def _build_requests_proxies() -> dict | None:
     proxy_url = str(getattr(cfg, "DEFAULT_PROXY", "") or "").strip()
     if not proxy_url:
@@ -86,6 +101,8 @@ def _collect_groups_from_config(config_path: str) -> list[dict]:
                     "name": group.get("name", "N/A"),
                     "count": len(group.get("proxies", [])),
                     "type": group.get("type", "N/A"),
+                    "nodes": list(group.get("proxies", [])),
+                    "current": "",
                 }
             )
     except Exception:
@@ -152,6 +169,239 @@ def _probe_local_ports(api_port: int, proxy_port: int, secret: str = "") -> bool
         return False
 
 
+def _controller_headers(secret: str) -> dict:
+    return {"Authorization": f"Bearer {secret}"} if secret else {}
+
+
+def _get_local_controller() -> tuple[str, str]:
+    config_data = _read_runtime_config()
+    clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
+    api_port = _extract_port_from_url(clash_conf.get("api_url"), 9097)
+    secret = str(clash_conf.get("secret") or "").strip()
+    return f"http://127.0.0.1:{api_port}", secret
+
+
+def _get_docker_controller(target: str) -> tuple[str | None, str]:
+    client = get_client()
+    if not client:
+        return None, ""
+    config_data = _read_runtime_config()
+    clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
+    secret = str(clash_conf.get("secret") or "").strip()
+    desired_name = "clash_1" if target in {"", "all", None} else f"clash_{target}"
+    try:
+        container = client.containers.get(desired_name)
+    except Exception:
+        return None, secret
+    bindings = container.attrs.get("HostConfig", {}).get("PortBindings", {}) or {}
+    port_bind = bindings.get("9090/tcp") or []
+    if not port_bind:
+        return None, secret
+    host_port = port_bind[0].get("HostPort")
+    if not host_port:
+        return None, secret
+    return f"http://127.0.0.1:{host_port}", secret
+
+
+def _get_controller_endpoint(target: str = "all") -> tuple[str | None, str]:
+    mode = _detect_runtime_mode(get_client())
+    if mode == "docker_pool":
+        return _get_docker_controller(target)
+    return _get_local_controller()
+
+
+def _fetch_controller_proxies(target: str = "all") -> dict:
+    base_url, secret = _get_controller_endpoint(target)
+    if not base_url:
+        raise RuntimeError("未找到可用的 Clash 控制接口。")
+    res = requests.get(f"{base_url}/proxies", headers=_controller_headers(secret), timeout=5)
+    res.raise_for_status()
+    payload = res.json() or {}
+    proxies = payload.get("proxies")
+    if not isinstance(proxies, dict):
+        raise RuntimeError("Clash 控制接口返回异常，缺少 proxies 数据。")
+    return proxies
+
+
+def _merge_runtime_groups(config_groups: list[dict], target: str = "all") -> list[dict]:
+    try:
+        proxy_map = _fetch_controller_proxies(target)
+    except Exception:
+        return config_groups
+
+    merged = []
+    for group in config_groups:
+        runtime = proxy_map.get(group.get("name", ""))
+        item = dict(group)
+        if isinstance(runtime, dict):
+            nodes = runtime.get("all")
+            if isinstance(nodes, list) and nodes:
+                item["nodes"] = nodes
+                item["count"] = len(nodes)
+            item["current"] = str(runtime.get("now") or "")
+            if runtime.get("type"):
+                item["type"] = runtime.get("type")
+        merged.append(item)
+    return merged
+
+
+def _apply_config_to_controller(config_path: str, target: str = "all") -> tuple[bool, str]:
+    try:
+        base_url, secret = _get_controller_endpoint(target)
+        if not base_url:
+            return False, "未找到可用的 Clash 控制接口。"
+        res = requests.put(
+            f"{base_url}/configs",
+            headers=_controller_headers(secret),
+            params={"force": "true"},
+            json={"path": config_path},
+            timeout=8,
+        )
+        if res.status_code not in {200, 204}:
+            return False, f"HTTP {res.status_code} {res.text[:160]}"
+        return True, "配置已热更新到当前 Clash 内核。"
+    except Exception as e:
+        return False, str(e)
+
+
+def switch_proxy_group(group_name: str, proxy_name: str, target: str = "all") -> tuple[bool, str]:
+    if not group_name or not proxy_name:
+        return False, "策略组和目标节点不能为空。"
+    try:
+        base_url, secret = _get_controller_endpoint(target)
+        if not base_url:
+            return False, "未找到可用的 Clash 控制接口。"
+        encoded_name = urllib.parse.quote(group_name, safe="")
+        res = requests.put(
+            f"{base_url}/proxies/{encoded_name}",
+            headers=_controller_headers(secret),
+            json={"name": proxy_name},
+            timeout=8,
+        )
+        if res.status_code not in {200, 204}:
+            return False, f"切换失败: HTTP {res.status_code} {res.text[:160]}"
+        return True, f"已切换策略组 [{group_name}] 到节点 [{proxy_name}]"
+    except Exception as e:
+        return False, str(e)
+
+
+def test_group_latency(group_name: str, target: str = "all") -> tuple[bool, dict | str]:
+    if not group_name:
+        return False, "策略组不能为空。"
+    try:
+        proxy_map = _fetch_controller_proxies(target)
+        runtime = proxy_map.get(group_name)
+        if not isinstance(runtime, dict):
+            return False, f"未找到策略组 [{group_name}]。"
+        nodes = runtime.get("all")
+        if not isinstance(nodes, list) or not nodes:
+            return False, f"策略组 [{group_name}] 没有可测速节点。"
+
+        config_data = _read_runtime_config()
+        clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
+        delay_url = str(clash_conf.get("test_proxy_url") or "").strip() or "https://www.gstatic.com/generate_204"
+        base_url, secret = _get_controller_endpoint(target)
+        if not base_url:
+            return False, "未找到可用的 Clash 控制接口。"
+        headers = _controller_headers(secret)
+
+        def _probe(node_name: str):
+            encoded = urllib.parse.quote(node_name, safe="")
+            try:
+                res = requests.get(
+                    f"{base_url}/proxies/{encoded}/delay",
+                    headers=headers,
+                    params={"timeout": 5000, "url": delay_url},
+                    timeout=8,
+                )
+                if res.status_code != 200:
+                    return node_name, {"status": "error", "message": f"HTTP {res.status_code}"}
+                payload = res.json() or {}
+                delay = payload.get("delay")
+                if isinstance(delay, (int, float)) and delay > 0:
+                    return node_name, {"status": "ok", "delay": int(delay)}
+                return node_name, {"status": "error", "message": "timeout"}
+            except Exception as e:
+                return node_name, {"status": "error", "message": str(e)}
+
+        results = {}
+        worker_count = max(1, min(20, len(nodes)))
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [executor.submit(_probe, node) for node in nodes]
+            for future in as_completed(futures):
+                node_name, result = future.result()
+                results[node_name] = result
+
+        healthy_nodes = [
+            node_name for node_name, result in sorted(
+                results.items(),
+                key=lambda item: item[1].get("delay", 10**9) if item[1].get("status") == "ok" else 10**9
+            )
+            if result.get("status") == "ok"
+        ]
+        _persist_tested_nodes(group_name, healthy_nodes)
+
+        return True, {
+            "group_name": group_name,
+            "test_url": delay_url,
+            "results": results,
+            "healthy_nodes": healthy_nodes,
+        }
+    except Exception as e:
+        return False, str(e)
+
+
+def control_runtime(action: str) -> tuple[bool, str]:
+    mode = _detect_runtime_mode(get_client())
+    action = str(action or "").strip().lower()
+    if action not in {"start", "stop", "restart"}:
+        return False, "不支持的运行操作。"
+
+    if mode == "local_gui":
+        return False, "当前为本地 GUI 模式，请直接在本机 Clash/Mihomo 客户端中操作。"
+
+    if mode == "linux_single_core":
+        config_data = _read_runtime_config()
+        clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
+        proxy_url = str(config_data.get("default_proxy") or "").strip()
+        api_url = str(clash_conf.get("api_url") or "").strip()
+        secret = str(clash_conf.get("secret") or "").strip()
+        externally_running = _probe_local_ports(
+            _extract_port_from_url(api_url, 9097),
+            _extract_port_from_url(proxy_url, 7897),
+            secret,
+        )
+        if action == "stop":
+            if not _is_pid_running(_read_pid()) and externally_running:
+                return False, "检测到当前 Mihomo 由外部服务托管，网页无法直接停止它。"
+            _stop_single_core()
+            return True, "Linux 单核心 Mihomo 已停止。"
+        if action == "restart":
+            if not _is_pid_running(_read_pid()) and externally_running:
+                return False, "检测到当前 Mihomo 由外部服务托管，请在系统服务中重启它。"
+            _stop_single_core()
+        ok, msg = _start_single_core()
+        return ok, ("Linux 单核心 Mihomo 已启动。 " + msg) if action == "start" and ok else msg
+
+    client = get_client()
+    if not client:
+        return False, "Docker 不可用，无法控制容器集群。"
+    containers = client.containers.list(all=True, filters={"name": "clash_"})
+    if not containers:
+        return False, "当前没有可控制的 Clash 容器实例。"
+    try:
+        for container in containers:
+            if action == "start":
+                container.start()
+            elif action == "stop":
+                container.stop()
+            else:
+                container.restart()
+        return True, f"Docker Clash 实例已执行 {action} 操作。"
+    except Exception as e:
+        return False, str(e)
+
+
 def _build_local_gui_status() -> dict:
     config_data = _read_runtime_config()
     clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
@@ -169,7 +419,7 @@ def _build_local_gui_status() -> dict:
                 "ports": f"{proxy_url or '-'} / {api_url or '-'}",
             }
         ],
-        "groups": _collect_groups_from_config(MANUAL_CONFIG_PATH),
+        "groups": _merge_runtime_groups(_collect_groups_from_config(MANUAL_CONFIG_PATH)),
         "message": (
             "当前未检测到 Docker，已切换为本地 GUI 模式。网页仅保存订阅链接与 YAML 配置，不直接接管 GUI 进程。"
             + (" 已检测到本地 Clash/Mihomo 正在运行。" if running else " 暂未检测到本地 Clash/Mihomo 控制口或代理口。")
@@ -183,7 +433,8 @@ def _build_single_core_status() -> dict:
     proxy_url = str(config_data.get("default_proxy") or "").strip()
     api_url = str(clash_conf.get("api_url") or "").strip()
     pid = _read_pid()
-    running = _is_pid_running(pid)
+    secret = str(clash_conf.get("secret") or "").strip()
+    running = _probe_local_ports(_extract_port_from_url(api_url, 9097), _extract_port_from_url(proxy_url, 7897), secret)
     return {
         "mode": "linux_single_core",
         "instances": [
@@ -194,7 +445,7 @@ def _build_single_core_status() -> dict:
                 "pid": pid or "-",
             }
         ],
-        "groups": _collect_groups_from_config(MANUAL_CONFIG_PATH),
+        "groups": _merge_runtime_groups(_collect_groups_from_config(MANUAL_CONFIG_PATH)),
         "message": "当前为 Linux 单核心模式。网页会直接写入 Mihomo 配置并重启本机内核。",
     }
 
@@ -286,7 +537,7 @@ def get_pool_status():
     return {
         "mode": "docker_pool",
         "instances": instances,
-        "groups": _collect_groups_from_config(os.path.join(BASE_PATH, "clash_1", "config.yaml")),
+        "groups": _merge_runtime_groups(_collect_groups_from_config(os.path.join(BASE_PATH, "clash_1", "config.yaml"))),
         "message": "当前为 Docker 集群模式。网页可直接调度 Mihomo 容器实例。",
     }
 
@@ -362,7 +613,10 @@ def patch_and_update(url, target):
 
         if mode == "local_gui":
             _write_single_core_config(raw_yaml)
-            return True, "订阅链接已保存。检测到 YAML 配置，已写入 data/mihomo-pool/manual-config.yaml，方便本地 GUI 导入。"
+            ok, apply_msg = _apply_config_to_controller(MANUAL_CONFIG_PATH, target)
+            if ok:
+                return True, "订阅已更新，并已热更新到本地 GUI Clash/Mihomo。"
+            return True, "订阅链接已保存。检测到 YAML 配置，已写入 data/mihomo-pool/manual-config.yaml；但热更新 GUI 内核失败：" + apply_msg
 
         if mode == "linux_single_core":
             _write_single_core_config(raw_yaml)
