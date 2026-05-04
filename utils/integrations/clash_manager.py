@@ -13,6 +13,7 @@ import requests
 import yaml
 
 import utils.config as cfg
+from utils.clash_group_utils import resolve_group_name
 BASE_PATH = os.path.join(os.getcwd(), "data", "mihomo-pool")
 os.makedirs(BASE_PATH, exist_ok=True)
 
@@ -200,7 +201,6 @@ def _extract_port_from_url(url: str, fallback: int) -> int:
     except Exception:
         return fallback
 
-
 def _collect_groups_from_config(config_path: str) -> list[dict]:
     groups = []
     if not os.path.exists(config_path):
@@ -336,6 +336,11 @@ def _fetch_controller_proxies(target: str = "all") -> dict:
     return proxies
 
 
+def _resolve_runtime_group_name(group_name: str, target: str = "all") -> str | None:
+    proxy_map = _fetch_controller_proxies(target)
+    return resolve_group_name(proxy_map, group_name)
+
+
 def _merge_runtime_groups(config_groups: list[dict], target: str = "all") -> list[dict]:
     try:
         proxy_map = _fetch_controller_proxies(target)
@@ -384,7 +389,10 @@ def switch_proxy_group(group_name: str, proxy_name: str, target: str = "all") ->
         base_url, secret = _get_controller_endpoint(target)
         if not base_url:
             return False, "未找到可用的 Clash 控制接口。"
-        encoded_name = urllib.parse.quote(group_name, safe="")
+        runtime_group_name = _resolve_runtime_group_name(group_name, target)
+        if not runtime_group_name:
+            return False, f"未找到策略组 [{group_name}]。"
+        encoded_name = urllib.parse.quote(runtime_group_name, safe="")
         res = requests.put(
             f"{base_url}/proxies/{encoded_name}",
             headers=_controller_headers(secret),
@@ -393,7 +401,7 @@ def switch_proxy_group(group_name: str, proxy_name: str, target: str = "all") ->
         )
         if res.status_code not in {200, 204}:
             return False, f"切换失败: HTTP {res.status_code} {res.text[:160]}"
-        return True, f"已切换策略组 [{group_name}] 到节点 [{proxy_name}]"
+        return True, f"已切换策略组 [{runtime_group_name}] 到节点 [{proxy_name}]"
     except Exception as e:
         return False, str(e)
 

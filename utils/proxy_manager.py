@@ -8,6 +8,7 @@ import os
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from utils.clash_group_utils import resolve_group_name
 
 CLASH_API_URL = ""
 LOCAL_PROXY_URL = ""
@@ -75,12 +76,6 @@ def clean_for_log(text: str) -> str:
         r'|[\uFE0F]'
     )
     return emoji_pattern.sub('', text).strip()
-
-
-def normalize_group_name(text: str) -> str:
-    cleaned = clean_for_log(str(text or "")).lower()
-    cleaned = re.sub(r'[\s\-_]+', '', cleaned)
-    return cleaned
 
 def get_display_name(proxy_url: str) -> str:
     """统一日志脱敏：将 URL 转换为 [X号机] 或隐藏域名"""
@@ -175,22 +170,17 @@ def _do_smart_switch(proxy_url=None):
             
         proxies_data = resp.json().get('proxies', {})
 
-        actual_group_name = None
-        target_group_name = normalize_group_name(PROXY_GROUP_NAME)
-        for key in proxies_data.keys():
-            if not (isinstance(proxies_data[key], dict) and 'all' in proxies_data[key]):
-                continue
-            key_name = normalize_group_name(key)
-            if (
-                PROXY_GROUP_NAME == key
-                or (target_group_name and target_group_name in key_name)
-                or (key_name and key_name in target_group_name)
-            ):
-                actual_group_name = key
-                break
+        actual_group_name = resolve_group_name(proxies_data, PROXY_GROUP_NAME)
                 
         if not actual_group_name:
-            print(f"[{ts()}] [ERROR] {display_name} 找不到策略组关键词 '{PROXY_GROUP_NAME}'")
+            available_groups = [
+                key for key, value in proxies_data.items()
+                if isinstance(value, dict) and 'all' in value
+            ]
+            print(
+                f"[{ts()}] [ERROR] {display_name} 找不到策略组关键词 '{PROXY_GROUP_NAME}'。"
+                f" 当前可用策略组: {', '.join(clean_for_log(g) for g in available_groups[:8])}"
+            )
             return False
             
         safe_group_name = urllib.parse.quote(actual_group_name)
