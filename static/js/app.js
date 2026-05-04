@@ -2709,9 +2709,17 @@ createApp({
                     body: JSON.stringify({ subscription_id: subscription.id })
                 });
                 const d = await res.json();
-                this.showToast(d.message, d.status);
                 if (d.status === 'success') {
+                    this.clashPool.subUrl = subscription.url;
+                    const updateRes = await this.authFetch('/api/clash/update', {
+                        method: 'POST',
+                        body: JSON.stringify({ sub_url: subscription.url, target: this.clashPool.target })
+                    });
+                    const updateData = await updateRes.json();
+                    this.showToast(`${d.message}；${updateData.message}`, updateData.status || d.status);
                     await this.fetchClashPool();
+                } else {
+                    this.showToast(d.message, d.status);
                 }
             } catch (e) {
                 this.showToast('选择订阅失败', 'error');
