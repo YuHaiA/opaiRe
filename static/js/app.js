@@ -79,6 +79,7 @@ createApp({
             accounts: [],
             selectedAccounts: [],
             hideRegisterOnlyAccounts: false,
+            accountStatusFilter: 'all',
 			currentPage: 1,
             pageSize: 10,
             totalAccounts: 0,
@@ -661,9 +662,12 @@ createApp({
 
             const statusMap = {
                 'all': '全部',
+                'pushed': '已推送',
                 'unpushed': '未推送',
                 'active': '活跃',
-                'disabled': '已禁用'
+                'disabled': '已禁用',
+                'credential': '完整凭证',
+                'image2api': 'Image2API'
             };
             this.showToast(`已筛选: ${statusMap[status]}的本地账号`, 'info');
         },
