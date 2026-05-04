@@ -2563,18 +2563,18 @@
                                         </div>
                                     </div>
                                 </div>
-                                <div class="bg-sky-50/40 p-5 rounded-2xl border border-sky-100 shadow-inner mb-6">
+                                <div class="bg-sky-50/40 p-5 rounded-2xl border border-sky-100 shadow-inner mb-6 overflow-hidden">
                                     <div class="flex flex-col lg:flex-row gap-4">
-                                        <div class="flex-1">
+                                        <div class="flex-1 min-w-0">
                                             <label class="block text-xs text-sky-900 font-black uppercase tracking-wider mb-3">订阅列表</label>
                                             <div class="max-h-56 overflow-y-auto custom-scrollbar space-y-2 pr-1">
                                                 <div v-for="sub in clashPool.subscriptions" :key="sub.id"
-                                                     class="bg-white border rounded-xl px-4 py-3 shadow-sm transition-all"
+                                                     class="bg-white border rounded-xl px-4 py-3 shadow-sm transition-all overflow-hidden"
                                                      :class="clashPool.selectedSubscriptionId === sub.id ? 'border-sky-400 shadow-sky-100 bg-sky-50/40' : 'border-slate-200'">
                                                     <div class="flex items-start justify-between gap-3">
-                                                        <div class="min-w-0">
-                                                            <div class="font-black text-sm text-slate-800 truncate">{{ sub.name || '未命名订阅' }}</div>
-                                                            <div class="text-[11px] text-slate-500 font-mono mt-1 break-all">{{ sub.url }}</div>
+                                                        <div class="min-w-0 flex-1 overflow-hidden">
+                                                            <div class="font-black text-sm text-slate-800 truncate whitespace-nowrap overflow-hidden text-ellipsis" :title="sub.name || '未命名订阅'">{{ sub.name || '未命名订阅' }}</div>
+                                                            <div class="text-[11px] text-slate-500 font-mono mt-1 truncate whitespace-nowrap overflow-hidden text-ellipsis" :title="sub.url">{{ sub.url }}</div>
                                                         </div>
                                                         <div class="flex gap-2 shrink-0">
                                                             <button @click="selectClashSubscription(sub)"
@@ -2596,7 +2596,7 @@
                                                 </div>
                                             </div>
                                         </div>
-                                        <div class="lg:w-[360px]">
+                                        <div class="lg:w-[360px] lg:min-w-[360px]">
                                             <label class="block text-xs text-sky-900 font-black uppercase tracking-wider mb-3">添加订阅</label>
                                             <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
                                                 <input type="text" v-model="clashPool.newSubName" placeholder="订阅名称（可选）"
