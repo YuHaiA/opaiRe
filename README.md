@@ -219,10 +219,25 @@ Start the Web Console service locally:
 python wfxl_openai_regst.py
 ```
 
+如果 `8000` 已被占用，有两种方式：
+
+```bash
+# 方式 1：明确指定启动端口
+set WEB_PORT=8001
+python wfxl_openai_regst.py
+```
+
+```bash
+# 方式 2：不指定，程序会从 8000 开始自动向后寻找空闲端口
+python wfxl_openai_regst.py
+```
+
 After startup, open the Web Console in your browser:
 
 ```text
 http://127.0.0.1:8000
+
+如果 `8000` 被占用，请以终端实际打印出来的控制台地址为准，例如 `http://127.0.0.1:8001`。
 ```
 
 Default Web Console password:
@@ -252,7 +267,7 @@ services:
     image: wenfxl/wenfxl-codex-manager:latest
     container_name: wenfxl_codex_manager
     ports:
-      - "8000:8000"
+      - "${WEB_PORT:-8000}:8000"
     restart: always
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -288,7 +303,7 @@ services:
     image: wenfxl/wenfxl-codex-manager:latest
     container_name: wenfxl_codex_manager
     ports:
-      - "8000:8000"
+      - "${WEB_PORT:-8000}:8000"
     restart: always
     environment:
       - TZ=Asia/Shanghai
@@ -329,7 +344,7 @@ docker-compose pull wenfxl/wenfxl-codex-manager:latest
 config directly
 Notes:
 - `./data:/app/data` is used to persist runtime data, local database content, and exports.
-- The Docker Web Console is exposed on port `8000` by default.
+- The Docker Web Console is exposed on container port `8000` by default, while the host port can be changed through `WEB_PORT`.
 - Default Web Console password: `admin`
 - The current compose file uses image tag `wenfxl/wenfxl-codex-manager:latest`.
 
