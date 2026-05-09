@@ -2912,15 +2912,36 @@ createApp({
             if (!this.clashPool.subUrl) return this.showToast('请输入订阅链接', 'error');
             this.clashPool.loading = true;
             try {
+                const previousGroupNames = (this.clashPool.groups || []).map(g => g.name).sort().join('|');
                 const res = await this.authFetch('/api/clash/update', {
                     method: 'POST',
                     body: JSON.stringify({ sub_url: this.clashPool.subUrl, target: this.clashPool.target })
                 });
                 const d = await res.json();
                 this.showToast(d.message, d.status);
-                this.fetchClashPool();
+                await this.refreshClashGroupsAfterSubscriptionChange(previousGroupNames, this.clashPool.subUrl);
             } catch (e) { this.showToast('网络错误', 'error'); }
             this.clashPool.loading = false;
+        },
+        async refreshCurrentClashGroups() {
+            if (!this.clashPool.subUrl) return this.showToast('请先选择订阅链接', 'warning');
+            this.clashPool.actionLoading = 'sub-refresh';
+            try {
+                const previousGroupNames = (this.clashPool.groups || []).map(g => g.name).sort().join('|');
+                const res = await this.authFetch('/api/clash/update', {
+                    method: 'POST',
+                    body: JSON.stringify({ sub_url: this.clashPool.subUrl, target: this.clashPool.target })
+                });
+                const d = await res.json();
+                this.showToast(d.message, d.status);
+                if (d.status === 'success') {
+                    await this.refreshClashGroupsAfterSubscriptionChange(previousGroupNames, this.clashPool.subUrl, true);
+                }
+            } catch (e) {
+                this.showToast('刷新策略组失败', 'error');
+            } finally {
+                this.clashPool.actionLoading = '';
+            }
         },
         async addClashSubscription() {
             if (!this.clashPool.newSubUrl) return this.showToast('请输入订阅链接', 'warning');
@@ -2950,6 +2971,7 @@ createApp({
         async selectClashSubscription(subscription) {
             this.clashPool.actionLoading = `sub-select:${subscription.id}`;
             try {
+                const previousGroupNames = (this.clashPool.groups || []).map(g => g.name).sort().join('|');
                 const res = await this.authFetch('/api/clash/subscriptions/select', {
                     method: 'POST',
                     body: JSON.stringify({ subscription_id: subscription.id })
@@ -2963,7 +2985,7 @@ createApp({
                     });
                     const updateData = await updateRes.json();
                     this.showToast(`${d.message}；${updateData.message}`, updateData.status || d.status);
-                    await this.fetchClashPool();
+                    await this.refreshClashGroupsAfterSubscriptionChange(previousGroupNames, subscription.url);
                 } else {
                     this.showToast(d.message, d.status);
                 }
@@ -3083,6 +3105,27 @@ createApp({
             } finally {
                 this.clashPool.actionLoading = '';
             }
+        },
+        async refreshClashGroupsAfterSubscriptionChange(previousGroupNames = '', expectedUrl = '', allowUnchangedGroups = false) {
+            const maxAttempts = 6;
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                await this.fetchClashPool();
+                const currentGroupNames = (this.clashPool.groups || []).map(g => g.name).sort().join('|');
+                const currentSelectedUrl = this.clashPool.subUrl || '';
+                const groupsReady = !!currentGroupNames;
+                const groupsChanged = currentGroupNames !== previousGroupNames;
+                const selectedReady = !expectedUrl || currentSelectedUrl === expectedUrl;
+                if (groupsReady && selectedReady && (groupsChanged || allowUnchangedGroups || attempt > 0)) {
+                    if (groupsChanged) {
+                        this.showToast('策略组已按新订阅刷新', 'success');
+                    } else if (allowUnchangedGroups) {
+                        this.showToast('策略组已按当前订阅重新刷新', 'success');
+                    }
+                    return;
+                }
+                await new Promise(resolve => setTimeout(resolve, 1200));
+            }
+            this.showToast('订阅已切换，但策略组刷新可能仍在进行中', 'warning');
         },
         syncClusterToPool() {
             if (!this.clashPool.instances || this.clashPool.instances.length === 0) {

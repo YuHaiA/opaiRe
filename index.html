@@ -2821,6 +2821,12 @@
                                                     <span :class="{'animate-spin': clashPool.actionLoading === 'sub-add'}">➕</span>
                                                     添加并选中
                                                 </button>
+                                                <button @click="refreshCurrentClashGroups"
+                                                        :disabled="clashPool.actionLoading === 'sub-refresh' || !clashPool.subUrl"
+                                                        class="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white text-sky-700 font-black text-sm border border-sky-200 hover:bg-sky-50 active:scale-95 transition-all shadow-sm disabled:opacity-50">
+                                                    <span :class="{'animate-spin': clashPool.actionLoading === 'sub-refresh'}">🔄</span>
+                                                    刷新策略组
+                                                </button>
                                             </div>
                                         </div>
                                     </div>
