@@ -616,7 +616,7 @@ def get_inventory_stats() -> dict:
 
             execute_sql(c, sql, params)
             row = c.fetchone()
-            r = [x or 0 for x in row] if row else [0] * 16
+            r = [x or 0 for x in row] if row else [0] * 17
 
             return {
                 "local": {
@@ -625,14 +625,14 @@ def get_inventory_stats() -> dict:
                     "disabled": r[2],
                     "unpushed": r[3],
                     "pushed": r[4],
-                    "with_token": r[11],
-                    "credential": r[12],
-                    "reg_only": r[13],
-                    "imgsub2api": r[14],
-                    "image2api": r[15]
+                    "with_token": r[12],
+                    "credential": r[13],
+                    "reg_only": r[14],
+                    "imgsub2api": r[15],
+                    "image2api": r[16]
                 },
                 "cloud": {
-                    "total": r[10],
+                    "total": r[11],
                     "enabled": r[1],
                     "cpa": r[5],
                     "cpa_active": r[6],
