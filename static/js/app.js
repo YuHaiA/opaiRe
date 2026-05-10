@@ -478,6 +478,7 @@ createApp({
                 subscriptionActionLoading: false,
                 delayLoading: false,
                 activeGroupName: '',
+                view: 'groups',
                 nodeSelections: {},
                 delayResults: {},
                 newSubscriptionName: '',
@@ -622,6 +623,9 @@ createApp({
         activeClashGroup() {
             if (!this.clashPool?.activeGroupName) return null;
             return (this.clashPool.groups || []).find(group => group.name === this.clashPool.activeGroupName) || null;
+        },
+        selectedClashSubscription() {
+            return (this.clashPool?.subscriptions || []).find(item => item.selected) || null;
         }
     },
     methods: {
@@ -969,14 +973,14 @@ createApp({
                 });
                 const payload = await res.json();
                 this.gitSync.outputTail = payload?.data?.output_tail || [];
-                if (payload.status === 'success') {
-                    this.gitSync.data = payload?.data?.after || this.gitSync.data;
-                    this.showToast(payload.message || 'Git 操作完成', 'success');
-                    if (payload?.data?.restart_scheduled) {
-                        this.showToast('项目正在重启，页面将在几秒后自动刷新...', 'info');
-                        setTimeout(() => window.location.reload(), 8000);
-                    }
-                } else {
+                    if (payload.status === 'success') {
+                        this.gitSync.data = payload?.data?.after || this.gitSync.data;
+                        this.showToast(payload.message || 'Git 操作完成', 'success');
+                        if (payload?.data?.restart_scheduled) {
+                        this.showToast('项目正在重启，页面将在 6 秒后自动刷新...', 'info');
+                        setTimeout(() => window.location.reload(), 6000);
+                        }
+                    } else {
                     this.gitSync.data = payload?.data?.after || this.gitSync.data;
                     this.gitSync.error = payload.message || 'Git 操作失败';
                     this.showToast(this.gitSync.error, payload.status === 'warning' ? 'warning' : 'error');
@@ -3435,19 +3439,49 @@ createApp({
                         this.clashPool.subUrl = currentSub?.url || this.clashPool.subUrl;
                     }
                     if (!this.clashPool.activeGroupName && this.clashPool.groups.length > 0) {
-                        this.setActiveClashGroup(this.clashPool.groups[0]);
+                        this.primeActiveClashGroup(this.clashPool.groups[0]);
                     }
                 }
             } catch (e) {}
             this.clashPool.loading = false;
         },
-        setActiveClashGroup(group) {
+        primeActiveClashGroup(group) {
             if (!group || !group.name) return;
             this.clashPool.activeGroupName = group.name;
             this.fillProxyGroup(group.name);
             if (!this.clashPool.nodeSelections[group.name]) {
                 this.clashPool.nodeSelections[group.name] = group.current || (Array.isArray(group.nodes) ? group.nodes[0] : '') || '';
             }
+        },
+        setActiveClashGroup(group) {
+            this.primeActiveClashGroup(group);
+            this.clashPool.view = 'nodes';
+        },
+        backToClashGroups() {
+            this.clashPool.view = 'groups';
+        },
+        getClashDelayRows(group) {
+            if (!group || !Array.isArray(group.nodes)) return [];
+            const resultMap = this.clashPool.delayResults[group.name]?.results || {};
+            const healthyNodes = Array.isArray(group.healthy_nodes) ? group.healthy_nodes.filter(Boolean) : [];
+            const sourceNodes = healthyNodes.length ? healthyNodes : group.nodes;
+            const rows = sourceNodes.map((nodeName) => ({
+                nodeName,
+                result: resultMap[nodeName] || null,
+                isCurrent: group.current === nodeName,
+                isSelected: this.clashPool.nodeSelections[group.name] === nodeName
+            }));
+            rows.sort((a, b) => {
+                const aOk = a.result?.status === 'ok';
+                const bOk = b.result?.status === 'ok';
+                if (aOk && bOk) return (a.result.delay || Number.MAX_SAFE_INTEGER) - (b.result.delay || Number.MAX_SAFE_INTEGER);
+                if (aOk) return -1;
+                if (bOk) return 1;
+                if (a.isCurrent) return -1;
+                if (b.isCurrent) return 1;
+                return a.nodeName.localeCompare(b.nodeName, 'zh-CN');
+            });
+            return rows;
         },
         async handleClashDeploy() {
             this.showToast('正在调整实例规模...', 'info');

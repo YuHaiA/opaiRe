@@ -342,16 +342,31 @@ def _resolve_runtime_group_name(group_name: str, target: str = "all") -> str | N
 
 
 def _merge_runtime_groups(config_groups: list[dict], target: str = "all") -> list[dict]:
+    config_data = _read_runtime_config()
+    clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
+    tested_map = clash_conf.get("tested_nodes", {})
+    if not isinstance(tested_map, dict):
+        tested_map = {}
     try:
         proxy_map = _fetch_controller_proxies(target)
     except Exception:
-        return config_groups
+        merged = []
+        for group in config_groups:
+            item = dict(group)
+            healthy_nodes = tested_map.get(str(group.get("name", "")), [])
+            if isinstance(healthy_nodes, list) and healthy_nodes:
+                item["healthy_nodes"] = healthy_nodes
+            merged.append(item)
+        return merged
 
     merged = []
     for group in config_groups:
         runtime_name = resolve_group_name(proxy_map, group.get("name", ""))
         runtime = proxy_map.get(runtime_name) if runtime_name else None
         item = dict(group)
+        healthy_nodes = tested_map.get(str(group.get("name", "")), [])
+        if isinstance(healthy_nodes, list) and healthy_nodes:
+            item["healthy_nodes"] = healthy_nodes
         if isinstance(runtime, dict):
             nodes = runtime.get("all")
             if isinstance(nodes, list) and nodes:
