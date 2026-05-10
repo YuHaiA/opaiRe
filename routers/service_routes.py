@@ -29,6 +29,7 @@ class ClashUpdateReq(BaseModel): sub_url: str; target: str = "all"
 class ClashRuntimeReq(BaseModel): action: str
 class ClashSwitchReq(BaseModel): group_name: str; proxy_name: str; target: str = "all"
 class ClashDelayReq(BaseModel): group_name: str; target: str = "all"
+class ClashTestedNodesClearReq(BaseModel): group_name: str
 class ClashSubscriptionAddReq(BaseModel): name: str = ""; url: str; make_selected: bool = False
 class ClashSubscriptionSelectReq(BaseModel): subscription_id: str
 class ClashSubscriptionDeleteReq(BaseModel): subscription_id: str
@@ -280,8 +281,14 @@ async def post_clash_switch(req: ClashSwitchReq, token: str = Depends(verify_tok
 async def post_clash_delay(req: ClashDelayReq, token: str = Depends(verify_token)):
     success, result = clash_manager.test_group_latency(req.group_name, req.target)
     if success:
-        return {"status": "success", "data": result, "message": f"已完成策略组 [{req.group_name}] 节点延迟测试"}
+        healthy_count = len(result.get("healthy_nodes", [])) if isinstance(result, dict) else 0
+        return {"status": "success", "data": result, "message": f"已完成策略组 [{req.group_name}] 节点延迟测试，并自动保存 {healthy_count} 个有效节点"}
     return {"status": "error", "message": str(result)}
+
+@router.post("/api/clash/tested_nodes/clear")
+async def post_clash_tested_nodes_clear(req: ClashTestedNodesClearReq, token: str = Depends(verify_token)):
+    success, msg = clash_manager.clear_tested_nodes(req.group_name)
+    return {"status": "success" if success else "error", "message": msg}
 
 @router.post("/api/clash/subscriptions/add")
 async def post_clash_subscription_add(req: ClashSubscriptionAddReq, token: str = Depends(verify_token)):

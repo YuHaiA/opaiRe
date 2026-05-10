@@ -2834,17 +2834,19 @@
                                             <span class="text-xs font-bold text-slate-400">{{ clashPool.subscriptions.length }} 条</span>
                                         </div>
                                         <div v-if="clashPool.subscriptions.length > 0" class="divide-y divide-slate-100">
-                                            <div v-for="sub in clashPool.subscriptions" :key="sub.id" class="px-5 py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                                                <div class="min-w-0">
-                                                    <div class="flex items-center gap-2">
-                                                        <div class="font-black text-slate-800 truncate">{{ sub.name || ('订阅 ' + sub.id) }}</div>
-                                                        <span v-if="sub.selected" class="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-black shrink-0">当前</span>
+                                            <div v-for="sub in clashPool.subscriptions" :key="sub.id" class="px-5 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3 transition-all border-l-4" :class="sub.selected ? 'bg-sky-50 border-l-sky-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]' : 'bg-white border-l-transparent hover:bg-slate-50/70'">
+                                                <div class="min-w-0 flex-1">
+                                                    <div class="flex items-center gap-2 min-w-0">
+                                                        <div class="max-w-full px-3 py-1.5 rounded-full border text-sm font-black truncate transition-all" :class="sub.selected ? 'bg-gradient-to-r from-sky-500 to-cyan-500 text-white border-sky-400 shadow-md shadow-sky-500/20' : 'bg-slate-50 text-slate-700 border-slate-200'">
+                                                            {{ sub.name || ('订阅 ' + sub.id) }}
+                                                        </div>
+                                                        <span v-if="sub.selected" class="px-2.5 py-1 rounded-full bg-emerald-500 text-white border border-emerald-400 text-[10px] font-black shrink-0 shadow-sm shadow-emerald-500/20">当前订阅</span>
                                                     </div>
-                                                    <div class="text-[11px] text-slate-500 mt-2 break-all font-mono leading-relaxed">{{ sub.url }}</div>
+                                                    <div class="text-[11px] mt-2 truncate font-mono leading-relaxed" :class="sub.selected ? 'text-sky-700/90 font-bold' : 'text-slate-500'" :title="sub.url">{{ sub.url }}</div>
                                                 </div>
                                                 <div class="flex gap-2 shrink-0">
-                                                    <button @click="selectClashSubscription(sub.id)" :disabled="clashPool.subscriptionActionLoading || sub.selected" class="px-4 py-2 rounded-xl bg-sky-600 text-white text-xs font-black hover:bg-sky-700 active:scale-95 disabled:opacity-60 transition-all">切换</button>
-                                                    <button @click="deleteClashSubscription(sub)" :disabled="clashPool.subscriptionActionLoading" class="px-4 py-2 rounded-xl bg-rose-600 text-white text-xs font-black hover:bg-rose-700 active:scale-95 disabled:opacity-60 transition-all">删除</button>
+                                                    <button @click="selectClashSubscription(sub.id)" :disabled="clashPool.subscriptionActionLoading || sub.selected" class="h-9 px-4 rounded-full bg-sky-600 text-white text-xs font-black hover:bg-sky-700 active:scale-95 disabled:opacity-60 transition-all">切换</button>
+                                                    <button @click="deleteClashSubscription(sub)" :disabled="clashPool.subscriptionActionLoading" class="h-9 px-4 rounded-full bg-rose-600 text-white text-xs font-black hover:bg-rose-700 active:scale-95 disabled:opacity-60 transition-all">删除</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -2888,12 +2890,24 @@
                                             <div class="text-xs font-black uppercase tracking-wider text-slate-500">当前策略组</div>
                                             <div class="text-xl font-black text-slate-800 mt-1">{{ activeClashGroup.name }}</div>
                                             <div v-if="activeClashGroup.current" class="text-sm font-bold text-emerald-700 mt-2">当前节点：{{ activeClashGroup.current }}</div>
-                                            <div class="text-xs text-slate-500 font-medium mt-2">
-                                                {{ Array.isArray(activeClashGroup.healthy_nodes) && activeClashGroup.healthy_nodes.length ? '当前显示的是已测速有效节点池，切换也只会在有效节点里进行。' : '当前还没有有效节点池，先做一次延迟测试后会自动收敛到可用节点。' }}
+                                            <div class="mt-3 flex flex-wrap items-center gap-2">
+                                                <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-black shadow-sm"
+                                                      :class="getClashHealthyCount(activeClashGroup) ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'">
+                                                    <span class="w-1.5 h-1.5 rounded-full" :class="getClashHealthyCount(activeClashGroup) ? 'bg-emerald-500' : 'bg-slate-400'"></span>
+                                                    有效节点池：{{ getClashHealthyCount(activeClashGroup) }} 个
+                                                </span>
+                                                <span v-if="clashPool.delayResults[activeClashGroup.name]?.healthy_nodes" class="inline-flex items-center px-3 py-1.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 text-xs font-black shadow-sm">
+                                                    本次测速已自动保存 {{ clashPool.delayResults[activeClashGroup.name].healthy_nodes.length }} 个
+                                                </span>
                                             </div>
                                         </div>
                                         <div class="flex flex-wrap gap-3">
-                                            <button @click="testClashGroup(activeClashGroup.name)" :disabled="clashPool.delayLoading" class="px-4 py-2.5 rounded-xl bg-amber-600 text-white text-sm font-black hover:bg-amber-700 active:scale-95 disabled:opacity-60 transition-all">延迟测试</button>
+                                            <button @click="testClashGroup(activeClashGroup.name)" :disabled="clashPool.delayLoading" class="px-4 py-2.5 rounded-xl bg-amber-500 text-amber-950 text-sm font-black hover:bg-amber-400 active:scale-95 disabled:opacity-60 transition-all shadow-md shadow-amber-500/20 border border-amber-300">
+                                                {{ clashPool.delayLoading ? '测试中...' : '延迟测试并保存有效节点' }}
+                                            </button>
+                                            <button @click="clearClashHealthyNodes(activeClashGroup.name)" :disabled="clashPool.delayLoading || !getClashHealthyCount(activeClashGroup)" class="px-4 py-2.5 rounded-xl bg-white text-slate-600 text-sm font-black hover:bg-slate-50 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm border border-slate-200">
+                                                清空有效池
+                                            </button>
                                         </div>
                                     </div>
                                     <div class="mt-5 text-xs text-slate-500 font-medium bg-white border border-slate-200 rounded-xl px-4 py-3 inline-flex items-center">

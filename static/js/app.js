@@ -3434,12 +3434,19 @@ createApp({
                     if (this.clashPool.instances.length > 0 && !this.clashPool.isDeploying) {
                         this.clashPool.count = this.clashPool.instances.length;
                     }
-                    if (this.clashPool.subscriptions.length > 0 && !this.clashPool.subUrl) {
-                        const currentSub = this.clashPool.subscriptions.find(item => item.selected) || this.clashPool.subscriptions[0];
-                        this.clashPool.subUrl = currentSub?.url || this.clashPool.subUrl;
+                    const currentSub = this.clashPool.subscriptions.find(item => item.selected) || this.clashPool.subscriptions[0] || null;
+                    this.clashPool.subUrl = currentSub?.url || '';
+                    const activeExists = this.clashPool.groups.some(group => group.name === this.clashPool.activeGroupName);
+                    if (this.clashPool.groups.length > 0) {
+                        if (!activeExists) {
+                            this.primeActiveClashGroup(this.clashPool.groups[0]);
+                        }
+                    } else {
+                        this.clashPool.activeGroupName = '';
                     }
-                    if (!this.clashPool.activeGroupName && this.clashPool.groups.length > 0) {
-                        this.primeActiveClashGroup(this.clashPool.groups[0]);
+                    if (!activeExists) {
+                        this.clashPool.view = 'groups';
+                        this.clashPool.delayResults = {};
                     }
                 }
             } catch (e) {}
@@ -3482,6 +3489,9 @@ createApp({
                 return a.nodeName.localeCompare(b.nodeName, 'zh-CN');
             });
             return rows;
+        },
+        getClashHealthyCount(group) {
+            return Array.isArray(group?.healthy_nodes) ? group.healthy_nodes.filter(Boolean).length : 0;
         },
         async handleClashDeploy() {
             this.showToast('正在调整实例规模...', 'info');
@@ -3625,12 +3635,41 @@ createApp({
                 const data = await res.json();
                 if (data.status === 'success') {
                     this.clashPool.delayResults[groupName] = data.data;
+                    const group = this.clashPool.groups.find(item => item.name === groupName);
+                    if (group && Array.isArray(data.data?.healthy_nodes)) {
+                        group.healthy_nodes = data.data.healthy_nodes;
+                    }
                     this.showToast(data.message || '延迟测试完成', 'success');
                 } else {
                     this.showToast(data.message || '延迟测试失败', 'error');
                 }
             } catch (e) {
                 this.showToast('延迟测试请求失败', 'error');
+            } finally {
+                this.clashPool.delayLoading = false;
+            }
+        },
+        async clearClashHealthyNodes(groupName) {
+            if (!groupName) return;
+            const confirmed = await this.customConfirm(`确定清空策略组 [${groupName}] 的有效节点池吗？清空后会重新显示全部节点。`);
+            if (!confirmed) return;
+            this.clashPool.delayLoading = true;
+            try {
+                const res = await this.authFetch('/api/clash/tested_nodes/clear', {
+                    method: 'POST',
+                    body: JSON.stringify({ group_name: groupName })
+                });
+                const data = await res.json();
+                this.showToast(data.message || '有效节点池已清空', data.status);
+                if (data.status === 'success') {
+                    const group = this.clashPool.groups.find(item => item.name === groupName);
+                    if (group) group.healthy_nodes = [];
+                    if (this.clashPool.delayResults[groupName]) {
+                        this.clashPool.delayResults[groupName].healthy_nodes = [];
+                    }
+                }
+            } catch (e) {
+                this.showToast('清空有效节点池失败', 'error');
             } finally {
                 this.clashPool.delayLoading = false;
             }

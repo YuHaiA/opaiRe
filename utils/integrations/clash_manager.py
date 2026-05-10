@@ -182,6 +182,23 @@ def _persist_tested_nodes(group_name: str, healthy_nodes: list[str]) -> None:
     cfg.reload_all_configs(new_config_dict=config_data)
 
 
+def clear_tested_nodes(group_name: str) -> tuple[bool, str]:
+    try:
+        config_data = _read_runtime_config()
+        clash_conf = config_data.get("clash_proxy_pool", {})
+        if not isinstance(clash_conf, dict):
+            clash_conf = {}
+        tested_map = clash_conf.get("tested_nodes", {})
+        if isinstance(tested_map, dict):
+            tested_map.pop(str(group_name), None)
+        clash_conf["tested_nodes"] = tested_map if isinstance(tested_map, dict) else {}
+        config_data["clash_proxy_pool"] = clash_conf
+        cfg.reload_all_configs(new_config_dict=config_data)
+        return True, f"已清空策略组 [{group_name}] 的有效节点池。"
+    except Exception as e:
+        return False, str(e)
+
+
 def _build_requests_proxies() -> dict | None:
     proxy_url = str(getattr(cfg, "DEFAULT_PROXY", "") or "").strip()
     if not proxy_url:
