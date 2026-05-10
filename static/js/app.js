@@ -374,6 +374,13 @@ createApp({
             memoryPrediction: null,
             isLoadingMemoryPrediction: false,
             memoryPredictionError: '',
+            cleanupMaintenance: {
+                loading: false,
+                actionLoading: false,
+                data: null,
+                error: '',
+                outputTail: []
+            },
             inventoryStats: {
                 local: { total: 0, active: 0, disabled: 0 },
                 cloud: { total: 0, cpa: 0, sub2api: 0, enabled: 0 }
@@ -407,6 +414,14 @@ createApp({
             toastId: 0,
             confirmModal: { show: false, message: '', resolve: null },
             updateInfo: { hasUpdate: false, version: '', url: '', changelog: '' },
+            gitSync: {
+                loading: false,
+                actionLoading: false,
+                data: null,
+                error: '',
+                lastAction: '',
+                outputTail: []
+            },
             sub2apiGroups: [],
             gmailOAuth: {
                 authUrl: '',
@@ -771,6 +786,24 @@ createApp({
             return classes[level] || classes.unknown;
         },
 
+        memoryRecommendationClass(level) {
+            const classes = {
+                ok: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+                watch: 'bg-sky-50 text-sky-700 border-sky-200',
+                warning: 'bg-amber-50 text-amber-700 border-amber-200',
+                critical: 'bg-rose-50 text-rose-700 border-rose-200',
+                unknown: 'bg-slate-50 text-slate-600 border-slate-200'
+            };
+            return classes[level] || classes.unknown;
+        },
+
+        gitSyncStateClass(data) {
+            if (!data) return 'bg-slate-50 text-slate-600 border-slate-200';
+            if (!data.is_clean) return 'bg-amber-50 text-amber-700 border-amber-200';
+            if ((data.behind || 0) > 0) return 'bg-sky-50 text-sky-700 border-sky-200';
+            return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+        },
+
         async fetchMemoryPrediction() {
             if (!this.isLoggedIn) return;
             this.isLoadingMemoryPrediction = true;
@@ -787,6 +820,152 @@ createApp({
                 this.memoryPredictionError = '内存预测 API 请求失败';
             } finally {
                 this.isLoadingMemoryPrediction = false;
+            }
+        },
+
+        async applyMemoryRecommendation() {
+            const suggested = this.memoryPrediction?.recommendation?.suggested_config;
+            if (!suggested || !this.config) {
+                this.showToast('当前没有可套用的建议配置', 'warning');
+                return;
+            }
+
+            this.config.enable_multi_thread_reg = !!suggested.enable_multi_thread_reg;
+            this.config.reg_threads = suggested.reg_threads ?? this.config.reg_threads;
+            if (!this.config.cpa_mode || typeof this.config.cpa_mode !== 'object') {
+                this.config.cpa_mode = {};
+            }
+            if (!this.config.sub2api_mode || typeof this.config.sub2api_mode !== 'object') {
+                this.config.sub2api_mode = {};
+            }
+            this.config.cpa_mode.threads = suggested.cpa_threads ?? this.config.cpa_mode.threads;
+            this.config.sub2api_mode.threads = suggested.sub2api_threads ?? this.config.sub2api_mode.threads;
+            this.config.max_log_lines = suggested.max_log_lines ?? this.config.max_log_lines;
+
+            this.showToast('已回填建议值，正在保存配置...', 'info');
+            await this.saveConfig();
+        },
+
+        async applyMemoryRecommendationAndRestart() {
+            const suggested = this.memoryPrediction?.recommendation?.suggested_config;
+            if (!suggested || !this.config) {
+                this.showToast('当前没有可套用的建议配置', 'warning');
+                return;
+            }
+            const confirmed = await this.customConfirm('确定要套用建议配置并立即重启项目吗？\n这适合服务器已经明显吃紧、需要尽快释放压力的场景。');
+            if (!confirmed) return;
+            await this.applyMemoryRecommendation();
+            await this.restartSystem();
+        },
+
+        async fetchCleanupStatus(showToast = false) {
+            if (!this.isLoggedIn) return;
+            this.cleanupMaintenance.loading = true;
+            this.cleanupMaintenance.error = '';
+            try {
+                const res = await this.authFetch('/api/system/cleanup_status');
+                const payload = await res.json();
+                if (payload.status === 'success' || payload.status === 'warning') {
+                    this.cleanupMaintenance.data = payload.data || null;
+                    if (payload.status === 'warning') {
+                        this.cleanupMaintenance.error = payload.message || '';
+                    } else if (showToast) {
+                        this.showToast(payload.message || '清理状态已刷新', 'success');
+                    }
+                } else {
+                    this.cleanupMaintenance.error = payload.message || '清理状态获取失败';
+                }
+            } catch (e) {
+                this.cleanupMaintenance.error = '清理状态请求失败';
+            } finally {
+                this.cleanupMaintenance.loading = false;
+            }
+        },
+
+        async runCleanup(force = false) {
+            const confirmed = await this.customConfirm(force ? '确定要强制执行磁盘 / 日志清理吗？\n即使磁盘占用还没到阈值，也会立刻清理日志、缓存和临时文件。' : '确定要执行磁盘 / 日志清理吗？');
+            if (!confirmed) return;
+            this.cleanupMaintenance.actionLoading = true;
+            this.cleanupMaintenance.error = '';
+            try {
+                const res = await this.authFetch('/api/system/run_cleanup', {
+                    method: 'POST',
+                    body: JSON.stringify({ force })
+                });
+                const payload = await res.json();
+                this.cleanupMaintenance.outputTail = payload?.data?.output_tail || [];
+                this.cleanupMaintenance.data = payload?.data?.status || this.cleanupMaintenance.data;
+                if (payload.status === 'success') {
+                    this.showToast(payload.message || '清理完成', 'success');
+                } else {
+                    this.cleanupMaintenance.error = payload.message || '清理失败';
+                    this.showToast(this.cleanupMaintenance.error, 'error');
+                }
+            } catch (e) {
+                this.cleanupMaintenance.error = '清理请求失败';
+                this.showToast(this.cleanupMaintenance.error, 'error');
+            } finally {
+                this.cleanupMaintenance.actionLoading = false;
+                await this.fetchCleanupStatus(false);
+            }
+        },
+
+        async fetchGitSyncStatus(showToast = false) {
+            if (!this.isLoggedIn) return;
+            this.gitSync.loading = true;
+            this.gitSync.error = '';
+            try {
+                const res = await this.authFetch('/api/system/git_status');
+                const payload = await res.json();
+                if (payload.status === 'success' || payload.status === 'warning') {
+                    this.gitSync.data = payload.data || null;
+                    this.gitSync.outputTail = [];
+                    if (payload.status === 'warning') {
+                        this.gitSync.error = payload.message || 'Git 状态读取失败';
+                    } else if (showToast) {
+                        this.showToast(payload.message || 'Git 状态已刷新', 'success');
+                    }
+                } else {
+                    this.gitSync.error = payload.message || 'Git 状态读取失败';
+                }
+            } catch (e) {
+                this.gitSync.error = 'Git 状态请求失败';
+            } finally {
+                this.gitSync.loading = false;
+            }
+        },
+
+        async runGitSyncAction(action) {
+            const isReset = action === 'reset_hard';
+            const confirmText = isReset
+                ? '⚠️ 危险操作：\n\n确定要强制覆盖本地代码并同步到远端跟踪分支吗？\n这会直接丢弃当前未提交改动。'
+                : '确定要抓取远端最新 Git 状态吗？';
+            const confirmed = await this.customConfirm(confirmText);
+            if (!confirmed) return;
+
+            this.gitSync.actionLoading = true;
+            this.gitSync.lastAction = action;
+            try {
+                const res = await this.authFetch('/api/system/git_update', {
+                    method: 'POST',
+                    body: JSON.stringify({ action, restart_after: false })
+                });
+                const payload = await res.json();
+                this.gitSync.outputTail = payload?.data?.output_tail || [];
+                if (payload.status === 'success') {
+                    this.gitSync.data = payload?.data?.after || this.gitSync.data;
+                    this.showToast(payload.message || 'Git 操作完成', 'success');
+                } else {
+                    this.gitSync.data = payload?.data?.after || this.gitSync.data;
+                    this.gitSync.error = payload.message || 'Git 操作失败';
+                    this.showToast(this.gitSync.error, payload.status === 'warning' ? 'warning' : 'error');
+                }
+            } catch (e) {
+                this.gitSync.error = 'Git 操作请求失败';
+                this.showToast(this.gitSync.error, 'error');
+            } finally {
+                this.gitSync.actionLoading = false;
+                await this.fetchGitSyncStatus(false);
             }
         },
 
@@ -845,6 +1024,8 @@ createApp({
             }
             if (this.currentTab === 'concurrency') {
                 this.fetchMemoryPrediction();
+                this.fetchGitSyncStatus(false);
+                this.fetchCleanupStatus(false);
             }
         },
         startStatsPolling() {
@@ -1372,6 +1553,8 @@ createApp({
             }
             if (tabId === 'concurrency') {
                 this.fetchMemoryPrediction();
+                this.fetchGitSyncStatus(false);
+                this.fetchCleanupStatus(false);
             }
             if (tabId === 'team_accounts') {
                 this.fetchTeamAccounts();

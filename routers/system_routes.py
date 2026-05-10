@@ -23,6 +23,7 @@ from utils.email_providers import mail_service
 from utils.config import reload_all_configs
 from utils.integrations.tg_notifier import send_tg_msg_async
 from utils.memory_predictor import build_memory_report
+from utils.system_maintenance import get_cleanup_status
 import utils.config as cfg
 
 router = APIRouter()
@@ -41,6 +42,9 @@ class ClusterControlReq(BaseModel): node_name: str; action: str
 class GitSyncReq(BaseModel):
     action: str
     restart_after: bool = False
+
+class CleanupRunReq(BaseModel):
+    force: bool = False
 
 class ExtResultReq(BaseModel):
     status: str
@@ -167,6 +171,28 @@ def _schedule_restart_after_delay(delay_sec: float = 1.5) -> None:
             os._exit(1)
 
     threading.Thread(target=_do_restart, daemon=True).start()
+
+
+def _run_cleanup_script(force: bool = False) -> dict:
+    status = get_cleanup_status(BASE_DIR)
+    if not status.get("can_run"):
+        return {
+            "ok": False,
+            "status": status,
+            "output_tail": [],
+            "error": "当前环境不支持执行磁盘清理脚本，通常仅 Linux 服务器可用。",
+        }
+
+    command = ["bash", status["script_path"]]
+    if force:
+        command.append("--force")
+    result = _run_local_command(command, timeout=240)
+    return {
+        "ok": result.get("ok", False),
+        "status": get_cleanup_status(BASE_DIR),
+        "output_tail": _tail_lines(result.get("output", ""), limit=20),
+        "error": result.get("error", ""),
+    }
 
 
 def _sanitize_local_microsoft_config(local_ms: Any) -> dict:
@@ -343,6 +369,32 @@ async def get_stats(token: str = Depends(verify_token)):
 @router.get("/api/system/memory_prediction")
 async def get_memory_prediction(token: str = Depends(verify_token)):
     return build_memory_report(getattr(core_engine.cfg, '_c', {}))
+
+
+@router.get("/api/system/cleanup_status")
+async def get_system_cleanup_status(token: str = Depends(verify_token)):
+    data = get_cleanup_status(BASE_DIR)
+    return {
+        "status": "success" if data.get("can_run") else "warning",
+        "message": "清理状态已读取。" if data.get("can_run") else "当前环境仅提供状态展示，无法直接执行清理脚本。",
+        "data": data,
+    }
+
+
+@router.post("/api/system/run_cleanup")
+async def run_system_cleanup(req: CleanupRunReq, token: str = Depends(verify_token)):
+    result = _run_cleanup_script(force=bool(req.force))
+    if not result.get("ok"):
+        return {
+            "status": "error",
+            "message": result.get("error") or "磁盘清理执行失败。",
+            "data": {"status": result.get("status"), "output_tail": result.get("output_tail", [])},
+        }
+    return {
+        "status": "success",
+        "message": "磁盘 / 日志清理已执行完成。",
+        "data": {"status": result.get("status"), "output_tail": result.get("output_tail", [])},
+    }
 
 
 @router.post("/api/start_check")
