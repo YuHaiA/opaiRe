@@ -7,10 +7,10 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Wenfxl 注册管理系统</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=20260510-12">
-    <script src="/static/js/tailwind.min.js?v=20260510-12"></script>
-    <script src="/static/js/vue.global.js?v=20260510-12"></script>
-    <script src="/static/js/jszip.min.js?v=20260510-12"></script>
+    <link rel="stylesheet" href="/static/css/style.css?v=20260510-13">
+    <script src="/static/js/tailwind.min.js?v=20260510-13"></script>
+    <script src="/static/js/vue.global.js?v=20260510-13"></script>
+    <script src="/static/js/jszip.min.js?v=20260510-13"></script>
     <style>
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -1319,23 +1319,19 @@
 
                                     <div v-if="config.enable_mail_domain_runtime_control" class="border-t border-amber-100/60 pt-5 mt-2 space-y-5">
                                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <div>
-                                                <div class="flex items-stretch rounded-lg shadow-sm overflow-hidden">
-                                                    <div class="flex items-center px-3 bg-slate-100 border border-r-0 border-slate-200 text-slate-500 font-mono text-sm font-black">冷却阈值</div>
-                                                    <input type="number" min="0" v-model.number="config.mail_domain_fail_threshold"
-                                                           class="flex-1 appearance-none bg-white border border-slate-200 text-slate-700 rounded-r-lg py-2.5 px-3 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-colors shadow-sm"
-                                                           placeholder="例如 3">
-                                                </div>
-                                                <p class="text-[11px] text-slate-400 mt-2 font-medium">同一主域异常达到该次数后暂停使用，0 表示关闭。</p>
+                                            <div class="bg-white border border-amber-100 rounded-2xl p-4 shadow-sm">
+                                                <label class="block text-[11px] font-black text-amber-700 uppercase tracking-widest mb-3">冷却阈值</label>
+                                                <input type="number" min="0" v-model.number="config.mail_domain_fail_threshold"
+                                                       class="w-full appearance-none bg-amber-50/60 border border-amber-200 text-amber-900 font-black rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-colors shadow-inner text-center text-lg"
+                                                       placeholder="例如 3">
+                                                <p class="text-[11px] text-slate-400 mt-3 font-medium leading-relaxed">同一主域异常达到该次数后暂停使用，`0` 表示关闭。</p>
                                             </div>
-                                            <div>
-                                                <div class="flex items-stretch rounded-lg shadow-sm overflow-hidden">
-                                                    <div class="flex items-center px-3 bg-slate-100 border border-r-0 border-slate-200 text-slate-500 font-mono text-sm font-black">冷却秒数</div>
-                                                    <input type="number" min="0" v-model.number="config.mail_domain_fail_cooldown_sec"
-                                                           class="flex-1 appearance-none bg-white border border-slate-200 text-slate-700 rounded-r-lg py-2.5 px-3 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-colors shadow-sm"
-                                                           placeholder="例如 600">
-                                                </div>
-                                                <p class="text-[11px] text-slate-400 mt-2 font-medium">触发阈值后，该主域暂停使用的时长。</p>
+                                            <div class="bg-white border border-amber-100 rounded-2xl p-4 shadow-sm">
+                                                <label class="block text-[11px] font-black text-amber-700 uppercase tracking-widest mb-3">冷却秒数</label>
+                                                <input type="number" min="0" v-model.number="config.mail_domain_fail_cooldown_sec"
+                                                       class="w-full appearance-none bg-amber-50/60 border border-amber-200 text-amber-900 font-black rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-colors shadow-inner text-center text-lg"
+                                                       placeholder="例如 600">
+                                                <p class="text-[11px] text-slate-400 mt-3 font-medium leading-relaxed">触发阈值后，这主域暂停使用的时长。</p>
                                             </div>
                                         </div>
 
@@ -4896,6 +4892,6 @@
             } catch (e) {}
         })();
     </script>
-    <script src="/static/js/app.js?v=20260510-12"></script>
+    <script src="/static/js/app.js?v=20260510-13"></script>
 </body>
 </html>
