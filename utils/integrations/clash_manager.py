@@ -610,6 +610,25 @@ def _write_single_core_config(raw_yaml: dict) -> dict:
     return patched
 
 
+def sync_single_core_runtime_from_saved_config() -> tuple[bool, str]:
+    mode = _detect_runtime_mode(get_client())
+    if mode != "linux_single_core":
+        return True, "当前不是 Linux 单核心模式，无需同步 Clash 运行端口。"
+    if not os.path.exists(MANUAL_CONFIG_PATH):
+        return True, "当前未发现 manual-config.yaml，跳过单核心端口同步。"
+
+    try:
+        with open(MANUAL_CONFIG_PATH, "r", encoding="utf-8") as f:
+            raw_yaml = yaml.safe_load(f) or {}
+        if not isinstance(raw_yaml, dict):
+            return False, "manual-config.yaml 不是有效的 YAML 字典，无法同步端口。"
+        _write_single_core_config(raw_yaml)
+        ok, msg = _start_single_core()
+        return ok, ("已按最新面板配置重建 Linux 单核心 Mihomo 运行端口。 " + msg) if ok else msg
+    except Exception as e:
+        return False, str(e)
+
+
 def _start_single_core() -> tuple[bool, str]:
     mihomo_bin = shutil.which("mihomo")
     if not mihomo_bin:

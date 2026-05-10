@@ -493,6 +493,7 @@ async def clear_mail_domain_runtime_domain_cooldown(req: DomainRuntimeActionReq,
 @router.post("/api/config")
 async def save_config(new_config: dict, token: str = Depends(verify_token)):
     try:
+        current_config = getattr(core_engine.cfg, '_c', {}).copy()
         if isinstance(new_config.get("sub2api_mode"), dict):
             new_config["sub2api_mode"].pop("min_remaining_weekly_percent", None)
         new_config["local_microsoft"] = _sanitize_local_microsoft_config(new_config.get("local_microsoft"))
@@ -507,8 +508,25 @@ async def save_config(new_config: dict, token: str = Depends(verify_token)):
         )) or ["discarded_email"]
         reload_all_configs(new_config_dict=new_config)
         mail_service.sync_mail_domain_runtime_state_with_config()
+        extra_messages = []
+        old_default_proxy = str(current_config.get("default_proxy") or "").strip()
+        new_default_proxy = str(new_config.get("default_proxy") or "").strip()
+        old_clash_conf = current_config.get("clash_proxy_pool", {}) if isinstance(current_config.get("clash_proxy_pool"), dict) else {}
+        new_clash_conf = new_config.get("clash_proxy_pool", {}) if isinstance(new_config.get("clash_proxy_pool"), dict) else {}
+        clash_runtime_related_changed = any([
+            old_default_proxy != new_default_proxy,
+            str(old_clash_conf.get("api_url") or "").strip() != str(new_clash_conf.get("api_url") or "").strip(),
+            str(old_clash_conf.get("secret") or "").strip() != str(new_clash_conf.get("secret") or "").strip(),
+        ])
+        if clash_runtime_related_changed:
+            ok, msg = clash_manager.sync_single_core_runtime_from_saved_config()
+            if msg:
+                extra_messages.append(msg if ok else f"Clash 运行配置同步失败: {msg}")
 
-        return {"status": "success", "message": "✅ 配置已成功保存并同步至云端！"}
+        final_message = "✅ 配置已成功保存并同步至云端！"
+        if extra_messages:
+            final_message += " " + " ".join(extra_messages)
+        return {"status": "success", "message": final_message}
     except Exception as e:
         return {"status": "error", "message": f"❌ 保存失败: {str(e)}"}
 
