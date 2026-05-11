@@ -75,6 +75,8 @@ def _normalize_subscriptions(raw_items, selected_url: str = "") -> list[dict]:
             item_id = str(item.get("id") or uuid4().hex[:8]).strip()
         else:
             continue
+        if name == "当前订阅":
+            continue
         if not url or url in seen:
             continue
         seen.add(url)
@@ -105,20 +107,21 @@ def get_subscription_state() -> dict:
     subscriptions = _normalize_subscriptions(clash_conf.get("sub_urls", []), selected_url)
     selected_id = ""
     matched = False
-    if selected_subscription_id:
-        for item in subscriptions:
-            if item["id"] == selected_subscription_id:
-                item["selected"] = True
-                selected_id = item["id"]
-                matched = True
-            else:
-                item["selected"] = False
-    if not matched:
+    if selected_url:
         for item in subscriptions:
             item["selected"] = item["url"] == selected_url
             if item["selected"]:
                 selected_id = item["id"]
                 matched = True
+    if not matched and selected_subscription_id:
+        for item in subscriptions:
+            item["selected"] = item["id"] == selected_subscription_id
+            if item["selected"]:
+                selected_id = item["id"]
+                matched = True
+    if not matched:
+        for item in subscriptions:
+            item["selected"] = False
     return {
         "selected_id": selected_id,
         "selected_url": selected_url,
