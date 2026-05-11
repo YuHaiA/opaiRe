@@ -319,6 +319,7 @@ createApp({
             isRunning: false,
             isLoadingConfig: false,
             configLoadError: '',
+            mobileNavOpen: false,
             tabs: [
                     { id: 'console', name: '运行主页', icon: '<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>' },
                     { id: 'cluster', name: '集群总控', icon: '<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>' },
@@ -619,6 +620,9 @@ createApp({
     beforeUnmount() {
         if(this.statsTimer) clearInterval(this.statsTimer);
         if (this.languageObserver) this.languageObserver.disconnect();
+        if (typeof document !== 'undefined') {
+            document.body.classList.remove('overflow-hidden');
+        }
     },
 	computed: {
         totalPages() {
@@ -745,6 +749,16 @@ createApp({
             const base = window.location.origin.replace(/\/+$/, '');
             if (text.startsWith('/')) return `${base}${text}`;
             return `${base}/${text.replace(/^\.?\//, '')}`;
+        },
+        isMobileViewport() {
+            return typeof window !== 'undefined' && window.innerWidth < 768;
+        },
+        toggleMobileNav(forceState = null) {
+            const nextState = typeof forceState === 'boolean' ? forceState : !this.mobileNavOpen;
+            this.mobileNavOpen = nextState;
+            if (typeof document !== 'undefined') {
+                document.body.classList.toggle('overflow-hidden', nextState && this.isMobileViewport());
+            }
         },
         formatClashSubscriptionLabel(subscription) {
             if (!subscription) return '未命名订阅';
@@ -1145,6 +1159,10 @@ createApp({
         logout() {
             localStorage.removeItem('auth_token');
             this.isLoggedIn = false;
+            this.mobileNavOpen = false;
+            if (typeof document !== 'undefined') {
+                document.body.classList.remove('overflow-hidden');
+            }
             this.loginPassword = '';
 			this.logs = [];
             Object.keys(this.showPwd).forEach(k => this.showPwd[k] = false);
@@ -1867,6 +1885,9 @@ createApp({
         switchTab(tabId) {
             if (!this.isLoggedIn) return;
             this.currentTab = tabId;
+            if (this.isMobileViewport()) {
+                this.toggleMobileNav(false);
+            }
             window.location.hash = tabId;
 			if (tabId === 'console') {
 				this.queuePollStats();

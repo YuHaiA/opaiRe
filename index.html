@@ -7,10 +7,10 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Wenfxl 注册管理系统</title>
-    <link rel="stylesheet" href="/static/css/style.css?v=20260510-13">
-    <script src="/static/js/tailwind.min.js?v=20260510-13"></script>
-    <script src="/static/js/vue.global.js?v=20260510-13"></script>
-    <script src="/static/js/jszip.min.js?v=20260510-13"></script>
+    <link rel="stylesheet" href="/static/css/style.css?v=20260511-8">
+    <script src="/static/js/tailwind.min.js?v=20260511-8"></script>
+    <script src="/static/js/vue.global.js?v=20260511-8"></script>
+    <script src="/static/js/jszip.min.js?v=20260511-8"></script>
     <style>
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -311,6 +311,208 @@
                 max-width: 140px;
             }
         }
+        @media (max-width: 767px) {
+            .console-topbar {
+                align-items: flex-start;
+                gap: 12px;
+            }
+            .console-topbar-primary {
+                width: 100%;
+                padding-right: 0;
+                gap: 10px;
+                flex-wrap: nowrap;
+                min-width: 0;
+            }
+            .console-mode-chip {
+                flex: 1 1 auto;
+                max-width: none;
+                min-width: 0;
+                padding: 8px 12px;
+                font-size: 11px;
+                line-height: 1.25;
+            }
+            .console-progress-wrap {
+                flex: 0 0 112px;
+                width: 112px;
+                max-width: 112px;
+                min-width: 0;
+                margin-left: 0;
+                gap: 8px;
+                padding-left: 0;
+            }
+            .console-topbar-actions {
+                width: 100%;
+                gap: 10px;
+                justify-content: flex-start;
+                align-items: flex-start;
+            }
+            .console-mode-switch {
+                width: 88px;
+                flex: 0 0 88px;
+            }
+            .console-mode-switch .flex {
+                width: auto;
+            }
+            .console-mode-switch-inner {
+                width: 100%;
+            }
+            .console-topbar-actions > .console-topbar-actions {
+                display: flex;
+                flex-wrap: wrap;
+                width: auto;
+                gap: 8px;
+            }
+            .console-toolbar-btn,
+            .console-status-pill,
+            .console-run-btn {
+                width: auto;
+                min-width: 72px;
+                min-height: 40px;
+                justify-content: center;
+                padding: 9px 12px;
+                border-radius: 16px;
+            }
+            .console-meta-strip {
+                gap: 6px 8px;
+                font-size: 10px;
+            }
+            .inventory-shell {
+                border-radius: 20px;
+            }
+            .inventory-toolbar {
+                padding: 14px;
+            }
+            .inventory-toolbar > div {
+                width: 100%;
+            }
+            .inventory-toolbar .ml-auto {
+                margin-left: 0 !important;
+            }
+            .inventory-toolbar .border-l {
+                border-left: 0 !important;
+                padding-left: 0 !important;
+            }
+            .inventory-toolbar .w-32,
+            .inventory-toolbar .w-48,
+            .inventory-toolbar .md\:w-48 {
+                width: 100% !important;
+            }
+            .inventory-toolbar .flex-wrap {
+                gap: 8px;
+            }
+            .inventory-toolbar .text-xl,
+            .inventory-toolbar .md\:text-2xl {
+                font-size: 1.2rem;
+                line-height: 1.2;
+            }
+            .inventory-toolbar.inventory-stats {
+                padding: 14px;
+            }
+            .inventory-toolbar.inventory-stats .grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 10px;
+            }
+            .inventory-mini-card,
+            .cloud-stat-card {
+                min-height: 72px;
+                padding: 10px 12px;
+            }
+            .inventory-table-wrap {
+                overflow-x: auto;
+            }
+            .inventory-table-wrap table {
+                min-width: 760px;
+            }
+            .inventory-table-wrap thead th {
+                white-space: nowrap;
+                font-size: 10px;
+                line-height: 1.25;
+                padding: 12px 10px;
+            }
+            .inventory-table-wrap tbody td {
+                white-space: nowrap;
+                padding: 12px 10px;
+            }
+            .inventory-footer {
+                padding: 12px 14px;
+                align-items: flex-start;
+                gap: 10px;
+            }
+            .inventory-footer > div {
+                width: 100%;
+            }
+            .inventory-footer .justify-between,
+            .inventory-footer .justify-end {
+                justify-content: flex-start !important;
+            }
+            .inventory-footer .mr-1,
+            .inventory-footer .ml-2 {
+                margin-right: 0 !important;
+                margin-left: 0 !important;
+            }
+            .inventory-footer .h-\[38px\] {
+                height: 36px;
+            }
+            .cloud-toolbar-shell {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 10px;
+            }
+            .cloud-toolbar-side,
+            .cloud-toolbar-side--right {
+                width: 100%;
+                justify-content: flex-start;
+                flex-wrap: wrap;
+            }
+            .cloud-toolbar-title {
+                width: 100%;
+            }
+            .cloud-filter-strip {
+                width: 100%;
+                overflow-x: auto;
+                padding: 4px;
+            }
+            .cloud-search-wrap {
+                width: 100%;
+                min-width: 0;
+                max-width: none;
+            }
+            .cloud-progress-inline {
+                width: 100%;
+                min-width: 0;
+                max-width: none;
+            }
+            .cloud-progress-copy {
+                min-width: 0;
+                flex: 0 0 92px;
+            }
+            .inventory-panel.mobile-table-priority {
+                min-height: calc(100vh - 78px);
+                height: calc(100vh - 78px);
+            }
+            .inventory-panel.mobile-table-priority .inventory-toolbar {
+                padding: 12px;
+            }
+            .inventory-panel.mobile-table-priority .inventory-toolbar.inventory-stats {
+                padding: 12px;
+            }
+            .inventory-panel.mobile-table-priority .inventory-toolbar.inventory-stats .grid {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 8px;
+            }
+            .inventory-panel.mobile-table-priority .inventory-mini-card,
+            .inventory-panel.mobile-table-priority .cloud-stat-card {
+                min-height: 58px;
+                padding: 8px 10px;
+            }
+            .inventory-panel.mobile-table-priority .inventory-scroll-region {
+                min-height: 0;
+                height: min(500px, calc(100vh - 420px));
+            }
+            .inventory-panel.mobile-table-priority .inventory-footer {
+                padding: 10px 12px;
+            }
+        }
         @media (min-width: 768px) {
             .inventory-panel {
                 height: calc(100vh - 188px);
@@ -326,6 +528,19 @@
                 min-width: 160px;
                 max-width: 260px;
             }
+        }
+        .mobile-nav-mask {
+            background: rgba(15, 23, 42, 0.42);
+            backdrop-filter: blur(8px);
+        }
+        .mobile-nav-drawer {
+            width: min(82vw, 320px);
+            transform: translateX(-100%);
+            transition: transform 240ms ease, box-shadow 240ms ease;
+        }
+        .mobile-nav-drawer.is-open {
+            transform: translateX(0);
+            box-shadow: 0 18px 50px rgba(15, 23, 42, 0.22);
         }
         ::-webkit-scrollbar {
             width: 6px;
@@ -523,10 +738,14 @@
         </div>
 
         <div v-else class="flex flex-col md:flex-row flex-1 overflow-hidden bg-slate-50">
+            <div v-if="mobileNavOpen" @click="toggleMobileNav(false)" class="md:hidden fixed inset-0 z-30 mobile-nav-mask"></div>
             <!-- Mac Glass 左侧边栏重构 -->
-            <aside class="w-full md:w-64 h-auto md:h-full bg-slate-100/70 backdrop-blur-3xl text-slate-600 flex flex-col shadow-[inset_-1px_0_0_rgba(0,0,0,0.06)] z-20 shrink-0 border-r border-slate-200/50">
+            <aside :class="mobileNavOpen ? 'is-open' : ''" class="mobile-nav-drawer fixed inset-y-0 left-0 z-40 md:static md:inset-auto md:translate-x-0 md:shadow-[inset_-1px_0_0_rgba(0,0,0,0.06)] w-64 h-full md:h-full bg-slate-100/92 md:bg-slate-100/70 backdrop-blur-3xl text-slate-600 flex flex-col shrink-0 border-r border-slate-200/50">
                 <div class="p-4 md:p-6 flex items-center justify-between md:justify-center border-b border-slate-200/60 shrink-0 bg-transparent">
                     <span class="font-black text-base md:text-xl tracking-tight text-slate-800 drop-shadow-sm">Wenfxl <span class="text-indigo-500">Manager</span></span>
+                    <button @click="toggleMobileNav(false)" class="md:hidden inline-flex items-center justify-center w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-500 shadow-sm hover:text-slate-700 hover:bg-slate-50 active:scale-95 transition-all">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
                     <button v-if="updateInfo.hasUpdate" @click="promptUpdate" class="relative group flex items-center justify-center focus:outline-none shrink-0 cursor-pointer" title="发现新版本，点击查看！">
                         <div class="absolute inset-0 bg-gradient-to-r from-rose-500 to-orange-500 blur-md opacity-50 group-hover:opacity-100 transition-opacity animate-pulse rounded-full"></div>
                         <span class="relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-rose-500 via-red-500 to-orange-500 border border-white/30 text-white font-black leading-none shadow-[0_4px_10px_rgba(244,63,94,0.4)] transform group-hover:scale-105 transition-all duration-300">
@@ -543,21 +762,21 @@
                         {{ appVersion }}
                     </span>
                 </div>
-                <nav class="flex flex-row md:flex-col overflow-x-auto md:overflow-y-auto px-3 py-3 md:px-4 md:py-6 gap-2 md:gap-1.5 md:space-y-1 hide-scrollbar flex-1 min-h-0">
+                <nav class="flex flex-col overflow-y-auto px-3 py-3 md:px-4 md:py-6 gap-2 md:gap-1.5 md:space-y-1 hide-scrollbar flex-1 min-h-0">
                     <button v-for="tab in tabs" :key="tab.id" @click="switchTab(tab.id)"
-                            :class="['whitespace-nowrap shrink-0 md:w-full flex items-center gap-2.5 md:gap-3 px-4 py-2.5 md:py-3.5 text-xs md:text-sm font-bold rounded-xl transition-all duration-300',
+                            :class="['whitespace-nowrap shrink-0 w-full flex items-center gap-2.5 md:gap-3 px-4 py-3 md:py-3.5 text-sm font-bold rounded-xl transition-all duration-300',
                                      currentTab === tab.id ? 'bg-white text-indigo-600 shadow-[0_2px_10px_rgba(0,0,0,0.04)] border border-slate-200/60' : 'text-slate-500 hover:bg-slate-200/60 hover:text-slate-800 border border-transparent']">
                         <span class="text-base" :class="currentTab === tab.id ? 'scale-110 transition-transform drop-shadow-sm' : ''" v-html="tab.icon"></span>
                         {{ t(tab.name) }}
                     </button>
-                    <div class="flex md:hidden items-center gap-2 pl-2 ml-1 border-l border-slate-200/60 shrink-0">
-                        <button @click="restartSystem" class="whitespace-nowrap px-4 py-2.5 text-xs font-bold text-amber-600 bg-amber-50/50 rounded-xl border border-amber-200/60 shadow-sm active:scale-95 transition-all">
+                    <div class="flex flex-col md:hidden gap-2 mt-3 pt-3 border-t border-slate-200/70 shrink-0">
+                        <button @click="restartSystem" class="w-full px-4 py-2.5 text-xs font-bold text-amber-600 bg-amber-50/50 rounded-xl border border-amber-200/60 shadow-sm active:scale-95 transition-all">
                             <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg> 重启项目
                         </button>
-                        <button @click="checkUpdate(true)" class="whitespace-nowrap px-4 py-2.5 text-xs font-bold text-blue-600 bg-blue-50/50 rounded-xl border border-blue-200/60 shadow-sm active:scale-95 transition-all">
+                        <button @click="checkUpdate(true)" class="w-full px-4 py-2.5 text-xs font-bold text-blue-600 bg-blue-50/50 rounded-xl border border-blue-200/60 shadow-sm active:scale-95 transition-all">
                             <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> 检查更新
                         </button>
-                        <button @click="logout" class="whitespace-nowrap px-4 py-2.5 text-xs font-bold text-slate-500 bg-slate-50 rounded-xl border border-slate-200/60 shadow-sm active:scale-95 transition-all hover:text-rose-500">
+                        <button @click="logout" class="w-full px-4 py-2.5 text-xs font-bold text-slate-500 bg-slate-50 rounded-xl border border-slate-200/60 shadow-sm active:scale-95 transition-all hover:text-rose-500">
                             <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg> 退出登录
                         </button>
                     </div>
@@ -579,6 +798,9 @@
                 <header class="bg-white/70 backdrop-blur-2xl border-b border-slate-200/60 text-slate-800 p-3 md:p-4 shrink-0 shadow-[0_4px_20px_-10px_rgba(0,0,0,0.05)] z-30 relative">
                     <div class="w-full xl:max-w-[85%] mx-auto console-topbar">
                         <div class="console-topbar-primary">
+                            <button @click="toggleMobileNav()" class="md:hidden inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-white border border-slate-200 text-slate-600 shadow-sm hover:bg-slate-50 hover:text-indigo-600 active:scale-95 transition-all shrink-0">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                            </button>
                             <div class="console-mode-chip bg-indigo-50/80 text-indigo-700 font-bold tracking-wide border border-indigo-100/80 truncate shadow-sm flex items-center">
                                 模式: {{ t(stats.mode) }} <span class="hidden sm:inline opacity-30 mx-2">|</span> <span class="hidden sm:inline text-slate-500">成功</span> <span class="font-black ml-1 text-indigo-600">{{stats.success}}/{{stats.target}}</span> <span class="hidden lg:inline opacity-30 mx-2">|</span> <span class="hidden lg:inline text-slate-500">总 {{stats.total}}</span>
                             </div>
@@ -593,7 +815,6 @@
                         <div class="console-topbar-actions">
                             <div v-if="config" class="console-mode-switch shrink-0">
                                 <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2">
-                                    <span class="text-[10px] md:text-xs font-black text-slate-400 uppercase tracking-widest ml-1 sm:hidden">协议</span>
                                     <div class="console-mode-switch-inner bg-slate-100 p-1 rounded-xl shadow-inner border border-slate-200 shrink-0">
                                         <button @click="changeRegMode('protocol')"
                                                 :class="['flex-1 py-1.5 md:py-2 px-2 md:px-3 rounded-lg text-xs md:text-sm font-bold transition-all whitespace-nowrap',
@@ -877,7 +1098,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div v-show="currentTab === 'accounts'" class="inventory-shell inventory-panel rounded-2xl overflow-hidden transition-shadow duration-300 hover:shadow-md">
+                        <div v-show="currentTab === 'accounts'" class="inventory-shell inventory-panel mobile-table-priority rounded-2xl overflow-hidden transition-shadow duration-300 hover:shadow-md">
                             <div class="inventory-toolbar px-5 md:px-8 py-4 border-b border-slate-100 flex flex-col gap-4">
                                 <div class="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 w-full">
                                     <div class="flex items-center gap-3">
@@ -3511,7 +3732,7 @@
 
                         </div>
 
-                        <div v-show="currentTab === 'cloud'" class="inventory-shell inventory-panel rounded-2xl overflow-hidden hover:shadow-md transition-shadow duration-300">
+                        <div v-show="currentTab === 'cloud'" class="inventory-shell inventory-panel mobile-table-priority rounded-2xl overflow-hidden hover:shadow-md transition-shadow duration-300">
                             <div class="inventory-toolbar px-5 md:px-8 py-4 border-b border-slate-100">
                                 <div class="cloud-toolbar-shell">
                                     <div class="cloud-toolbar-side">
@@ -4892,6 +5113,6 @@
             } catch (e) {}
         })();
     </script>
-    <script src="/static/js/app.js?v=20260510-13"></script>
+    <script src="/static/js/app.js?v=20260511-8"></script>
 </body>
 </html>
