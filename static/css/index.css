@@ -585,6 +585,18 @@
 	transform: translateX(0);
 	box-shadow: 0 18px 50px rgba(15, 23, 42, 0.22);
 }
+body:not(.theme-dark) .mobile-nav-mask {
+	background: rgba(15, 23, 42, 0.52);
+	backdrop-filter: none;
+}
+body:not(.theme-dark) .mobile-nav-drawer {
+	background: #f1f5f9 !important;
+	backdrop-filter: none !important;
+	border-right-color: #cbd5e1 !important;
+	box-shadow:
+		inset -1px 0 0 rgba(148, 163, 184, 0.24),
+		0 14px 32px rgba(15, 23, 42, 0.08);
+}
 body.theme-dark .inventory-shell {
 	background: linear-gradient(180deg, rgba(18, 24, 33, 0.98), rgba(12, 19, 30, 0.96));
 	border-color: #2b3648;
