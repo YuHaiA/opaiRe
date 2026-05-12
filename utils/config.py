@@ -178,7 +178,7 @@ def init_config():
                 print(f"[{ts()}] [WARNING] 自动补全配置文件写入失败: {e}")
 
     return user_config
-APP_VERSION = "v14.4.1"
+APP_VERSION = "v14.4.2"
 _c: dict = {}
 WEB_PASSWORD: str = "admin"
 RETAIN_REG_ONLY: bool = False
@@ -903,6 +903,7 @@ def reload_all_configs(new_config_dict=None):
     CLUSTER_NODE_NAME = str(_c.get("cluster_node_name", "")).strip()
     CLUSTER_MASTER_URL = str(_c.get("cluster_master_url", "")).strip().rstrip("/")
     CLUSTER_SECRET = str(_c.get("cluster_secret", "wenfxl666")).strip()
+    CLUSTER_UPLOAD_TIMEOUT_SEC = min(3600, safe_int(_c.get("cluster_upload_timeout_sec", 15), 15, minimum=15))
 
     REG_MODE = str(_c.get("reg_mode", "protocol")).strip().lower()
 
