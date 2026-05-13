@@ -565,6 +565,7 @@ createApp({
             cfTools: {
                 workerName: 'openai-cpa',
                 deleteDomains: '',
+                syncDeleteFromMailPool: true,
                 results: [],
                 isHosting: false,
                 isEnablingEmail: false,
@@ -1605,6 +1606,63 @@ createApp({
         normalizeMailDomainGroupInput(index) {
             if (!this.config || !Array.isArray(this.config.mail_domain_groups)) return;
             this.config.mail_domain_groups[index] = normalizeMailDomainCsv(this.config.mail_domain_groups[index]).join(',');
+        },
+        normalizeDomainActionItems(rawValue) {
+            const seen = new Set();
+            return String(rawValue || '')
+                .split(/[\s,，]+/)
+                .map(item => String(item || '').trim().toLowerCase().replace(/^\.+|\.+$/g, ''))
+                .filter(item => {
+                    if (!item || seen.has(item)) return false;
+                    seen.add(item);
+                    return true;
+                });
+        },
+        removeDomainsFromDeleteTextarea(domains) {
+            const removeSet = new Set((domains || []).map(item => String(item || '').trim().toLowerCase()));
+            if (!removeSet.size) return;
+            const remaining = this.normalizeDomainActionItems(this.cfTools.deleteDomains).filter(item => !removeSet.has(item));
+            this.cfTools.deleteDomains = remaining.join('\n');
+        },
+        applyMailDomainDeleteResult(data) {
+            if (data?.config && this.config) {
+                this.config.mail_domains = normalizeMailDomainCsv(data.config.mail_domains || '').join(',');
+                this.config.disabled_mail_domains = Array.isArray(data.config.disabled_mail_domains) ? data.config.disabled_mail_domains : [];
+                this.config.enable_mail_domain_grouping = normalizeBooleanLike(data.config.enable_mail_domain_grouping, false);
+                this.config.mail_domain_group_count = data.config.mail_domain_group_count || 1;
+                this.config.mail_domain_groups = Array.isArray(data.config.mail_domain_groups)
+                    ? data.config.mail_domain_groups.map(item => normalizeMailDomainCsv(item).join(','))
+                    : [];
+            }
+            if (data?.cf_result?.status === 'success' && Array.isArray(data.cf_result.data)) {
+                this.cfTools.results = data.cf_result.data;
+            }
+            const removedDomains = Array.isArray(data?.removed_domains) ? data.removed_domains : [];
+            this.removeDomainsFromDeleteTextarea(removedDomains);
+        },
+        async deleteMailDomain(domain) {
+            const normalized = String(domain || '').trim().toLowerCase().replace(/^\.+|\.+$/g, '');
+            if (!normalized) return;
+            const confirmed = await this.customConfirm(`⚠️ 危险操作：\n\n将删除域名 [${normalized}]，并同步从发信域名池移除，同时尝试删除 CF 托管，确定继续吗？`);
+            if (!confirmed) return;
+            try {
+                const res = await this.authFetch('/api/config/mail_domains/delete', {
+                    method: 'POST',
+                    body: JSON.stringify({ domains: normalized, delete_cf: true })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    this.applyMailDomainDeleteResult(data);
+                    this.showToast(data.message || '域名删除完成', 'success');
+                    await this.fetchConfig();
+                    await this.fetchMailDomainRuntimeStats({ silent: true, force: true });
+                    this.queuePollStats();
+                } else {
+                    this.showToast(data.message || '域名删除失败', 'error');
+                }
+            } catch (e) {
+                this.showToast('域名删除失败，请检查网络连接', 'error');
+            }
         },
         async fetchMailDomainRuntimeStats(options = {}) {
             const { silent = false, force = false } = options;
@@ -4663,21 +4721,39 @@ async exportSub2Api() {
             if (!targetDomains) return this.showToast('请先填写需要删除的 CF 托管域名！', 'warning');
             if (!this.config.cf_api_email || !this.config.cf_api_key) return this.showToast('请填写 CF 账号邮箱和 API Key！', 'warning');
 
-            const confirmed = await this.customConfirm(`⚠️ 危险操作：\n\n即将删除你在下方填写的 CF 托管域名及其 DNS / 邮件路由配置，确定继续吗？`);
+            const confirmed = await this.customConfirm(
+                this.cfTools.syncDeleteFromMailPool
+                    ? `⚠️ 危险操作：\n\n即将删除你填写的域名，并同步从发信域名池移除，同时删除 CF 托管与邮件路由配置，确定继续吗？`
+                    : `⚠️ 危险操作：\n\n即将删除你在下方填写的 CF 托管域名及其 DNS / 邮件路由配置，确定继续吗？`
+            );
             if (!confirmed) return;
 
             this.cfTools.isDeletingHosting = true;
-            this.showToast('正在批量删除 CF 托管域名...', 'info');
+            this.showToast(this.cfTools.syncDeleteFromMailPool ? '正在同步删除域名与 CF 托管...' : '正在批量删除 CF 托管域名...', 'info');
             this.currentTab = 'console';
             try {
-                const res = await this.authFetch('/api/cloudflare/delete_zones', {
-                    method: 'POST',
-                    body: JSON.stringify({ domains: targetDomains, api_email: this.config.cf_api_email, api_key: this.config.cf_api_key })
-                });
+                const res = await this.authFetch(
+                    this.cfTools.syncDeleteFromMailPool ? '/api/config/mail_domains/delete' : '/api/cloudflare/delete_zones',
+                    {
+                        method: 'POST',
+                        body: JSON.stringify(
+                            this.cfTools.syncDeleteFromMailPool
+                                ? { domains: targetDomains, delete_cf: true }
+                                : { domains: targetDomains, api_email: this.config.cf_api_email, api_key: this.config.cf_api_key }
+                        )
+                    }
+                );
                 const data = await res.json();
                 if (data.status === 'success') {
-                    this.cfTools.results = data.data || [];
-                    this.showToast('✅ 托管域名删除完成', 'success');
+                    if (this.cfTools.syncDeleteFromMailPool) {
+                        this.applyMailDomainDeleteResult(data);
+                        await this.fetchConfig();
+                        await this.fetchMailDomainRuntimeStats({ silent: true, force: true });
+                        this.queuePollStats();
+                    } else {
+                        this.cfTools.results = data.data || [];
+                    }
+                    this.showToast(data.message || '✅ 托管域名删除完成', 'success');
                     this.currentTab = 'email';
                 } else {
                     this.showToast(data.message || '删除失败', 'error');

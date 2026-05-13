@@ -36,6 +36,9 @@ class DummyArgs:
 
 class LoginData(BaseModel): password: str
 class DomainRuntimeActionReq(BaseModel): domain: str
+class MailDomainDeleteReq(BaseModel):
+    domains: str
+    delete_cf: bool = True
 class ClusterUploadAccountsReq(BaseModel): node_name: str; secret: str; accounts: list
 class ClusterReportReq(BaseModel): node_name: str; secret: str; stats: dict; logs: list
 class ClusterControlReq(BaseModel): node_name: str; action: str
@@ -198,6 +201,21 @@ def _normalize_mail_domain_items(raw_value: Any) -> list[str]:
     seen = set()
     domains = []
     for part in str(raw_value or "").split(','):
+        text = str(part or "").strip().lower().strip('.')
+        if text and text not in seen:
+            seen.add(text)
+            domains.append(text)
+    return domains
+
+
+def _format_mail_domain_items_csv(items: list[str]) -> str:
+    return ",".join(_normalize_mail_domain_items(",".join(items or [])))
+
+
+def _normalize_mail_domain_action_items(raw_value: Any) -> list[str]:
+    seen = set()
+    domains = []
+    for part in re.split(r"[\s,，]+", str(raw_value or "")):
         text = str(part or "").strip().lower().strip('.')
         if text and text not in seen:
             seen.add(text)
@@ -621,6 +639,104 @@ async def clear_mail_domain_runtime_domain_cooldown(req: DomainRuntimeActionReq,
     if not item:
         return {"status": "error", "message": "未找到指定域名的冷却状态"}
     return {"status": "success", "message": f"已清除 {item['domain']} 的冷却", "item": item}
+
+
+@router.post("/api/config/mail_domains/delete")
+async def delete_mail_domains(req: MailDomainDeleteReq, token: str = Depends(verify_token)):
+    target_domains = _normalize_mail_domain_action_items(req.domains)
+    if not target_domains:
+        return {"status": "error", "message": "没有找到有效的待删除域名"}
+
+    current_config = getattr(core_engine.cfg, '_c', {}).copy()
+    current_domains = _normalize_mail_domain_items(current_config.get("mail_domains", ""))
+    target_set = set(target_domains)
+    remaining_domains = [domain for domain in current_domains if domain not in target_set]
+    removed_domains = [domain for domain in current_domains if domain in target_set]
+
+    disabled_domains = [
+        str(item or "").strip().lower().strip('.')
+        for item in (current_config.get("disabled_mail_domains", []) or [])
+    ]
+    current_config["disabled_mail_domains"] = [
+        domain for domain in disabled_domains if domain and domain not in target_set
+    ]
+    current_config["mail_domains"] = _format_mail_domain_items_csv(remaining_domains)
+
+    if not remaining_domains:
+        current_config["enable_mail_domain_grouping"] = False
+        current_config["mail_domain_group_count"] = 1
+        current_config["mail_domain_groups"] = []
+    else:
+        group_mode = str(current_config.get("mail_domain_group_mode", "auto") or "auto").strip().lower()
+        filtered_groups = []
+        for raw_group in current_config.get("mail_domain_groups", []) or []:
+            kept_domains = [domain for domain in _normalize_mail_domain_items(raw_group) if domain in set(remaining_domains)]
+            if kept_domains:
+                filtered_groups.append(_format_mail_domain_items_csv(kept_domains))
+        if group_mode == "manual":
+            if filtered_groups:
+                current_config["mail_domain_group_count"] = max(1, min(len(filtered_groups), len(remaining_domains), 10))
+                current_config["mail_domain_groups"] = filtered_groups[:current_config["mail_domain_group_count"]]
+            else:
+                current_config["enable_mail_domain_grouping"] = False
+                current_config["mail_domain_group_count"] = 1
+                current_config["mail_domain_groups"] = []
+        else:
+            try:
+                group_count = int(current_config.get("mail_domain_group_count", 2) or 2)
+            except Exception:
+                group_count = 2
+            group_count = max(1, min(group_count, len(remaining_domains), 10))
+            current_config["mail_domain_group_count"] = group_count
+            current_config["mail_domain_groups"] = filtered_groups[:group_count]
+
+    grouping_error = _normalize_mail_domain_grouping_payload(current_config)
+    if grouping_error:
+        current_config["enable_mail_domain_grouping"] = False
+        current_config["mail_domain_group_count"] = 1
+        current_config["mail_domain_groups"] = []
+        fallback_error = _normalize_mail_domain_grouping_payload(current_config)
+        if fallback_error:
+            return {"status": "error", "message": fallback_error}
+
+    reload_all_configs(new_config_dict=current_config)
+    mail_service.sync_mail_domain_runtime_state_with_config()
+
+    cf_result = None
+    cf_message = ""
+    if req.delete_cf:
+        cf_api_email = str(current_config.get("cf_api_email") or "").strip()
+        cf_api_key = str(current_config.get("cf_api_key") or "").strip()
+        if cf_api_email and cf_api_key:
+            from routers import service_routes
+            cf_req = service_routes.CFZoneBaseReq(
+                domains=_format_mail_domain_items_csv(target_domains),
+                api_email=cf_api_email,
+                api_key=cf_api_key,
+            )
+            cf_result = await service_routes.cloudflare_delete_zones(cf_req, token=token)
+            if cf_result.get("status") == "success":
+                cf_message = "，并已同步执行 CF 托管删除"
+            else:
+                cf_message = f"；但 CF 托管删除失败: {cf_result.get('message', '未知错误')}"
+        else:
+            cf_message = "；未配置 CF 凭据，已跳过 CF 托管删除"
+
+    removed_text = "、".join(removed_domains or target_domains)
+    return {
+        "status": "success",
+        "message": f"已从发信域名池删除 {removed_text}{cf_message}",
+        "removed_domains": removed_domains,
+        "requested_domains": target_domains,
+        "config": {
+            "mail_domains": current_config.get("mail_domains", ""),
+            "disabled_mail_domains": current_config.get("disabled_mail_domains", []),
+            "enable_mail_domain_grouping": current_config.get("enable_mail_domain_grouping", False),
+            "mail_domain_group_count": current_config.get("mail_domain_group_count", 1),
+            "mail_domain_groups": current_config.get("mail_domain_groups", []),
+        },
+        "cf_result": cf_result,
+    }
 
 
 @router.post("/api/config")

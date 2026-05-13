@@ -2,6 +2,7 @@ import os
 import asyncio
 import httpx
 import json
+import re
 import urllib.parse
 import ipaddress
 import socket
@@ -405,7 +406,7 @@ async def cloudflare_add_zones(req: CFZoneBaseReq, token: str = Depends(verify_t
 @router.post("/api/cloudflare/delete_zones")
 async def cloudflare_delete_zones(req: CFZoneBaseReq, token: str = Depends(verify_token)):
     try:
-        domain_list = [d.strip() for d in req.domains.split(",") if d.strip()]
+        domain_list = [d.strip() for d in re.split(r"[\s,，]+", req.domains) if d.strip()]
         if not domain_list:
             return {"status": "error", "message": "没有找到有效的域名"}
 
