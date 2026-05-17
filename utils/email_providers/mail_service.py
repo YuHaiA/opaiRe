@@ -279,6 +279,13 @@ def _format_grouped_mail_log(label: str, email: str) -> str:
     masked_email = mask_email(email)
     return f"{group_label} {masked_email}" if group_label else masked_email
 
+def _clean_html_to_text(raw_html: str) -> str:
+    if not raw_html:
+        return ""
+    text = re.sub(r'(?is)<(style|script)[^>]*>.*?</\1>', ' ', str(raw_html))
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = unescape(text)
+    return text
 
 def _normalize_main_domain(domain: str) -> str:
     text = str(domain or "").strip().lower().strip(".")
@@ -1489,6 +1496,7 @@ def _extract_body_from_message(message: Message) -> str:
                 except Exception:
                     text = ""
             if ct == "text/html":
+                text = re.sub(r'(?is)<(style|script)[^>]*>.*?</\1>', ' ', text)
                 text = re.sub(r"<[^>]+>", " ", text)
             parts.append(text)
     else:
@@ -1502,6 +1510,7 @@ def _extract_body_from_message(message: Message) -> str:
             except Exception:
                 body = str(message.get_payload() or "")
         if "html" in (message.get_content_type() or "").lower():
+            body = re.sub(r'(?is)<(style|script)[^>]*>.*?</\1>', ' ', body)
             body = re.sub(r"<[^>]+>", " ", body)
         parts.append(body)
     return unescape("\n".join(p for p in parts if p).strip())
@@ -1527,7 +1536,7 @@ def _extract_mail_fields(mail: dict) -> dict:
             body_text = (f"{body_text}\n{parsed}".strip() if body_text else parsed) if parsed else body_text
         except Exception:
             body_text = f"{body_text}\n{raw}".strip() if body_text else raw
-    body_text = unescape(re.sub(r"<[^>]+>", " ", body_text))
+    body_text = _clean_html_to_text(body_text)
     return {"sender": sender, "subject": subject, "body": body_text, "raw": raw}
 
 
@@ -1640,7 +1649,7 @@ def get_oai_code(
                                 d = detail_res.json()
                                 body = (f"{d.get('subject', '')}\n"
                                         f"{d.get('content', '')}\n"
-                                        f"{d.get('html', '')}")
+                                        f"{_clean_html_to_text(d.get('html', ''))}")
                                 code = _extract_otp_code(body)
                                 if code:
                                     processed_mail_ids.add(m_id)
@@ -1660,23 +1669,24 @@ def get_oai_code(
 
                     if "openai" in sender or "openai" in subject.lower() or "chatgpt" in subject.lower():
                         raw_body = fs.get_message_body(email, m_id)
-                        clean_body = re.sub(r'<[^>]+>', ' ', raw_body)
+                        clean_body = _clean_html_to_text(raw_body)
                         combined_text = subject + " \n " + clean_body
                         code = None
-                        new_format = re.findall(r"enter this code:\s*(\d{6})", combined_text, re.I)
-                        if not new_format:
-                            new_format = re.findall(r"verification code to continue:\s*(\d{6})", combined_text, re.I)
-
-                        if new_format:
-                            code = new_format[-1]
-                        else:
-                            direct = re.findall(r"Your (?:ChatGPT|OpenAI) code is (\d{6})", combined_text, re.I)
-                            if direct:
-                                code = direct[-1]
-                            else:
-                                generic = re.findall(r"\b(\d{6})\b", combined_text)
-                                if generic:
-                                    code = generic[-1]
+                        code = _extract_otp_code(combined_text)
+                        # new_format = re.findall(r"enter this code:\s*(\d{6})", combined_text, re.I)
+                        # if not new_format:
+                        #     new_format = re.findall(r"verification code to continue:\s*(\d{6})", combined_text, re.I)
+                        #
+                        # if new_format:
+                        #     code = new_format[-1]
+                        # else:
+                        #     direct = re.findall(r"Your (?:ChatGPT|OpenAI) code is (\d{6})", combined_text, re.I)
+                        #     if direct:
+                        #         code = direct[-1]
+                        #     else:
+                        #         generic = re.findall(r"\b(\d{6})\b", combined_text)
+                        #         if generic:
+                        #             code = generic[-1]
 
                         if code:
                             processed_mail_ids.add(m_id)
@@ -1702,25 +1712,26 @@ def get_oai_code(
                         a = detail.get("id", "")
                         if "openai" in sender or "openai" in subject.lower() or "chatgpt" in subject.lower():
                             raw_body = tm_service.get_message_body(detail.get("id", ""))
-                            clean_body = re.sub(r'<[^>]+>', ' ', raw_body)
+                            clean_body = _clean_html_to_text(raw_body)
                             combined_text = subject + " \n " + clean_body
 
                             code = None
-                            new_format = re.findall(r"enter this code:\s*(\d{6})", combined_text, re.I)
-                            if not new_format:
-                                new_format = re.findall(r"verification code to continue:\s*(\d{6})", combined_text,
-                                                        re.I)
-
-                            if new_format:
-                                code = new_format[-1]
-                            else:
-                                direct = re.findall(r"Your (?:ChatGPT|OpenAI) code is (\d{6})", combined_text, re.I)
-                                if direct:
-                                    code = direct[-1]
-                                else:
-                                    generic = re.findall(r"\b(\d{6})\b", combined_text)
-                                    if generic:
-                                        code = generic[-1]
+                            code = _extract_otp_code(combined_text)
+                            # new_format = re.findall(r"enter this code:\s*(\d{6})", combined_text, re.I)
+                            # if not new_format:
+                            #     new_format = re.findall(r"verification code to continue:\s*(\d{6})", combined_text,
+                            #                             re.I)
+                            #
+                            # if new_format:
+                            #     code = new_format[-1]
+                            # else:
+                            #     direct = re.findall(r"Your (?:ChatGPT|OpenAI) code is (\d{6})", combined_text, re.I)
+                            #     if direct:
+                            #         code = direct[-1]
+                            #     else:
+                            #         generic = re.findall(r"\b(\d{6})\b", combined_text)
+                            #         if generic:
+                            #             code = generic[-1]
                             if code:
                                 processed_mail_ids.add(m_id)
                                 print(f"\n[{cfg.ts()}] [SUCCESS] TemporaryMail ({mask_email(email)}) 邮箱提取成功: {code}")
@@ -1745,26 +1756,27 @@ def get_oai_code(
 
                         if "openai" in sender or "openai" in subject.lower() or "chatgpt" in subject.lower():
                             raw_body = ibs.get_message_body(m_id, user_id=jwt)
-                            clean_body = re.sub(r'<[^>]+>', ' ', raw_body)
+                            clean_body = _clean_html_to_text(raw_body)
 
                             combined_text = subject + " \n " + clean_body
 
                             code = None
-                            new_format = re.findall(r"enter this code:\s*(\d{6})", combined_text, re.I)
-                            if not new_format:
-                                new_format = re.findall(r"verification code to continue:\s*(\d{6})", combined_text,
-                                                        re.I)
-
-                            if new_format:
-                                code = new_format[-1]
-                            else:
-                                direct = re.findall(r"Your (?:ChatGPT|OpenAI) code is (\d{6})", combined_text, re.I)
-                                if direct:
-                                    code = direct[-1]
-                                else:
-                                    generic = re.findall(r"\b(\d{6})\b", combined_text)
-                                    if generic:
-                                        code = generic[-1]
+                            code = _extract_otp_code(combined_text)
+                            # new_format = re.findall(r"enter this code:\s*(\d{6})", combined_text, re.I)
+                            # if not new_format:
+                            #     new_format = re.findall(r"verification code to continue:\s*(\d{6})", combined_text,
+                            #                             re.I)
+                            #
+                            # if new_format:
+                            #     code = new_format[-1]
+                            # else:
+                            #     direct = re.findall(r"Your (?:ChatGPT|OpenAI) code is (\d{6})", combined_text, re.I)
+                            #     if direct:
+                            #         code = direct[-1]
+                            #     else:
+                            #         generic = re.findall(r"\b(\d{6})\b", combined_text)
+                            #         if generic:
+                            #             code = generic[-1]
                             if code:
                                 processed_mail_ids.add(m_id)
                                 print(f"\n[{cfg.ts()}] [SUCCESS] Inboxes.com ({mask_email(email)}) 邮箱提取成功: {code}")
@@ -1801,24 +1813,25 @@ def get_oai_code(
                         mail_body, real_subject = ts_service.read_email(jwt, msg_id, email_id)
 
                         if mail_body or real_subject:
-                            clean_body = re.sub(r'<[^>]+>', ' ', str(mail_body))
+                            clean_body = _clean_html_to_text(str(mail_body))
                             combined_text = str(real_subject) + " \n " + clean_body
                             code = None
-                            new_format = re.findall(r"enter this code:\s*(\d{6})", combined_text, re.I)
-                            if not new_format:
-                                new_format = re.findall(r"verification code to continue:\s*(\d{6})", combined_text,
-                                                        re.I)
-
-                            if new_format:
-                                code = new_format[-1]
-                            else:
-                                direct = re.findall(r"Your (?:ChatGPT|OpenAI) code is (\d{6})", combined_text, re.I)
-                                if direct:
-                                    code = direct[-1]
-                                else:
-                                    generic = re.findall(r"\b(\d{6})\b", combined_text)
-                                    if generic:
-                                        code = generic[-1]
+                            code = _extract_otp_code(combined_text)
+                            # new_format = re.findall(r"enter this code:\s*(\d{6})", combined_text, re.I)
+                            # if not new_format:
+                            #     new_format = re.findall(r"verification code to continue:\s*(\d{6})", combined_text,
+                            #                             re.I)
+                            #
+                            # if new_format:
+                            #     code = new_format[-1]
+                            # else:
+                            #     direct = re.findall(r"Your (?:ChatGPT|OpenAI) code is (\d{6})", combined_text, re.I)
+                            #     if direct:
+                            #         code = direct[-1]
+                            #     else:
+                            #         generic = re.findall(r"\b(\d{6})\b", combined_text)
+                            #         if generic:
+                            #             code = generic[-1]
                             if code:
                                 processed_mail_ids.add(msg_id)
                                 print(f"\n[{cfg.ts()}] [SUCCESS] Tmailor ({mask_email(email)}) 提取成功: {code}")
@@ -1852,7 +1865,7 @@ def get_oai_code(
             #                 raw_body = tp_service.get_messages_body(msg_id)
             #                 if not raw_body:
             #                     raw_body = str(msg.get("summary", ""))
-            #                 clean_body = re.sub(r'<[^>]+>', ' ', raw_body)
+            #                 clean_body = _clean_html_to_text(raw_body)
             #                 combined_text = subject + " \n " + clean_body
             #
             #                 code = None
@@ -1885,14 +1898,15 @@ def get_oai_code(
                         target_email = email.lower().strip()
                         if target_email in code_pool:
                             raw_text = code_pool.pop(target_email, "")
+                            clean_text = _clean_html_to_text(raw_text)
                             code = ""
-                            m = re.search(r"(?<!\d)(\d{6})(?!\d)", raw_text)
+                            m = re.search(r"(?<![\d#])(\d{6})(?!\d)", clean_text)
                             if m:
                                 code = m.group(1)
 
                             if not code:
                                 try:
-                                    code = _extract_otp_code(raw_text)
+                                    code = _extract_otp_code(clean_text)
                                 except Exception:
                                     pass
                             if code:
@@ -1923,25 +1937,26 @@ def get_oai_code(
 
                                 raw_body = str(m.get("content", "") or m.get("text", ""))
 
-                                clean_body = re.sub(r'<[^>]+>', ' ', raw_body)
+                                clean_body = _clean_html_to_text(raw_body)
 
                                 combined_text = subject + " \n " + clean_body
                                 code = None
-                                new_format = re.findall(r"enter this code:\s*(\d{6})", combined_text, re.I)
-                                if not new_format:
-                                    new_format = re.findall(r"verification code to continue:\s*(\d{6})", combined_text,
-                                                            re.I)
-
-                                if new_format:
-                                    code = new_format[-1]
-                                else:
-                                    direct = re.findall(r"Your (?:ChatGPT|OpenAI) code is (\d{6})", combined_text, re.I)
-                                    if direct:
-                                        code = direct[-1]
-                                    else:
-                                        generic = re.findall(r"\b(\d{6})\b", combined_text)
-                                        if generic:
-                                            code = generic[-1]
+                                code = _extract_otp_code(combined_text)
+                                # new_format = re.findall(r"enter this code:\s*(\d{6})", combined_text, re.I)
+                                # if not new_format:
+                                #     new_format = re.findall(r"verification code to continue:\s*(\d{6})", combined_text,
+                                #                             re.I)
+                                #
+                                # if new_format:
+                                #     code = new_format[-1]
+                                # else:
+                                #     direct = re.findall(r"Your (?:ChatGPT|OpenAI) code is (\d{6})", combined_text, re.I)
+                                #     if direct:
+                                #         code = direct[-1]
+                                #     else:
+                                #         generic = re.findall(r"\b(\d{6})\b", combined_text)
+                                #         if generic:
+                                #             code = generic[-1]
                                 if code:
                                     processed_mail_ids.add(m_id)
                                     print(f"\n[{cfg.ts()}] [SUCCESS] CloudMail ({mask_email(email)})邮箱提取成功: {code}")
@@ -2107,7 +2122,7 @@ def get_oai_code(
                 else:
                     msgs = ds.get_messages(jwt)
                     for m in msgs:
-                        content = f"{m.get('subject', '')}\n{m.get('text', '')}\n{ds.strip_html(m.get('html', ''))}"
+                        content = f"{m.get('subject', '')}\n{m.get('text', '')}\n{_clean_html_to_text(m.get('html', ''))}"
                         if "openai" in content.lower() or "chatgpt" in content.lower():
                             code = _extract_otp_code(content)
                             if code:
@@ -2158,8 +2173,7 @@ def get_oai_code(
                         sender = str(msg.get("from", "")).lower()
                         subject = str(msg.get("subject", ""))
                         body = str(msg.get("body", ""))
-                        html = str(msg.get("html") or "")
-
+                        html = _clean_html_to_text(str(msg.get("html") or ""))
                         content = "\n".join([sender, subject, body, html])
 
                         safe_content = re.sub(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", " ", content)
@@ -2193,7 +2207,7 @@ def get_oai_code(
                         bodyPreview = str(msg.get("bodyPreview", ""))
                         content = "\n".join([subject, bodyPreview])
                         code = ""
-                        m = re.search(r"(?<!\d)(\d{6})(?!\d)", content)
+                        m = re.search(r"(?<![\d#])(\d{6})(?!\d)", content)
                         if m:
                             code = m.group(1)
 
@@ -2269,15 +2283,30 @@ def get_oai_code(
                                 else:
                                     content = msg.get_payload(decode=True).decode("utf-8", "ignore")
                                 if "<html" in content.lower() or "<div" in content.lower():
+                                    content = re.sub(r'(?is)<(style|script)[^>]*>.*?</\1>', ' ', content)
                                     try:
                                         from html.parser import HTMLParser as _HP
                                         class _S(_HP):
-                                            def __init__(self): super().__init__(); self._t = []
-                                            def handle_data(self, d): self._t.append(d)
-                                            def get(self): return " ".join(self._t)
-                                        _p = _S(); _p.feed(content); content = _p.get()
+                                            def __init__(self):
+                                                super().__init__()
+                                                self._t = []
+                                                self._ignore = False
+                                            def handle_starttag(self, tag, attrs):
+                                                if tag.lower() in ('style', 'script'):
+                                                    self._ignore = True
+                                            def handle_endtag(self, tag):
+                                                if tag.lower() in ('style', 'script'):
+                                                    self._ignore = False
+                                            def handle_data(self, d):
+                                                if not self._ignore:
+                                                    self._t.append(d)
+                                            def get(self):
+                                                return " ".join(self._t)
+                                        _p = _S();
+                                        _p.feed(content);
+                                        content = _p.get()
                                     except Exception:
-                                        pass
+                                        content = re.sub(r"<[^>]+>", " ", content)
                                 to_h = str(msg.get("To", "")).lower()
                                 del_h = str(msg.get("Delivered-To", "")).lower()
                                 tgt = email.lower()
@@ -2313,7 +2342,7 @@ def get_oai_code(
                         for attempt in range(max_attempts):
                             if target_email in code_pool:
                                 raw_text = code_pool.get(target_email, "")
-                                current_code = _extract_otp_code(raw_text)
+                                current_code = _extract_otp_code(_clean_html_to_text(raw_text))
                                 if current_code and current_code != ignore_code:
                                     code_pool.pop(target_email, None)
                                     print(f"[{cfg.ts()}] [SUCCESS] 项目专属邮箱 OPENAI-CPA ({mask_email(target_email)}) 提取成功: {current_code}")
@@ -2332,14 +2361,15 @@ def get_oai_code(
                         target_email = email.lower().strip()
                         if target_email in code_pool:
                             raw_text = code_pool.pop(target_email, "")
+                            clean_text = _clean_html_to_text(raw_text)
                             code = ""
-                            m = re.search(r"(?<!\d)(\d{6})(?!\d)", raw_text)
+                            m = re.search(r"(?<![\d#])(\d{6})(?!\d)", clean_text)
                             if m:
                                 code = m.group(1)
 
                             if not code:
                                 try:
-                                    code = _extract_otp_code(raw_text)
+                                    code = _extract_otp_code(clean_text)
                                 except Exception:
                                     pass
                             if code:
@@ -2373,7 +2403,7 @@ def get_oai_code(
                                 continue
                             subject_text = str(mail.get("subject") or mail.get("title") or "")
                             code = ""
-                            m = re.search(r"(?<!\d)(\d{6})(?!\d)", subject_text)
+                            m = re.search(r"(?<![\d#])(\d{6})(?!\d)", subject_text)
                             if m:
                                 code = m.group(1)
                             if not code:
@@ -2390,7 +2420,7 @@ def get_oai_code(
                                         content = "\n".join(filter(None, [
                                             str(d.get("subject") or ""),
                                             str(d.get("content") or ""),
-                                            str(d.get("html_content") or ""),
+                                            _clean_html_to_text(str(d.get("html_content") or "")),
                                         ]))
                                         code = _extract_otp_code(content)
                                 except Exception:

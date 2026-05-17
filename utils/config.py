@@ -178,7 +178,7 @@ def init_config():
                 print(f"[{ts()}] [WARNING] 自动补全配置文件写入失败: {e}")
 
     return user_config
-APP_VERSION = "v14.4.4"
+APP_VERSION = "v15.0.0"
 _c: dict = {}
 WEB_PASSWORD: str = "admin"
 RETAIN_REG_ONLY: bool = False
@@ -363,6 +363,15 @@ TG_BOT: dict = {"enable": False, "token": "", "chat_id": ""}
 CLUSTER_NODE_NAME: str = ""
 CLUSTER_MASTER_URL: str = ""
 CLUSTER_SECRET: str = "wenfxl666"
+CLUSTER_UPLOAD_TIMEOUT_SEC: int = 15
+CLUSTER_SYNC_SHARED_DIR: str = "data/cluster_sync"
+CLUSTER_SYNC_IMPORT_POLL_SEC: int = 2
+CLUSTER_SYNC_MAX_RETRIES: int = 3
+CLUSTER_SYNC_PROGRESS_FLUSH_EVERY: int = 100
+CLUSTER_SYNC_STALE_FILE_MAX_AGE_HOURS: int = 12
+CLUSTER_SYNC_MAX_FILE_SIZE_MB: int = 20
+CLUSTER_SYNC_MAX_RECORDS: int = 100000
+CLUSTER_SYNC_REQUIRE_CUSTOM_SECRET: bool = True
 TEMPORAM_COOKIE: str = ""
 FVIA_TOKEN: str = ""
 TMAILOR_CURRENT_TOKEN: str = ""
@@ -381,8 +390,10 @@ GMAIL_OAUTH_SUFFIX_LEN_MAX: int = 8
 DISABLE_FORCED_TAKEOVER: bool = True
 OPENAI_CPA_WEBHOOK_SECRET = ""
 USE_ORIGINAL_PASSWORD_FLOW: bool = False
-
+CF_API_EMAIL: str = ""
+CF_API_KEY: str = ""
 TEAM_MODE_ENABLE: bool = False
+TEAM_MODE_OVERSPEED: bool = False
 def reset_sub2api_proxy_rotation():
     global _sub2api_proxy_rotation_index
     with _sub2api_proxy_rotation_lock:
@@ -448,7 +459,7 @@ def reload_all_configs(new_config_dict=None):
     global SUB2API_DEFAULT_PROXY_POOL
     global SUB2API_ACCOUNT_RATE_MULTIPLIER, SUB2API_ACCOUNT_GROUP_IDS, SUB2API_ENABLE_WS_MODE
     global ENABLE_IMAGE2API_MODE, IMAGE2API_URL, IMAGE2API_KEY, IMAGE2API_RETAIN_REG_ONLY, IMAGE2API_IMG_ONLY_MODE
-
+    global CF_API_EMAIL, CF_API_KEY
     global LUCKMAIL_API_KEY, LUCKMAIL_PREFERRED_DOMAIN, LUCKMAIL_EMAIL_TYPE, LUCKMAIL_VARIANT_MODE, LUCKMAIL_REUSE_PURCHASED, LUCKMAIL_TAG_ID
     global HERO_SMS_ENABLED, HERO_SMS_API_KEY, HERO_SMS_BASE_URL, HERO_SMS_COUNTRY, HERO_SMS_SERVICE
     global HERO_SMS_AUTO_PICK_COUNTRY, HERO_SMS_REUSE_PHONE, HERO_SMS_MAX_PRICE, HERO_SMS_VERIFY_ON_REGISTER
@@ -463,6 +474,8 @@ def reload_all_configs(new_config_dict=None):
     global DUCKMAIL_FORWARD_MODE, DUCKMAIL_FORWARD_EMAIL
     global DUCK_USE_PROXY
     global CLUSTER_NODE_NAME, CLUSTER_MASTER_URL, CLUSTER_SECRET, CLUSTER_UPLOAD_TIMEOUT_SEC
+    global CLUSTER_SYNC_SHARED_DIR, CLUSTER_SYNC_IMPORT_POLL_SEC, CLUSTER_SYNC_MAX_RETRIES, CLUSTER_SYNC_PROGRESS_FLUSH_EVERY
+    global CLUSTER_SYNC_STALE_FILE_MAX_AGE_HOURS, CLUSTER_SYNC_MAX_FILE_SIZE_MB, CLUSTER_SYNC_MAX_RECORDS, CLUSTER_SYNC_REQUIRE_CUSTOM_SECRET
     global REG_MODE
     global LOCAL_MS_ENABLE_FISSION, LOCAL_MS_MASTER_EMAIL, LOCAL_MS_PASSWORD, LOCAL_MS_CLIENT_ID, LOCAL_MS_REFRESH_TOKEN, LOCAL_MS_POOL_FISSION
     global LOCAL_MS_SUFFIX_MODE, LOCAL_MS_SUFFIX_LEN_MIN, LOCAL_MS_SUFFIX_LEN_MAX
@@ -483,7 +496,7 @@ def reload_all_configs(new_config_dict=None):
     global HERO_SMS_REUSE_PHONE, HERO_SMS_REUSE_MAX
     global FIVESIM_REUSE_PHONE, FIVESIM_REUSE_MAX
     global OPENAI_CPA_WEBHOOK_SECRET, USE_ORIGINAL_PASSWORD_FLOW
-    global TEAM_MODE_ENABLE
+    global TEAM_MODE_ENABLE, TEAM_MODE_OVERSPEED
     base_yaml_config = init_config()
 
     _db_conf = base_yaml_config.get("database", {})
@@ -686,6 +699,8 @@ def reload_all_configs(new_config_dict=None):
     MC_API_BASE = str(_mc.get("api_base", "")).strip().rstrip("/")
     MC_KEY = _mc.get("key", "")
 
+    CF_API_EMAIL = _c.get("cf_api_email", "")
+    CF_API_KEY = _c.get("cf_api_key", "")
 
     _ocpa = _c.get("openai_cpa", {})
     OPENAI_CPA_WEBHOOK_SECRET = str(_ocpa.get("webhook_secret", "")).strip()
@@ -911,6 +926,14 @@ def reload_all_configs(new_config_dict=None):
     CLUSTER_MASTER_URL = str(_c.get("cluster_master_url", "")).strip().rstrip("/")
     CLUSTER_SECRET = str(_c.get("cluster_secret", "wenfxl666")).strip()
     CLUSTER_UPLOAD_TIMEOUT_SEC = min(3600, safe_int(_c.get("cluster_upload_timeout_sec", 15), 15, minimum=15))
+    CLUSTER_SYNC_SHARED_DIR = str(_c.get("cluster_sync_shared_dir", "data/cluster_sync") or "data/cluster_sync").strip() or "data/cluster_sync"
+    CLUSTER_SYNC_IMPORT_POLL_SEC = safe_int(_c.get("cluster_sync_import_poll_sec", 2), 2, minimum=1)
+    CLUSTER_SYNC_MAX_RETRIES = safe_int(_c.get("cluster_sync_max_retries", 3), 3, minimum=0)
+    CLUSTER_SYNC_PROGRESS_FLUSH_EVERY = safe_int(_c.get("cluster_sync_progress_flush_every", 100), 100, minimum=1)
+    CLUSTER_SYNC_STALE_FILE_MAX_AGE_HOURS = safe_int(_c.get("cluster_sync_stale_file_max_age_hours", 12), 12, minimum=1)
+    CLUSTER_SYNC_MAX_FILE_SIZE_MB = safe_int(_c.get("cluster_sync_max_file_size_mb", 20), 20, minimum=1)
+    CLUSTER_SYNC_MAX_RECORDS = safe_int(_c.get("cluster_sync_max_records", 100000), 100000, minimum=1)
+    CLUSTER_SYNC_REQUIRE_CUSTOM_SECRET = safe_bool(_c.get("cluster_sync_require_custom_secret", True), default=True)
 
     REG_MODE = str(_c.get("reg_mode", "protocol")).strip().lower()
 
@@ -939,6 +962,7 @@ def reload_all_configs(new_config_dict=None):
     global TEAM_MODE_ENABLE
     _team = _c.get("team_mode", {})
     TEAM_MODE_ENABLE = safe_bool(_team.get("enable", False))
+    TEAM_MODE_OVERSPEED = safe_bool(_team.get("overspeed", False))
 
     reload_proxy_config()
     print(f"[{ts()}] [系统] 核心配置已完成同步。")
