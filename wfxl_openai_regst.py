@@ -77,9 +77,30 @@ def _remove_pid_file() -> None:
 
 
 def _get_listener_pid(host: str, port: int):
+    if os.name == "nt":
+        try:
+            output = subprocess.check_output(
+                ["netstat", "-ano", "-p", "tcp"],
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+            )
+            target = f":{port}"
+            for raw_line in output.splitlines():
+                line = raw_line.strip()
+                if "LISTENING" not in line or target not in line:
+                    continue
+                parts = line.split()
+                if len(parts) >= 5 and parts[1].endswith(target):
+                    try:
+                        return int(parts[-1])
+                    except ValueError:
+                        return -1
+        except Exception:
+            return -1
+
     tester = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        tester.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         tester.bind((host, port))
         return None
     except OSError:
@@ -90,29 +111,6 @@ def _get_listener_pid(host: str, port: int):
         except Exception:
             pass
 
-    if os.name != "nt":
-        return -1
-
-    try:
-        output = subprocess.check_output(
-            ["netstat", "-ano", "-p", "tcp"],
-            text=True,
-            encoding="utf-8",
-            errors="ignore",
-        )
-        target = f":{port}"
-        for raw_line in output.splitlines():
-            line = raw_line.strip()
-            if "LISTENING" not in line or target not in line:
-                continue
-            parts = line.split()
-            if len(parts) >= 5 and parts[1].endswith(target):
-                try:
-                    return int(parts[-1])
-                except ValueError:
-                    return -1
-    except Exception:
-        return -1
     return -1
 
 
@@ -432,11 +430,6 @@ if __name__ == "__main__":
     except: pass
     atexit.register(_remove_pid_file)
     existing_port = _find_existing_console_port(WEB_HOST, WEB_PORT)
-    if existing_port is not None:
-        print(f"[{core_engine.ts()}] [系统] Web 控制台已经在运行中，无需重复启动。")
-        sys.__stdout__.write(f"[{core_engine.ts()}] [系统] 控制台地址：http://127.0.0.1:{existing_port} \n")
-        sys.__stdout__.flush()
-        raise SystemExit(0)
 
     selected_port = _find_first_available_port(WEB_HOST, WEB_PORT)
     if selected_port is None:
@@ -452,6 +445,8 @@ if __name__ == "__main__":
     print(f"[{core_engine.ts()}] [系统] 根据官网披露消息：在某些国家，您可以使用 WhatsApp 完成手机验证，而无需通过短信：阿拉伯联合酋长国、埃及、印度尼西亚、以色列、印度、马来西亚、尼日利亚、巴基斯坦、沙特阿拉伯、土耳其、乌克兰、越南，目前WhatsApp需要大家测试后在说。")
     print("-" * 65)
     print(f"[{core_engine.ts()}] [系统] Web 控制台已准备就绪，等待下发指令...")
+    if existing_port is not None:
+        print(f"[{core_engine.ts()}] [系统] 检测到已有控制台实例正在端口 {existing_port} 运行，本次将自动寻找新的可用端口继续启动。")
     if selected_port != WEB_PORT:
         print(f"[{core_engine.ts()}] [系统] 默认端口 {WEB_PORT} 已被占用，已自动切换到端口 {selected_port}。")
     _write_pid_file()
