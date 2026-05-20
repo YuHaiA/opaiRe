@@ -126,3 +126,32 @@
 
 - 新增表格页时，优先复用 `.data-panel` 与 `.data-table-scroll`，避免再次出现外层滚动抢占的问题。
 - 若某页头部筛选区明显更高，应优先在面板高度或分区布局上调整，不要退回内容撑高方案。
+
+## 本次上游同步记录
+
+- 修改类型：
+  - 吸收 `upstream/main` 最新更新，并将本地有效版本推进到 `v15.0.3`。
+- 本次同步涉及文件：
+  - `index.html`
+  - `routers/account_routes.py`
+  - `static/js/app.js`
+  - `utils/config.py`
+  - `utils/core_engine.py`
+  - `utils/db_manager.py`
+  - `utils/auth_core.cpython-311-aarch64-linux-gnu.so`
+  - `utils/auth_core.cpython-311-darwin.so`
+  - `utils/auth_core.cpython-311-x86_64-linux-gnu.so`
+  - `utils/auth_core.pyd`
+- 本次吸收的主要变化：
+  - `APP_VERSION` 提升到 `v15.0.3`。
+  - CPA 与 Sub2API 的库存报警阈值在设为 `0` 时，改为跳过云端库存巡检，直接按单次补发量执行补货。
+  - 前端在 CPA / Sub2API 阈值输入区新增了“阈值为 0 时跳过云端全量获取”的提示文案。
+  - Team 模式超速开关开启时会同步确保 `team_mode.enable = true`。
+  - 批量删除账号的路由与数据库删除实现重新对齐：路由直接调用批量删除，数据库层负责按分块执行，避免 SQL 过长问题。
+  - 云端库同步节流逻辑被放宽，刷新云端库时更积极地同步本地库。
+  - 静态资源版本号更新到较新的上游缓存版本。
+- 合并时的本地处理：
+  - `index.html` 出现的唯一冲突是静态资源版本号，已保留较新的上游版本号；功能逻辑未发生手工改写冲突。
+- 影响范围：
+  - 影响补货策略、账号删除路径、Team 模式启用行为，以及前端静态资源缓存失效版本。
+  - 后续若排查“阈值为 0 仍请求云端库存”的问题，应以本次同步后的逻辑为准。

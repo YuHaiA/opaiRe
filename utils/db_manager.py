@@ -217,8 +217,11 @@ def delete_accounts_by_emails(emails: list) -> bool:
     try:
         with get_db_conn(is_write=True) as conn:
             c = get_cursor(conn)
-            placeholders = ','.join(['?'] * len(emails))
-            execute_sql(c, f"DELETE FROM accounts WHERE email IN ({placeholders})", tuple(emails))
+            chunk_size = 900
+            for i in range(0, len(emails), chunk_size):
+                chunk = emails[i:i + chunk_size]
+                placeholders = ','.join(['?'] * len(chunk))
+                execute_sql(c, f"DELETE FROM accounts WHERE email IN ({placeholders})", tuple(chunk))
             return True
     except Exception as e:
         print(f"[{cfg.ts()}] [ERROR] 数据库批量删除账号异常: {e}")
@@ -788,7 +791,7 @@ def update_account_push_info(emails: list, platform: str, mode: str = "overwrite
     try:
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         target_platform = platform.strip().upper()
-        target_prefixes = tuple(str(e).strip() for e in emails if str(e).strip())
+        target_prefixes = tuple(str(e).strip().lower() for e in emails if str(e).strip())
         if not target_prefixes:
             return
 
@@ -804,7 +807,7 @@ def update_account_push_info(emails: list, platform: str, mode: str = "overwrite
                 if not db_email:
                     continue
 
-                if db_email.startswith(target_prefixes):
+                if db_email.strip().lower().startswith(target_prefixes):
                     current_raw = row[1] if row[1] else ""
 
                     if mode == "sync":
