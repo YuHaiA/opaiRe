@@ -40,6 +40,13 @@ def _get_env_int(name: str, default: int) -> int:
         return default
 
 
+def _get_env_bool(name: str, default: bool = False) -> bool:
+    raw_value = str(os.getenv(name, "")).strip().lower()
+    if not raw_value:
+        return default
+    return raw_value in {"1", "true", "yes", "on"}
+
+
 def _is_default_cluster_secret(secret: str) -> bool:
     return str(secret or "").strip() in {"", "wenfxl666"}
 
@@ -56,6 +63,7 @@ def _calculate_file_sha256(file_path: str) -> str:
 WEB_HOST = os.getenv("WEB_HOST", "0.0.0.0").strip() or "0.0.0.0"
 WEB_PORT = _get_env_int("WEB_PORT", _get_env_int("PORT", 8000))
 WEB_PORT_SCAN_LIMIT = max(1, _get_env_int("WEB_PORT_SCAN_LIMIT", 20))
+WEB_PORT_STRICT = _get_env_bool("WEB_PORT_STRICT", False)
 PID_FILE = os.path.join("data", "web_console.pid")
 
 
@@ -119,6 +127,17 @@ def _conflict_hosts(host: str) -> list[str]:
     if normalized == "0.0.0.0":
         return ["0.0.0.0", "127.0.0.1"]
     return [normalized]
+
+
+def _find_conflicting_listener_pid(host: str, port: int) -> Optional[int]:
+    checked_pids = set()
+    for current_host in _conflict_hosts(host):
+        listener_pid = _get_listener_pid(current_host, port)
+        if listener_pid is None or listener_pid in checked_pids:
+            continue
+        checked_pids.add(listener_pid)
+        return listener_pid
+    return None
 
 
 def _get_process_command_line(pid_value: int) -> str:
@@ -430,11 +449,22 @@ if __name__ == "__main__":
     except: pass
     atexit.register(_remove_pid_file)
     existing_port = _find_existing_console_port(WEB_HOST, WEB_PORT)
-
-    selected_port = _find_first_available_port(WEB_HOST, WEB_PORT)
-    if selected_port is None:
-        print(f"[{core_engine.ts()}] [ERROR] 在 {WEB_PORT}-{WEB_PORT + WEB_PORT_SCAN_LIMIT - 1} 端口区间内未找到可用端口。")
-        raise SystemExit(1)
+    if WEB_PORT_STRICT:
+        selected_port = WEB_PORT
+        conflict_pid = _find_conflicting_listener_pid(WEB_HOST, selected_port)
+        if conflict_pid is not None:
+            cmdline = _get_process_command_line(conflict_pid)
+            print(f"[{core_engine.ts()}] [ERROR] 固定端口模式已启用，但端口 {selected_port} 已被占用，拒绝自动顺延。")
+            if conflict_pid > 0:
+                print(f"[{core_engine.ts()}] [ERROR] 占用 PID: {conflict_pid}")
+            if cmdline:
+                print(f"[{core_engine.ts()}] [ERROR] 占用进程命令行: {cmdline}")
+            raise SystemExit(1)
+    else:
+        selected_port = _find_first_available_port(WEB_HOST, WEB_PORT)
+        if selected_port is None:
+            print(f"[{core_engine.ts()}] [ERROR] 在 {WEB_PORT}-{WEB_PORT + WEB_PORT_SCAN_LIMIT - 1} 端口区间内未找到可用端口。")
+            raise SystemExit(1)
 
     print("=" * 65)
     print(f"[{core_engine.ts()}] [系统] OpenAI 全链路自动化生产与多维资源中转调度平台")
@@ -445,9 +475,11 @@ if __name__ == "__main__":
     print(f"[{core_engine.ts()}] [系统] 根据官网披露消息：在某些国家，您可以使用 WhatsApp 完成手机验证，而无需通过短信：阿拉伯联合酋长国、埃及、印度尼西亚、以色列、印度、马来西亚、尼日利亚、巴基斯坦、沙特阿拉伯、土耳其、乌克兰、越南，目前WhatsApp需要大家测试后在说。")
     print("-" * 65)
     print(f"[{core_engine.ts()}] [系统] Web 控制台已准备就绪，等待下发指令...")
-    if existing_port is not None:
+    if existing_port is not None and not WEB_PORT_STRICT:
         print(f"[{core_engine.ts()}] [系统] 检测到已有控制台实例正在端口 {existing_port} 运行，本次将自动寻找新的可用端口继续启动。")
-    if selected_port != WEB_PORT:
+    if WEB_PORT_STRICT:
+        print(f"[{core_engine.ts()}] [系统] 已启用固定端口模式，控制台将锁定运行在端口 {selected_port}。")
+    elif selected_port != WEB_PORT:
         print(f"[{core_engine.ts()}] [系统] 默认端口 {WEB_PORT} 已被占用，已自动切换到端口 {selected_port}。")
     _write_pid_file()
     sys.__stdout__.write(f"[{core_engine.ts()}] [系统] 控制台地址：http://127.0.0.1:{selected_port} \n")
