@@ -71,6 +71,7 @@ WEB_HOST = os.getenv("WEB_HOST", "0.0.0.0").strip() or "0.0.0.0"
 WEB_PORT = _get_env_int("WEB_PORT", _get_env_int("PORT", 8000))
 WEB_PORT_SCAN_LIMIT = max(1, _get_env_int("WEB_PORT_SCAN_LIMIT", 20))
 WEB_PORT_STRICT = _get_env_bool("WEB_PORT_STRICT", _running_under_systemd())
+WEB_PORT_STRICT_WAIT_SEC = max(0, _get_env_int("WEB_PORT_STRICT_WAIT_SEC", 20))
 PID_FILE = os.path.join("data", "web_console.pid")
 
 
@@ -164,6 +165,19 @@ def _get_process_command_line(pid_value: int) -> str:
         ).strip()
     except Exception:
         return ""
+
+
+def _wait_for_port_release(host: str, port: int, timeout_sec: int) -> Optional[int]:
+    if timeout_sec <= 0:
+        return _find_conflicting_listener_pid(host, port)
+
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        listener_pid = _find_conflicting_listener_pid(host, port)
+        if listener_pid is None:
+            return None
+        time.sleep(0.5)
+    return _find_conflicting_listener_pid(host, port)
 
 
 def _is_same_console_instance(cmdline: str) -> bool:
@@ -461,12 +475,19 @@ if __name__ == "__main__":
         conflict_pid = _find_conflicting_listener_pid(WEB_HOST, selected_port)
         if conflict_pid is not None:
             cmdline = _get_process_command_line(conflict_pid)
-            print(f"[{core_engine.ts()}] [ERROR] 固定端口模式已启用，但端口 {selected_port} 已被占用，拒绝自动顺延。")
-            if conflict_pid > 0:
-                print(f"[{core_engine.ts()}] [ERROR] 占用 PID: {conflict_pid}")
-            if cmdline:
-                print(f"[{core_engine.ts()}] [ERROR] 占用进程命令行: {cmdline}")
-            raise SystemExit(1)
+            if _is_same_console_instance(cmdline):
+                print(f"[{core_engine.ts()}] [系统] 固定端口 {selected_port} 仍被上一個控制台進程占用，等待釋放中...")
+                conflict_pid = _wait_for_port_release(WEB_HOST, selected_port, WEB_PORT_STRICT_WAIT_SEC)
+                cmdline = _get_process_command_line(conflict_pid) if conflict_pid is not None else ""
+            if conflict_pid is None:
+                print(f"[{core_engine.ts()}] [系统] 固定端口 {selected_port} 已釋放，繼續啟動。")
+            else:
+                print(f"[{core_engine.ts()}] [ERROR] 固定端口模式已启用，但端口 {selected_port} 已被占用，拒绝自动顺延。")
+                if conflict_pid > 0:
+                    print(f"[{core_engine.ts()}] [ERROR] 占用 PID: {conflict_pid}")
+                if cmdline:
+                    print(f"[{core_engine.ts()}] [ERROR] 占用进程命令行: {cmdline}")
+                raise SystemExit(1)
     else:
         selected_port = _find_first_available_port(WEB_HOST, WEB_PORT)
         if selected_port is None:
