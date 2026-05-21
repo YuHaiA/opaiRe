@@ -51,6 +51,13 @@ def _is_default_cluster_secret(secret: str) -> bool:
     return str(secret or "").strip() in {"", "wenfxl666"}
 
 
+def _running_under_systemd() -> bool:
+    return any(
+        os.getenv(name)
+        for name in ("INVOCATION_ID", "NOTIFY_SOCKET", "JOURNAL_STREAM", "SYSTEMD_EXEC_PID")
+    )
+
+
 def _calculate_file_sha256(file_path: str) -> str:
     digest = hashlib.sha256()
     with open(file_path, "rb") as handle:
@@ -63,7 +70,7 @@ def _calculate_file_sha256(file_path: str) -> str:
 WEB_HOST = os.getenv("WEB_HOST", "0.0.0.0").strip() or "0.0.0.0"
 WEB_PORT = _get_env_int("WEB_PORT", _get_env_int("PORT", 8000))
 WEB_PORT_SCAN_LIMIT = max(1, _get_env_int("WEB_PORT_SCAN_LIMIT", 20))
-WEB_PORT_STRICT = _get_env_bool("WEB_PORT_STRICT", False)
+WEB_PORT_STRICT = _get_env_bool("WEB_PORT_STRICT", _running_under_systemd())
 PID_FILE = os.path.join("data", "web_console.pid")
 
 
