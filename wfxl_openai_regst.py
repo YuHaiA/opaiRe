@@ -7,6 +7,7 @@ import threading
 import atexit
 import secrets
 import hashlib
+import re
 import uvicorn
 import warnings
 import subprocess
@@ -114,6 +115,25 @@ def _get_listener_pid(host: str, port: int):
                         return -1
         except Exception:
             return -1
+
+    try:
+        output = subprocess.check_output(
+            ["ss", "-ltnp"],
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+        )
+        target = f":{port}"
+        for raw_line in output.splitlines():
+            line = raw_line.strip()
+            if "LISTEN" not in line or target not in line:
+                continue
+            match = re.search(r"pid=(\d+)", line)
+            if match:
+                return int(match.group(1))
+            return -1
+    except Exception:
+        pass
 
     tester = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
