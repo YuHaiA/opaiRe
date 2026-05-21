@@ -248,6 +248,13 @@ def _build_requests_proxies() -> Optional[dict]:
     return {"http": proxy_url, "https": proxy_url}
 
 
+def _format_subscription_yaml_error(exc: Exception) -> str:
+    text = str(exc or "").strip()
+    if "could not determine a constructor for the tag" in text or "found unconstructable recursive node" in text:
+        return "订阅内容不是标准 YAML，或包含当前服务器不支持的标签。"
+    return "订阅 YAML 解析失败。"
+
+
 def _extract_port_from_url(url: str, fallback: int) -> int:
     text = str(url or "").strip()
     if not text:
@@ -824,7 +831,10 @@ def patch_and_update(url, target, subscription_id: str = ""):
         with open(MANUAL_SUBSCRIPTION_PATH, "w", encoding="utf-8") as f:
             f.write(raw_text)
 
-        raw_yaml = yaml.safe_load(raw_text)
+        try:
+            raw_yaml = yaml.safe_load(raw_text)
+        except yaml.YAMLError as exc:
+            return False, _format_subscription_yaml_error(exc)
         if not isinstance(raw_yaml, dict):
             if mode == "local_gui":
                 return True, "订阅链接已保存，但内容不是 YAML。当前为本地 GUI 模式，请让 GUI 自己导入该订阅链接。"
