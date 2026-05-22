@@ -670,12 +670,25 @@ def _build_sample_container_config():
     return {"allow-lan": True, "mixed-port": 7890}
 
 
+def _strip_conflicting_listener_ports(config_dict: dict, mixed_port: int) -> dict:
+    patched = dict(config_dict or {})
+    listener_keys = ("port", "mixed-port", "redir-port", "tproxy-port")
+    for key in listener_keys:
+        value = patched.get(key)
+        try:
+            if int(value) == int(mixed_port):
+                patched.pop(key, None)
+        except Exception:
+            continue
+    return patched
+
+
 def _write_single_core_config(raw_yaml: dict) -> dict:
     config_data = _read_runtime_config()
     clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
     mixed_port = _extract_port_from_url(config_data.get("default_proxy"), 7897)
     controller_port = _extract_port_from_url(clash_conf.get("api_url"), 9097)
-    patched = dict(raw_yaml)
+    patched = _strip_conflicting_listener_ports(raw_yaml, mixed_port)
     patched.update(
         {
             "mixed-port": mixed_port,
