@@ -4048,10 +4048,18 @@ async exportSub2Api() {
         backToClashGroups() {
             this.clashPool.view = 'groups';
         },
+        getClashHealthyNodes(group) {
+            if (!group?.name) return [];
+            const latest = this.clashPool.delayResults[group.name]?.healthy_nodes;
+            if (Array.isArray(latest)) {
+                return latest.filter(Boolean);
+            }
+            return Array.isArray(group.healthy_nodes) ? group.healthy_nodes.filter(Boolean) : [];
+        },
         getClashDelayRows(group) {
             if (!group || !Array.isArray(group.nodes)) return [];
             const resultMap = this.clashPool.delayResults[group.name]?.results || {};
-            const healthyNodes = Array.isArray(group.healthy_nodes) ? group.healthy_nodes.filter(Boolean) : [];
+            const healthyNodes = this.getClashHealthyNodes(group);
             const sourceNodes = healthyNodes.length ? healthyNodes : group.nodes;
             const rows = sourceNodes.map((nodeName) => ({
                 nodeName,
@@ -4072,7 +4080,7 @@ async exportSub2Api() {
             return rows;
         },
         getClashHealthyCount(group) {
-            return Array.isArray(group?.healthy_nodes) ? group.healthy_nodes.filter(Boolean).length : 0;
+            return this.getClashHealthyNodes(group).length;
         },
         async handleClashDeploy() {
             this.showToast('正在调整实例规模...', 'info');
@@ -4230,10 +4238,17 @@ async exportSub2Api() {
                 });
                 const data = await res.json();
                 if (data.status === 'success') {
-                    this.clashPool.delayResults[groupName] = data.data;
-                    const group = this.clashPool.groups.find(item => item.name === groupName);
+                    const runtimeGroupName = data.data?.group_name || groupName;
+                    const syncKeys = [...new Set([groupName, runtimeGroupName])];
+                    syncKeys.forEach((key) => {
+                        this.clashPool.delayResults[key] = data.data;
+                    });
+                    const group = this.clashPool.groups.find(item => item.name === runtimeGroupName || item.name === groupName);
                     if (group && Array.isArray(data.data?.healthy_nodes)) {
                         group.healthy_nodes = data.data.healthy_nodes;
+                    }
+                    if (this.clashPool.activeGroupName === groupName && runtimeGroupName) {
+                        this.clashPool.activeGroupName = runtimeGroupName;
                     }
                     this.showToast(data.message || '延迟测试完成', 'success');
                 } else {
