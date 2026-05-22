@@ -289,9 +289,23 @@ class DummyArgs:
         self.once = once
 
 def _worker_push_thread():
+    asyncio_ref = asyncio
+    json_ref = json
+    time_ref = time
+    subprocess_ref = subprocess
+    os_ref = os
+    sys_ref = sys
+    secrets_ref = secrets
     core = core_engine
     engine_ref = engine
     mail_service_ref = mail_service
+    append_log_ref = append_log
+    log_history_ref = log_history
+    db_manager_ref = db_manager
+    build_memory_report_ref = build_memory_report
+    base_dir = BASE_DIR
+    calculate_file_sha256 = _calculate_file_sha256
+    is_default_cluster_secret = _is_default_cluster_secret
     last_role = None
     log_cache = RecentParsedLogCache(limit=50)
     push_interval = 1.0
@@ -309,7 +323,7 @@ def _worker_push_thread():
                 "retries": 0,
                 "pwd_blocked": 0,
                 "phone_verify": 0,
-                "start_time": time.time(),
+                "start_time": time_ref.time(),
             }
         )
         mail_service_ref.start_mail_domain_runtime_tracking()
@@ -331,7 +345,7 @@ def _worker_push_thread():
         while True:
             try:
                 while not core.log_queue.empty():
-                    append_log(core.log_queue.get_nowait())
+                    append_log_ref(core.log_queue.get_nowait())
             except Exception:
                 pass
 
@@ -344,14 +358,14 @@ def _worker_push_thread():
                 if last_role != "master":
                     print(f"[{core.ts()}] [集群] 主控模式激活。")
                     last_role = "master"
-                await asyncio.sleep(0.5)
+                await asyncio_ref.sleep(0.5)
                 continue
 
-            if getattr(core.cfg, "CLUSTER_SYNC_REQUIRE_CUSTOM_SECRET", True) and _is_default_cluster_secret(secret):
+            if getattr(core.cfg, "CLUSTER_SYNC_REQUIRE_CUSTOM_SECRET", True) and is_default_cluster_secret(secret):
                 if last_role != "secret_invalid":
                     print(f"[{core.ts()}] [集群] ❌ 当前 cluster_secret 仍为默认值，请先修改集群秘钥后再连接主控。")
                     last_role = "secret_invalid"
-                await asyncio.sleep(3)
+                await asyncio_ref.sleep(3)
                 continue
 
             if master_url.startswith("http"):
@@ -372,7 +386,7 @@ def _worker_push_thread():
                         while True:
                             try:
                                 while not core.log_queue.empty():
-                                    append_log(core.log_queue.get_nowait())
+                                    append_log_ref(core.log_queue.get_nowait())
                             except Exception:
                                 pass
 
@@ -380,7 +394,7 @@ def _worker_push_thread():
                             is_running = engine_ref.is_running()
                             total = s["success"] + s["failed"]
                             if is_running:
-                                elapsed = round(time.time() - s["start_time"], 1) if s.get("start_time", 0) > 0 else 0
+                                elapsed = round(time_ref.time() - s["start_time"], 1) if s.get("start_time", 0) > 0 else 0
                                 s["_frozen_elapsed"] = elapsed
                             else:
                                 elapsed = s.get("_frozen_elapsed", 0)
@@ -403,7 +417,7 @@ def _worker_push_thread():
                                 else ("Sub2Api" if getattr(core.cfg, "ENABLE_SUB2API_MODE", False) else "常规量产"),
                             }
                             try:
-                                memory_report = build_memory_report(getattr(core.cfg, "_c", {}))
+                                memory_report = build_memory_report_ref(getattr(core.cfg, "_c", {}))
                                 stats_payload["memory"] = {
                                     "rss_mb": memory_report.get("actual", {}).get("rss_mb"),
                                     "predicted_mid_mb": memory_report.get("prediction", {}).get("predicted_mb", {}).get("mid"),
@@ -414,23 +428,23 @@ def _worker_push_thread():
                             except Exception:
                                 pass
 
-                            _, parsed_logs, changed = log_cache.refresh(log_history)
+                            _, parsed_logs, changed = log_cache.refresh(log_history_ref)
                             if changed or is_running:
-                                await ws.send(json.dumps({"stats": stats_payload, "logs": parsed_logs}))
+                                await ws.send(json_ref.dumps({"stats": stats_payload, "logs": parsed_logs}))
                             else:
-                                await ws.send(json.dumps({"stats": stats_payload}))
+                                await ws.send(json_ref.dumps({"stats": stats_payload}))
 
                             resp_str = await ws.recv()
-                            cmd = json.loads(resp_str).get("command", "none")
+                            cmd = json_ref.loads(resp_str).get("command", "none")
 
                             if cmd == "restart":
                                 print(f"[{core.ts()}] [集群] 🔄 收到总控重启指令，正在重启...")
 
                                 def _do_restart():
-                                    time.sleep(1)
-                                    sys.stdout.flush()
-                                    subprocess.Popen([sys.executable] + sys.argv)
-                                    os._exit(0)
+                                    time_ref.sleep(1)
+                                    sys_ref.stdout.flush()
+                                    subprocess_ref.Popen([sys_ref.executable] + sys_ref.argv)
+                                    os_ref._exit(0)
 
                                 threading.Thread(target=_do_restart, daemon=True).start()
                             elif cmd == "start" and not is_running:
@@ -451,25 +465,25 @@ def _worker_push_thread():
                                             getattr(core.cfg, "CLUSTER_SYNC_SHARED_DIR", "data/cluster_sync")
                                             or "data/cluster_sync"
                                         ).strip()
-                                        shared_root = shared_dir if os.path.isabs(shared_dir) else os.path.join(BASE_DIR, shared_dir)
-                                        node_dir = os.path.join(shared_root, node_name)
-                                        os.makedirs(node_dir, exist_ok=True)
+                                        shared_root = shared_dir if os_ref.path.isabs(shared_dir) else os_ref.path.join(base_dir, shared_dir)
+                                        node_dir = os_ref.path.join(shared_root, node_name)
+                                        os_ref.makedirs(node_dir, exist_ok=True)
                                         secret_value = str(secret or "").strip()
-                                        if getattr(core.cfg, "CLUSTER_SYNC_REQUIRE_CUSTOM_SECRET", True) and _is_default_cluster_secret(secret_value):
+                                        if getattr(core.cfg, "CLUSTER_SYNC_REQUIRE_CUSTOM_SECRET", True) and is_default_cluster_secret(secret_value):
                                             raise RuntimeError("请先配置自定义 cluster_secret 后再发起同步")
-                                        local_accounts = db_manager.get_all_accounts_with_token(0, 0)
+                                        local_accounts = db_manager_ref.get_all_accounts_with_token(0, 0)
                                         if not local_accounts:
                                             print(f"[{core.ts()}] [系统] ⚠️ 本地库存为空，无账号可提取。")
                                             return
                                         max_records = max(1, int(getattr(core.cfg, "CLUSTER_SYNC_MAX_RECORDS", 100000) or 100000))
                                         if len(local_accounts) > max_records:
                                             raise RuntimeError(f"同步记录数量超限，当前 {len(local_accounts)}，上限 {max_records}")
-                                        task_id = f"{node_name}-{int(time.time())}-{secrets.token_hex(4)}"
-                                        file_path = os.path.join(node_dir, f"{task_id}.jsonl")
+                                        task_id = f"{node_name}-{int(time_ref.time())}-{secrets_ref.token_hex(4)}"
+                                        file_path = os_ref.path.join(node_dir, f"{task_id}.jsonl")
                                         with open(file_path, "w", encoding="utf-8") as handle:
                                             for acc in local_accounts:
                                                 handle.write(
-                                                    json.dumps(
+                                                    json_ref.dumps(
                                                         {
                                                             "email": acc.get("email"),
                                                             "password": acc.get("password"),
@@ -479,11 +493,11 @@ def _worker_push_thread():
                                                     )
                                                     + "\n"
                                                 )
-                                        file_size = os.path.getsize(file_path)
+                                        file_size = os_ref.path.getsize(file_path)
                                         max_file_size = max(1, int(getattr(core.cfg, "CLUSTER_SYNC_MAX_FILE_SIZE_MB", 20) or 20)) * 1024 * 1024
                                         if file_size > max_file_size:
                                             raise RuntimeError(f"同步文件大小超限，当前 {file_size} 字节，上限 {max_file_size} 字节")
-                                        file_sha256 = _calculate_file_sha256(file_path)
+                                        file_sha256 = calculate_file_sha256(file_path)
                                         print(f"[{core.ts()}] [系统] 📦 账号文件已导出: {file_path}，共 {len(local_accounts)} 个账号。")
                                         req_data = {
                                             "node_name": node_name,
@@ -494,7 +508,7 @@ def _worker_push_thread():
                                             "total_count": len(local_accounts),
                                             "file_sha256": file_sha256,
                                         }
-                                        req_body = json.dumps(req_data).encode("utf-8")
+                                        req_body = json_ref.dumps(req_data).encode("utf-8")
                                         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
                                         upload_timeout = getattr(core.cfg, "CLUSTER_UPLOAD_TIMEOUT_SEC", 15)
                                         upload_req = urllib.request.Request(
@@ -505,7 +519,7 @@ def _worker_push_thread():
                                         with opener.open(upload_req, timeout=upload_timeout) as resp:
                                             resp_body = resp.read().decode("utf-8", errors="replace").strip()
                                         try:
-                                            resp_json = json.loads(resp_body) if resp_body else {}
+                                            resp_json = json_ref.loads(resp_body) if resp_body else {}
                                         except Exception:
                                             raise RuntimeError(f"主控返回了非 JSON 响应: {resp_body[:200]}")
                                         if resp_json.get("status") != "success":
@@ -514,20 +528,20 @@ def _worker_push_thread():
                                     except Exception as e:
                                         if file_path:
                                             try:
-                                                if os.path.exists(file_path):
-                                                    os.remove(file_path)
+                                                if os_ref.path.exists(file_path):
+                                                    os_ref.remove(file_path)
                                             except Exception:
                                                 pass
                                         print(f"[{core.ts()}] [ERROR] ❌ 账号同步任务提交失败: {e}")
 
                                 threading.Thread(target=_upload_task, daemon=True).start()
 
-                            await asyncio.sleep(push_interval if is_running else 3.0)
+                            await asyncio_ref.sleep(push_interval if is_running else 3.0)
                 except Exception:
                     pass
-            await asyncio.sleep(3)
+            await asyncio_ref.sleep(3)
 
-    asyncio.run(_ws_loop())
+    asyncio_ref.run(_ws_loop())
 
 threading.Thread(target=_worker_push_thread, daemon=True).start()
 
