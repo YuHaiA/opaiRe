@@ -3224,7 +3224,7 @@
                                                         </div>
                                                         <span v-if="sub.selected" class="px-2.5 py-1 rounded-full bg-sky-700 text-white border border-sky-500 text-[10px] font-black shrink-0 shadow-sm shadow-sky-500/20">当前订阅</span>
                                                     </div>
-                                                    <div class="text-[11px] mt-2 truncate font-mono leading-relaxed" :class="sub.selected ? 'text-sky-700/80 font-bold' : 'text-slate-400'" :title="sub.url">{{ sub.url }}</div>
+                                                    <div class="text-[11px] mt-2 truncate font-mono leading-relaxed" :class="sub.selected ? 'text-sky-700/80 font-bold' : 'text-slate-400'" :title="sub.display_url || sub.url">{{ sub.display_url || sub.url }}</div>
                                                 </div>
                                                 <div class="flex gap-2 shrink-0">
                                                     <button @click="selectClashSubscription(sub.id)" :disabled="clashPool.subscriptionActionLoading || sub.selected" class="h-9 px-4 rounded-full bg-sky-600 text-white text-xs font-black hover:bg-sky-700 active:scale-95 disabled:opacity-60 transition-all">切换</button>

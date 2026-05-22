@@ -748,6 +748,7 @@ createApp({
         resolveClashSubscriptionUrl(rawUrl) {
             const text = String(rawUrl || '').trim();
             if (!text) return '';
+            if (/^[a-z][a-z0-9+\-.]*:\/\//i.test(text)) return text;
             if (/^https?:\/\//i.test(text)) return text;
             if (text.startsWith('//')) return `${window.location.protocol}${text}`;
             const base = window.location.origin.replace(/\/+$/, '');
@@ -3999,7 +4000,8 @@ async exportSub2Api() {
                     this.clashPool.subscriptions = (d.data.subscriptions?.items || []).map((item) => ({
                         ...item,
                         raw_url: item.url,
-                        url: this.resolveClashSubscriptionUrl(item.url)
+                        url: this.resolveClashSubscriptionUrl(item.url),
+                        display_url: item.display_url || this.resolveClashSubscriptionUrl(item.url)
                     }));
                     this.clashPool.mode = d.data.mode || '';
                     this.clashPool.message = d.data.message || '';
@@ -4014,7 +4016,8 @@ async exportSub2Api() {
                         this.config.clash_proxy_pool.sub_urls = this.clashPool.subscriptions.map((item) => ({
                             id: item.id,
                             name: item.name,
-                            url: item.raw_url || item.url || ''
+                            url: item.raw_url || item.url || '',
+                            display_url: item.display_url || item.raw_url || item.url || ''
                         }));
                     }
                     const activeExists = this.clashPool.groups.some(group => group.name === this.clashPool.activeGroupName);

@@ -26,6 +26,7 @@ HOST_BASE_PATH = os.path.join(HOST_PROJECT_PATH, "data", "mihomo-pool")
 IMAGE_NAME = "metacubex/mihomo:latest"
 MANUAL_SUBSCRIPTION_PATH = os.path.join(BASE_PATH, "manual-subscription.txt")
 MANUAL_CONFIG_PATH = os.path.join(BASE_PATH, "manual-config.yaml")
+IMPORTED_SUBSCRIPTION_DIR = os.path.join(BASE_PATH, "imported-subscriptions")
 SINGLE_CORE_LOG_PATH = os.path.join(BASE_PATH, "mihomo-core.log")
 SINGLE_CORE_PID_PATH = os.path.join(BASE_PATH, "mihomo-core.pid")
 
@@ -74,10 +75,12 @@ def _normalize_subscriptions(raw_items, selected_url: str = "") -> list[dict]:
             url = item.strip()
             name = url
             item_id = uuid4().hex[:8]
+            display_url = url
         elif isinstance(item, dict):
             url = str(item.get("url") or "").strip()
             name = str(item.get("name") or item.get("label") or url or "未命名订阅").strip()
             item_id = str(item.get("id") or uuid4().hex[:8]).strip()
+            display_url = str(item.get("display_url") or item.get("source_url") or url or "").strip()
         else:
             continue
         if name == "当前订阅":
@@ -85,11 +88,11 @@ def _normalize_subscriptions(raw_items, selected_url: str = "") -> list[dict]:
         if not url or url in seen:
             continue
         seen.add(url)
-        items.append({"id": item_id, "name": name or url, "url": url})
+        items.append({"id": item_id, "name": name or url, "url": url, "display_url": display_url or url})
 
     selected_url = str(selected_url or "").strip()
     if selected_url and selected_url not in seen:
-        items.insert(0, {"id": uuid4().hex[:8], "name": "当前订阅", "url": selected_url})
+        items.insert(0, {"id": uuid4().hex[:8], "name": "当前订阅", "url": selected_url, "display_url": selected_url})
     return items
 
 
@@ -98,10 +101,28 @@ def _normalize_single_subscription_url(url: str, resolved_url: str = "") -> str:
     if explicit:
         return explicit
     raw = str(url or "").strip()
+    if raw.startswith("local://"):
+        return raw
     parsed = urllib.parse.urlparse(raw)
     if parsed.scheme in {"http", "https"}:
         return raw
     return raw
+
+
+def _resolve_imported_subscription_path(url: str) -> str:
+    raw = str(url or "").strip()
+    prefix = "local://imported/"
+    if not raw.startswith(prefix):
+        return ""
+    relative = raw[len(prefix):].replace("\\", "/").strip("/")
+    if not relative:
+        return ""
+    os.makedirs(IMPORTED_SUBSCRIPTION_DIR, exist_ok=True)
+    candidate = os.path.abspath(os.path.join(IMPORTED_SUBSCRIPTION_DIR, relative))
+    imported_root = os.path.abspath(IMPORTED_SUBSCRIPTION_DIR)
+    if not candidate.startswith(imported_root + os.sep) and candidate != imported_root:
+        return ""
+    return candidate
 
 
 def get_subscription_state() -> dict:
@@ -835,14 +856,21 @@ def patch_and_update(url, target, subscription_id: str = ""):
     mode = _detect_runtime_mode(client)
     try:
         normalized_url = _normalize_single_subscription_url(url)
-        parsed = urllib.parse.urlparse(normalized_url)
-        if parsed.scheme not in {"http", "https"}:
-            return False, "订阅链接不是完整的 http/https URL，无法在服务器端直接拉取。"
-        proxies = _build_requests_proxies()
-        fetch_result = fetch_subscription_text(normalized_url, proxies=proxies)
-        if not fetch_result.ok:
-            return False, fetch_result.message
-        raw_text = fetch_result.text
+        imported_path = _resolve_imported_subscription_path(normalized_url)
+        if imported_path:
+            if not os.path.exists(imported_path):
+                return False, "本地导入订阅文件不存在。"
+            with open(imported_path, "r", encoding="utf-8") as f:
+                raw_text = f.read()
+        else:
+            parsed = urllib.parse.urlparse(normalized_url)
+            if parsed.scheme not in {"http", "https"}:
+                return False, "订阅链接不是完整的 http/https URL，无法在服务器端直接拉取。"
+            proxies = _build_requests_proxies()
+            fetch_result = fetch_subscription_text(normalized_url, proxies=proxies)
+            if not fetch_result.ok:
+                return False, fetch_result.message
+            raw_text = fetch_result.text
         _persist_sub_url(normalized_url, subscription_id)
         os.makedirs(BASE_PATH, exist_ok=True)
         with open(MANUAL_SUBSCRIPTION_PATH, "w", encoding="utf-8") as f:
