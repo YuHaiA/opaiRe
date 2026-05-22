@@ -733,7 +733,7 @@ def _start_single_core() -> tuple[bool, str]:
     api_port = _extract_port_from_url(clash_conf.get("api_url"), 9097)
     secret = str(clash_conf.get("secret") or "").strip()
     last_error = ""
-    for _ in range(12):
+    for _ in range(30):
         time.sleep(0.5)
         try:
             headers = {"Authorization": f"Bearer {secret}"} if secret else {}

@@ -1029,6 +1029,14 @@ async def save_config(new_config: dict, token: str = Depends(verify_token)):
         new_default_proxy = str(new_config.get("default_proxy") or "").strip()
         old_clash_conf = current_config.get("clash_proxy_pool", {}) if isinstance(current_config.get("clash_proxy_pool"), dict) else {}
         new_clash_conf = new_config.get("clash_proxy_pool", {}) if isinstance(new_config.get("clash_proxy_pool"), dict) else {}
+        if new_clash_conf:
+            # 订阅列表/选中态由专用 Clash API 维护，普通“保存配置”不允许用前端旧快照把它们覆盖回去。
+            for key in ("sub_urls", "selected_subscription_id", "tested_nodes"):
+                if key in old_clash_conf:
+                    new_clash_conf[key] = old_clash_conf.get(key)
+            if not str(new_clash_conf.get("sub_url") or "").strip() and str(old_clash_conf.get("sub_url") or "").strip():
+                new_clash_conf["sub_url"] = old_clash_conf.get("sub_url")
+            new_config["clash_proxy_pool"] = new_clash_conf
         clash_runtime_related_changed = any([
             old_default_proxy != new_default_proxy,
             str(old_clash_conf.get("api_url") or "").strip() != str(new_clash_conf.get("api_url") or "").strip(),

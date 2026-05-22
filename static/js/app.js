@@ -4008,6 +4008,15 @@ async exportSub2Api() {
                     }
                     const currentSub = this.clashPool.subscriptions.find(item => item.selected) || this.clashPool.subscriptions[0] || null;
                     this.clashPool.subUrl = currentSub?.url || '';
+                    if (this.config && this.config.clash_proxy_pool) {
+                        this.config.clash_proxy_pool.sub_url = d.data.subscriptions?.selected_url || this.clashPool.subUrl || '';
+                        this.config.clash_proxy_pool.selected_subscription_id = d.data.subscriptions?.selected_id || '';
+                        this.config.clash_proxy_pool.sub_urls = this.clashPool.subscriptions.map((item) => ({
+                            id: item.id,
+                            name: item.name,
+                            url: item.raw_url || item.url || ''
+                        }));
+                    }
                     const activeExists = this.clashPool.groups.some(group => group.name === this.clashPool.activeGroupName);
                     if (this.clashPool.groups.length > 0) {
                         if (!activeExists) {
