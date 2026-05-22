@@ -31,6 +31,23 @@ SINGLE_CORE_LOG_PATH = os.path.join(BASE_PATH, "mihomo-core.log")
 SINGLE_CORE_PID_PATH = os.path.join(BASE_PATH, "mihomo-core.pid")
 
 
+class _PermissiveSafeLoader(yaml.SafeLoader):
+    pass
+
+
+def _construct_unknown_yaml_tag(loader, tag_suffix, node):
+    if isinstance(node, yaml.ScalarNode):
+        return loader.construct_scalar(node)
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node)
+    if isinstance(node, yaml.MappingNode):
+        return loader.construct_mapping(node)
+    return None
+
+
+_PermissiveSafeLoader.add_multi_constructor("", _construct_unknown_yaml_tag)
+
+
 def get_client():
     try:
         return docker.from_env()
@@ -278,6 +295,10 @@ def _format_subscription_yaml_error(exc: Exception) -> str:
     if "could not determine a constructor for the tag" in text or "found unconstructable recursive node" in text:
         return "订阅内容不是标准 YAML，或包含当前服务器不支持的标签。"
     return "订阅 YAML 解析失败。"
+
+
+def _load_subscription_yaml(raw_text: str):
+    return yaml.load(str(raw_text or ""), Loader=_PermissiveSafeLoader)
 
 
 def _extract_port_from_url(url: str, fallback: int) -> int:
@@ -877,7 +898,7 @@ def patch_and_update(url, target, subscription_id: str = ""):
             f.write(raw_text)
 
         try:
-            raw_yaml = yaml.safe_load(raw_text)
+            raw_yaml = _load_subscription_yaml(raw_text)
         except yaml.YAMLError as exc:
             return False, _format_subscription_yaml_error(exc)
         if not isinstance(raw_yaml, dict):

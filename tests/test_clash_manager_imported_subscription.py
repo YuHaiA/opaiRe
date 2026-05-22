@@ -17,6 +17,11 @@ class ClashManagerImportedSubscriptionTests(unittest.TestCase):
                 escaped = clash_manager._resolve_imported_subscription_path("local://imported/../../secret.txt")
                 self.assertEqual("", escaped)
 
+    def test_load_subscription_yaml_accepts_unknown_scalar_tags(self):
+        raw_text = "proxies:\n  - name: demo\n    password: !<str> 162534\n"
+        data = clash_manager._load_subscription_yaml(raw_text)
+        self.assertEqual("162534", data["proxies"][0]["password"])
+
 
 if __name__ == "__main__":
     unittest.main()
