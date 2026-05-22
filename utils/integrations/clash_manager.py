@@ -5,6 +5,7 @@ import socket
 import subprocess
 import time
 import urllib.parse
+import copy
 from typing import Optional, Tuple, Union
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import uuid4
@@ -38,6 +39,9 @@ def get_client():
 
 
 def _read_runtime_config() -> dict:
+    runtime_cfg = getattr(cfg, "_c", None)
+    if isinstance(runtime_cfg, dict) and runtime_cfg:
+        return copy.deepcopy(runtime_cfg)
     config_path = os.path.join(os.getcwd(), "data", "config.yaml")
     if not os.path.exists(config_path):
         return {}
