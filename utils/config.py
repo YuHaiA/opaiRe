@@ -554,7 +554,12 @@ def reload_all_configs(new_config_dict=None):
             db_config = get_sys_kv("global_app_config")
             if db_config:
                 deep_update_config(base_yaml_config, db_config)
-                _c = db_config
+                _c = base_yaml_config
+                # 云端配置可能残缺（之前被写坏过），修复后写回完整配置
+                try:
+                    set_sys_kv("global_app_config", _c)
+                except Exception:
+                    pass
             else:
                 _c = base_yaml_config
                 set_sys_kv("global_app_config", _c)
