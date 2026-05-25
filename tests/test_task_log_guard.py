@@ -8,6 +8,7 @@ class TaskLogGuardTests(unittest.TestCase):
         task_log_guard.end_task()
         task_log_guard.reset_bucket("bucket-a")
         task_log_guard.reset_bucket("bucket-b")
+        task_log_guard.clear_batch("batch-a")
 
     def test_ignored_oauth_401_does_not_increment_counter(self):
         task_log_guard.start_task("bucket-a")
@@ -16,6 +17,7 @@ class TaskLogGuardTests(unittest.TestCase):
 
     def test_timeout_reaches_abort_threshold_on_third_hit(self):
         task_log_guard.start_task("bucket-a")
+        task_log_guard.bind_task_batch("batch-a")
         timeout_log = (
             "请求失败(第 1 次)Failed to perform, curl: (28) Connection timed out after 15002 milliseconds."
         )
@@ -29,6 +31,17 @@ class TaskLogGuardTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.bucket_id, "bucket-a")
         self.assertEqual(ctx.exception.count, 3)
+        self.assertTrue(task_log_guard.is_batch_aborted("batch-a"))
+
+    def test_raise_if_current_batch_aborted_interrupts_peer_worker(self):
+        task_log_guard.start_task("bucket-a")
+        task_log_guard.bind_task_batch("batch-a")
+        task_log_guard.abort_batch("batch-a")
+
+        with self.assertRaises(task_log_guard.BatchAbortError) as ctx:
+            task_log_guard.raise_if_current_batch_aborted()
+
+        self.assertEqual("batch-a", ctx.exception.batch_id)
 
     def test_success_marker_resets_bucket(self):
         task_log_guard.start_task("bucket-b")

@@ -18,22 +18,33 @@ _IGNORED_RULES = (
 _thread_local = threading.local()
 _tracker_lock = threading.Lock()
 _bucket_counts: dict[str, int] = {}
+_aborted_batches: set[str] = set()
 
 
 @dataclass
 class TaskContext:
     bucket_id: str
     label: str
+    batch_id: str = ""
 
 
 class TaskAbortError(BaseException):
-    def __init__(self, bucket_id: str, count: int, kind: str, message: str, label: str = ""):
+    def __init__(self, bucket_id: str, count: int, kind: str, message: str, label: str = "", batch_id: str = ""):
         super().__init__(message)
         self.bucket_id = bucket_id
         self.count = count
         self.kind = kind
         self.message = message
         self.label = label or bucket_id
+        self.batch_id = batch_id
+
+
+class BatchAbortError(BaseException):
+    def __init__(self, batch_id: str, bucket_id: str = "", label: str = ""):
+        super().__init__(batch_id)
+        self.batch_id = batch_id
+        self.bucket_id = bucket_id
+        self.label = label or bucket_id or batch_id
 
 
 def start_task(bucket_id: str, label: str = "") -> None:
@@ -41,6 +52,13 @@ def start_task(bucket_id: str, label: str = "") -> None:
         _thread_local.current_task = None
         return
     _thread_local.current_task = TaskContext(bucket_id=bucket_id, label=label or bucket_id)
+
+
+def bind_task_batch(batch_id: str) -> None:
+    context: Optional[TaskContext] = getattr(_thread_local, "current_task", None)
+    if context is None:
+        return
+    context.batch_id = str(batch_id or "").strip()
 
 
 def end_task() -> None:
@@ -78,6 +96,42 @@ def mark_task_success(bucket_id: str) -> None:
     reset_bucket(bucket_id)
 
 
+def abort_batch(batch_id: str) -> None:
+    normalized = str(batch_id or "").strip()
+    if not normalized:
+        return
+    with _tracker_lock:
+        _aborted_batches.add(normalized)
+
+
+def clear_batch(batch_id: str) -> None:
+    normalized = str(batch_id or "").strip()
+    if not normalized:
+        return
+    with _tracker_lock:
+        _aborted_batches.discard(normalized)
+
+
+def is_batch_aborted(batch_id: str) -> bool:
+    normalized = str(batch_id or "").strip()
+    if not normalized:
+        return False
+    with _tracker_lock:
+        return normalized in _aborted_batches
+
+
+def raise_if_current_batch_aborted() -> None:
+    context: Optional[TaskContext] = getattr(_thread_local, "current_task", None)
+    if context is None or not context.batch_id:
+        return
+    if is_batch_aborted(context.batch_id):
+        raise BatchAbortError(
+            batch_id=context.batch_id,
+            bucket_id=context.bucket_id,
+            label=context.label,
+        )
+
+
 def observe_log_message(message: str) -> None:
     context: Optional[TaskContext] = getattr(_thread_local, "current_task", None)
     if context is None:
@@ -92,10 +146,13 @@ def observe_log_message(message: str) -> None:
         _bucket_counts[context.bucket_id] = next_count
 
     if next_count >= COUNTABLE_ERROR_LIMIT:
+        if context.batch_id:
+            abort_batch(context.batch_id)
         raise TaskAbortError(
             bucket_id=context.bucket_id,
             count=next_count,
             kind=kind,
             message=str(message or "").strip(),
             label=context.label,
+            batch_id=context.batch_id,
         )

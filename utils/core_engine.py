@@ -730,6 +730,7 @@ def _execute_registration_run(proxy, args, cpa_upload=False, skip_switch=False, 
     bucket_id = get_failure_bucket_id(proxy)
     try:
         task_log_guard.start_task(bucket_id, label=bucket_id)
+        task_log_guard.bind_task_batch(str(batch_id or ""))
         result = run(
             proxy,
             run_ctx=run_ctx,
@@ -750,6 +751,8 @@ def _execute_registration_run(proxy, args, cpa_upload=False, skip_switch=False, 
             print(f"[{ts()}] [INFO] 节点池处理完成: {remove_msg}")
         else:
             print(f"[{ts()}] [WARNING] 节点池处理未完成: {remove_msg}")
+        return None, "switch_node"
+    except task_log_guard.BatchAbortError:
         return None, "switch_node"
     except Exception as e:
         print(f"[{ts()}] [ERROR] 注册线程发生未捕获异常{e}")
@@ -1091,9 +1094,8 @@ def normal_main_loop(args, stop_event: threading.Event, executor=None):
                     and getattr(cfg, 'ENABLE_MAIL_DOMAIN_RUNTIME_CONTROL', False)
                 )
                 preallocated_domains = []
-                batch_id = None
+                batch_id = int(time.time() * 1000) if current_batch > 1 else None
                 if should_preallocate_domains:
-                    batch_id = int(time.time() * 1000)
                     domain_pool = mail_service.get_configured_main_domains_snapshot()
                     preallocated_domains = mail_service.preallocate_main_domains_for_batch(domain_pool, current_batch)
 
@@ -1164,6 +1166,7 @@ def normal_main_loop(args, stop_event: threading.Event, executor=None):
                                 success_count += 1
                             elif worker_status == "switch_node":
                                 skip_wait_after_round = True
+                task_log_guard.clear_batch(str(batch_id or ""))
             else:
                 if cfg.is_raw_proxy_pool_enabled():
                     borrowed_generation, p = cfg.unpack_proxy_queue_item(cfg.PROXY_QUEUE.get())
@@ -1413,7 +1416,7 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
                     remaining  = need_to_reg - success_in_this_cycle
                     batch_size = min(cfg.REG_THREADS, remaining)
                     preallocated_domains = []
-                    batch_id = None
+                    batch_id = int(time.time() * 1000) if batch_size > 1 else None
                     batch_force_switch = False
 
                     if cfg._clash_enable and not cfg._clash_pool_mode:
@@ -1426,7 +1429,6 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
                         and batch_size > 1
                         and getattr(cfg, 'ENABLE_MAIL_DOMAIN_RUNTIME_CONTROL', False)
                     ):
-                        batch_id = int(time.time() * 1000)
                         domain_pool = mail_service.get_configured_main_domains_snapshot()
                         preallocated_domains = mail_service.preallocate_main_domains_for_batch(domain_pool, batch_size)
 
@@ -1498,6 +1500,7 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
                             await asyncio.sleep(5)
                     if cfg.EMAIL_API_MODE in ["local_microsoft", "gmail_fission"]:
                         global_postman_fleet.clear_fleet()
+                    task_log_guard.clear_batch(str(batch_id or ""))
                     if batch_force_switch:
                         print(f"[{ts()}] [INFO] 当前故障节点已剔除，立即切换到下一批补货任务...")
                         continue
@@ -1674,7 +1677,7 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                     remaining  = need_to_reg - success_in_this_cycle
                     batch_size = min(cfg.REG_THREADS, remaining)
                     preallocated_domains = []
-                    batch_id = None
+                    batch_id = int(time.time() * 1000) if batch_size > 1 else None
                     batch_force_switch = False
 
                     if cfg._clash_enable and not cfg._clash_pool_mode:
@@ -1687,7 +1690,6 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                         and batch_size > 1
                         and getattr(cfg, 'ENABLE_MAIL_DOMAIN_RUNTIME_CONTROL', False)
                     ):
-                        batch_id = int(time.time() * 1000)
                         domain_pool = mail_service.get_configured_main_domains_snapshot()
                         preallocated_domains = mail_service.preallocate_main_domains_for_batch(domain_pool, batch_size)
 
@@ -1766,6 +1768,7 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                             except asyncio.TimeoutError: pass
                     if cfg.EMAIL_API_MODE in ["local_microsoft", "gmail_fission"]:
                         global_postman_fleet.clear_fleet()
+                    task_log_guard.clear_batch(str(batch_id or ""))
                     if batch_force_switch:
                         print(f"[{ts()}] [INFO] 当前故障节点已剔除，立即切换到下一批 Sub2API 任务...")
                         continue

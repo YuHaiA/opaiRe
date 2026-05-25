@@ -6,6 +6,7 @@ from typing import Optional
 import json
 from curl_cffi import requests
 from utils import config as cfg
+from utils import task_log_guard
 from utils.email_providers.mail_service import get_email_and_token, get_oai_code, mask_email,_extract_otp_code
 from utils.integrations.hero_sms import _try_verify_phone_via_hero_sms
 from utils.integrations.fivesim_sms import try_verify_phone_via_fivesim
@@ -27,6 +28,7 @@ def run(
     worker_index: Optional[int] = None,
 ) -> tuple:
     processed_mails: set = set()
+    task_log_guard.raise_if_current_batch_aborted()
     proxy = cfg.format_docker_url(proxy)
     if proxy and proxy.startswith("socks5://"):
         proxy = proxy.replace("socks5://", "socks5h://")
@@ -81,6 +83,7 @@ def run(
         MAX_REG_RETRIES = 2
 
         for attempt in range(MAX_REG_RETRIES):
+            task_log_guard.raise_if_current_batch_aborted()
             if s_reg is not None:
                 try:
                     s_reg.close()
@@ -350,6 +353,7 @@ def run(
                         code = ""
                         code_resp = None
                         for resend_attempt in range(max(1, cfg.MAX_OTP_RETRIES)):
+                            task_log_guard.raise_if_current_batch_aborted()
                             if getattr(cfg, 'GLOBAL_STOP', False): return None, None
                             if resend_attempt > 0:
                                 is_openai_cpa = getattr(cfg, 'EMAIL_API_MODE', '')
@@ -724,6 +728,7 @@ def run(
                         login_code_oauth = ""
                         login_code_resp = None
                         for login_code_attempt in range(max(1, cfg.MAX_OTP_RETRIES)):
+                            task_log_guard.raise_if_current_batch_aborted()
                             if getattr(cfg, 'GLOBAL_STOP', False): return None, None
                             if login_code_attempt > 0:
                                 print(

@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from curl_cffi import requests
 from utils import config as cfg
+from utils import task_log_guard
 
 
 def _ssl_verify() -> bool:
@@ -37,6 +38,7 @@ def _post_form(
     }
     last_error: Optional[Exception] = None
     for attempt in range(retries + 1):
+        task_log_guard.raise_if_current_batch_aborted()
         try:
             resp = requests.post(
                 url, data=data, headers=headers,
@@ -74,6 +76,7 @@ def _post_with_retry(
     last_error: Optional[Exception] = None
     for attempt in range(retries + 1):
         if getattr(cfg, 'GLOBAL_STOP', False): raise RuntimeError("系统已停止，强制中断网络请求")
+        task_log_guard.raise_if_current_batch_aborted()
         try:
             if json_body is not None:
                 return session.post(
@@ -124,6 +127,7 @@ def _follow_redirect_chain_local(
     current_url = start_url
     response = None
     for _ in range(max_redirects):
+        task_log_guard.raise_if_current_batch_aborted()
         try:
             response = session.get(
                 current_url,
