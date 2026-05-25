@@ -523,17 +523,30 @@ def reload_all_configs(new_config_dict=None):
             print(f"[{ts()}] [WARNING] 无法连接到云端数据库，退回本地 YAML 模式: {e}")
 
     if new_config_dict is not None:
-        _c = new_config_dict
+        # 合并策略：以 base_yaml_config（当前完整配置）为基础，
+        # 仅将 new_config_dict 中显式提供的 key 覆盖进去
+        # 对于嵌套 dict，递归合并确保不丢失未提供的子 key
+        def _deep_merge(base, overlay):
+            """递归合并 overlay 到 base，仅覆盖 overlay 中出现的 key"""
+            for key, value in overlay.items():
+                if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+                    _deep_merge(base[key], value)
+                else:
+                    base[key] = value
+
+        merged = dict(base_yaml_config)  # 当前完整配置
+        _deep_merge(merged, new_config_dict)  # 仅覆盖 new_config_dict 有的 key
+        _c = merged
         try:
             with CONFIG_FILE_LOCK:
                 with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-                    yaml.dump(new_config_dict, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
+                    yaml.dump(merged, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
         except Exception:
             pass
 
         if is_cloud_db and db_ready:
             try:
-                set_sys_kv("global_app_config", new_config_dict)
+                set_sys_kv("global_app_config", merged)
             except Exception:
                 pass
     else:
