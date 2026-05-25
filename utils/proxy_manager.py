@@ -219,6 +219,13 @@ def evict_current_proxy_or_node(proxy_url=None):
     runtime_cfg.reload_all_configs(new_config_dict=config_data)
     return True, f"已拉黑 Clash 节点 [{clean_for_log(current_node)}]"
 
+
+def evict_failed_switch_candidate(proxy_url=None, candidate_name: str = "") -> tuple[bool, str]:
+    candidate_name = str(candidate_name or "").strip()
+    if candidate_name:
+        _remember_current_node(proxy_url, candidate_name)
+    return evict_current_proxy_or_node(proxy_url)
+
 def test_proxy_liveness(proxy_url=None):
     """测试当前代理是否可用 (脱敏)"""
     raw_url = proxy_url if proxy_url else LOCAL_PROXY_URL
@@ -379,6 +386,13 @@ def _do_smart_switch(proxy_url=None):
                             if test_proxy_liveness(proxy_url):
                                 _remember_current_node(proxy_url, best_node)
                                 return True
+                            removed, remove_msg = evict_failed_switch_candidate(proxy_url, best_node)
+                            if removed:
+                                print(f"[{ts()}] [代理池] {display_name} 测活失败，已剔除节点: {remove_msg}")
+                            else:
+                                print(f"[{ts()}] [代理池] {display_name} 测活失败，剔除节点失败: {remove_msg}")
+                            valid_nodes = [n for n in valid_nodes if n != best_node]
+                            nodes_with_delay = [item for item in nodes_with_delay if item[0] != best_node]
                             print(f"[{ts()}] [代理池] {display_name} 最快节点测活失败，回退到随机抽卡模式...")
                     else:
                         print(f"[{ts()}] [代理池] {display_name} 所有节点均超时，回退到随机抽卡模式...")
@@ -406,6 +420,12 @@ def _do_smart_switch(proxy_url=None):
                 if test_proxy_liveness(proxy_url):
                     _remember_current_node(proxy_url, selected_node)
                     return True
+                removed, remove_msg = evict_failed_switch_candidate(proxy_url, selected_node)
+                if removed:
+                    print(f"[{ts()}] [代理池] {display_name} 测活失败，已剔除节点: {remove_msg}")
+                else:
+                    print(f"[{ts()}] [代理池] {display_name} 测活失败，剔除节点失败: {remove_msg}")
+                random_candidates = [name for name in random_candidates if name != selected_node]
                 print(f"[{ts()}] [代理池] {display_name} 测活失败，重新抽卡...")
             else:
                 print(f"[{ts()}] [代理池] {display_name} 指令下发失败 (HTTP {switch_resp.status_code})。")
