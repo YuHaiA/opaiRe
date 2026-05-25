@@ -32,7 +32,8 @@ from utils.email_providers.mail_service import mask_email
 from utils.auth_pipeline.register import run
 from utils.auth_pipeline.oauth import refresh_oauth_token as _refresh_oauth_token
 
-from utils.proxy_manager import smart_switch_node
+from utils import task_log_guard
+from utils.proxy_manager import smart_switch_node, get_failure_bucket_id, evict_current_proxy_or_node
 from utils.integrations.sub2api_client import Sub2APIClient
 from utils.integrations.tg_notifier import send_tg_msg_sync
 from utils.email_providers.postman_center import global_postman_fleet
@@ -94,15 +95,16 @@ def web_print(*args, **kwargs):
     _orig_print(*args, file=tmp, **kwargs)
     _thread_local.buffer += tmp.getvalue()
     if _thread_local.buffer.endswith("\n"):
+        msg = _thread_local.buffer.lstrip("\n")
+        _thread_local.buffer = ""
         with _print_lock:
-            msg = _thread_local.buffer.lstrip("\n")
             if msg and msg.strip() != ".":
                 try:
                     from global_state import append_log
                     append_log(msg.strip())
                 except Exception:
                     pass
-        _thread_local.buffer = ""
+                task_log_guard.observe_log_message(msg.strip())
 
 
 builtins.print = web_print
@@ -717,16 +719,17 @@ def handle_registration_result(result: Any, cpa_upload: bool = False, run_ctx: d
         send_tg_msg_sync(success_text)
     return ret_status
 
-def run_and_refresh(proxy, args, cpa_upload=False, skip_switch=False, assigned_domain=None, batch_id=None, worker_index=None):
+def _execute_registration_run(proxy, args, cpa_upload=False, skip_switch=False, assigned_domain=None, batch_id=None, worker_index=None):
     proxy = format_docker_url(proxy)
-    """切节点 → 注册 → 处理结果。"""
     if not skip_switch:
         if not smart_switch_node(proxy):
             print(f"[{ts()}] [WARNING] {proxy} 节点切换失败，将使用当前 IP 继续尝试...")
 
     result = None
     run_ctx = {}
+    bucket_id = get_failure_bucket_id(proxy)
     try:
+        task_log_guard.start_task(bucket_id, label=bucket_id)
         result = run(
             proxy,
             run_ctx=run_ctx,
@@ -734,12 +737,45 @@ def run_and_refresh(proxy, args, cpa_upload=False, skip_switch=False, assigned_d
             batch_id=batch_id,
             worker_index=worker_index,
         )
+    except task_log_guard.TaskAbortError as abort_error:
+        with _stats_lock:
+            run_stats["failed"] += 1
+        task_log_guard.reset_bucket(bucket_id)
+        removed, remove_msg = evict_current_proxy_or_node(proxy)
+        print(
+            f"[{ts()}] [WARNING] {abort_error.label} 连续命中 {abort_error.count} 次可计数错误，"
+            f"终止当前任务队列并切换节点。"
+        )
+        if removed:
+            print(f"[{ts()}] [INFO] 节点池处理完成: {remove_msg}")
+        else:
+            print(f"[{ts()}] [WARNING] 节点池处理未完成: {remove_msg}")
+        return None, "switch_node"
     except Exception as e:
         print(f"[{ts()}] [ERROR] 注册线程发生未捕获异常{e}")
         import traceback
         traceback.print_exc()
+    finally:
+        task_log_guard.end_task()
 
-    return handle_registration_result(result, cpa_upload=cpa_upload, run_ctx=run_ctx)
+    status = handle_registration_result(result, cpa_upload=cpa_upload, run_ctx=run_ctx)
+    if status in {"success", "half_finished"}:
+        task_log_guard.mark_task_success(bucket_id)
+    return result, status
+
+
+def run_and_refresh(proxy, args, cpa_upload=False, skip_switch=False, assigned_domain=None, batch_id=None, worker_index=None):
+    """切节点 → 注册 → 处理结果。"""
+    _, status = _execute_registration_run(
+        proxy,
+        args,
+        cpa_upload=cpa_upload,
+        skip_switch=skip_switch,
+        assigned_domain=assigned_domain,
+        batch_id=batch_id,
+        worker_index=worker_index,
+    )
+    return status
 
 # def auto_heal_subdomain(failed_domain: str):
     # print(f"[{ts()}] [自愈] 域名 {failed_domain} 达到失败阈值，触发更替程序...")
@@ -1027,6 +1063,7 @@ def normal_main_loop(args, stop_event: threading.Event, executor=None):
     total_attempts = 0
 
     while not stop_event.is_set() and not cfg.POOL_EXHAUSTED:
+        skip_wait_after_round = False
         if target_count > 0 and success_count >= target_count:
             print(f"\n[{ts()}] [SUCCESS] 已达到目标注册数量 ({target_count})，任务圆满结束！")
             break
@@ -1110,8 +1147,11 @@ def normal_main_loop(args, stop_event: threading.Event, executor=None):
                         for idx in range(current_batch)
                     ]
                     for f in futures:
-                        if f.result() == "success":
+                        worker_status = f.result()
+                        if worker_status == "success":
                             success_count += 1
+                        elif worker_status == "switch_node":
+                            skip_wait_after_round = True
                 else:
                     with ThreadPoolExecutor(max_workers=current_batch) as ex:
                         futures = [
@@ -1119,8 +1159,11 @@ def normal_main_loop(args, stop_event: threading.Event, executor=None):
                             for idx in range(current_batch)
                         ]
                         for f in futures:
-                            if f.result() == "success":
+                            worker_status = f.result()
+                            if worker_status == "success":
                                 success_count += 1
+                            elif worker_status == "switch_node":
+                                skip_wait_after_round = True
             else:
                 if cfg.is_raw_proxy_pool_enabled():
                     borrowed_generation, p = cfg.unpack_proxy_queue_item(cfg.PROXY_QUEUE.get())
@@ -1143,6 +1186,8 @@ def normal_main_loop(args, stop_event: threading.Event, executor=None):
 
                 if status == "success":
                     success_count += 1
+                elif status == "switch_node":
+                    skip_wait_after_round = True
             if cfg.EMAIL_API_MODE in ["local_microsoft", "gmail_fission"]:
                 global_postman_fleet.clear_fleet()
 
@@ -1155,6 +1200,10 @@ def normal_main_loop(args, stop_event: threading.Event, executor=None):
 
         if getattr(args, 'once', False):
             break
+
+        if skip_wait_after_round:
+            print(f"[{ts()}] [INFO] 当前节点已淘汰，立即切换到下一轮任务...")
+            continue
 
         wait_time = random.randint(sleep_min, sleep_max)
         print(f"[{ts()}] [INFO] 缓冲防风控，等待 {wait_time} 秒后继续...")
@@ -1365,6 +1414,7 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
                     batch_size = min(cfg.REG_THREADS, remaining)
                     preallocated_domains = []
                     batch_id = None
+                    batch_force_switch = False
 
                     if cfg._clash_enable and not cfg._clash_pool_mode:
                         print(f"[{ts()}] [INFO] [CPA补货] 切换全局节点...")
@@ -1414,6 +1464,8 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
                             elif status == "retry_403":
                                 print(f"[{ts()}] [WARNING] 遇到 403 频率限制，给服务器 15 秒冷却时间...")
                                 await asyncio.sleep(15)
+                            elif status == "switch_node":
+                                batch_force_switch = True
                     else:
                         print(f"[{ts()}] [INFO] 单线程补货: {success_in_this_cycle}/{need_to_reg}")
                         if cfg.is_raw_proxy_pool_enabled():
@@ -1440,9 +1492,15 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
                             success_in_this_cycle += 1
                         elif status == "retry_403":
                             await asyncio.sleep(10)
-                        await asyncio.sleep(5)
+                        elif status == "switch_node":
+                            batch_force_switch = True
+                        if not batch_force_switch:
+                            await asyncio.sleep(5)
                     if cfg.EMAIL_API_MODE in ["local_microsoft", "gmail_fission"]:
                         global_postman_fleet.clear_fleet()
+                    if batch_force_switch:
+                        print(f"[{ts()}] [INFO] 当前故障节点已剔除，立即切换到下一批补货任务...")
+                        continue
                 print(f"[{ts()}] [SUCCESS] 本轮补货完成！累计入库: {success_in_this_cycle} 个。")
             else:
                 print(f"[{ts()}] [INFO] 仓库存量充足，无需补发。")
@@ -1551,19 +1609,15 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                 await asyncio.sleep(1)
 
                 def _sub2api_run_wrapper(p, skip_switch, assigned_domain=None, batch_id=None, worker_index=None):
-                    p = format_docker_url(p)
-                    if not skip_switch:
-                        if not smart_switch_node(p):
-                            print(f"[{ts()}] [WARNING] [Sub2API补货] 全局节点切换失败...")
-                    run_ctx = {}
-                    result = run(
+                    result, status = _execute_registration_run(
                         p,
-                        run_ctx=run_ctx,
+                        args,
+                        cpa_upload=False,
+                        skip_switch=skip_switch,
                         assigned_domain=assigned_domain,
                         batch_id=batch_id,
                         worker_index=worker_index,
                     )
-                    status = handle_registration_result(result, cpa_upload=False, run_ctx=run_ctx)
 
                     if status == "success":
                         token_dict = json.loads(result[0])
@@ -1621,6 +1675,7 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                     batch_size = min(cfg.REG_THREADS, remaining)
                     preallocated_domains = []
                     batch_id = None
+                    batch_force_switch = False
 
                     if cfg._clash_enable and not cfg._clash_pool_mode:
                         print(f"[{ts()}] [INFO] [Sub2API补货] 切换全局节点...")
@@ -1672,6 +1727,8 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                                 print(f"[{ts()}] [WARNING] 遇到 403 频率限制，给服务器 15 秒冷却时间...")
                                 try: await asyncio.wait_for(async_stop_event.wait(), timeout=15)
                                 except asyncio.TimeoutError: pass
+                            elif status == "switch_node":
+                                batch_force_switch = True
 
                     else:
                         print(f"[{ts()}] [INFO] 单线程补货: {success_in_this_cycle}/{need_to_reg}")
@@ -1701,11 +1758,17 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                         elif status == "retry_403":
                             try: await asyncio.wait_for(async_stop_event.wait(), timeout=10)
                             except asyncio.TimeoutError: pass
+                        elif status == "switch_node":
+                            batch_force_switch = True
 
-                        try: await asyncio.wait_for(async_stop_event.wait(), timeout=5)
-                        except asyncio.TimeoutError: pass
+                        if not batch_force_switch:
+                            try: await asyncio.wait_for(async_stop_event.wait(), timeout=5)
+                            except asyncio.TimeoutError: pass
                     if cfg.EMAIL_API_MODE in ["local_microsoft", "gmail_fission"]:
                         global_postman_fleet.clear_fleet()
+                    if batch_force_switch:
+                        print(f"[{ts()}] [INFO] 当前故障节点已剔除，立即切换到下一批 Sub2API 任务...")
+                        continue
                 print(f"[{ts()}] [SUCCESS] 本轮补货完成！累计入库 Sub2API: {success_in_this_cycle} 个。")
             else:
                 print(f"[{ts()}] [INFO] 仓库存量充足，无需补发。")

@@ -22,6 +22,7 @@ TESTED_NODES_MAP = {}
 _IS_IN_DOCKER = os.path.exists('/.dockerenv')
 _global_switch_lock = threading.Lock()
 _last_switch_time = 0
+_CURRENT_NODE_BY_PROXY = {}
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(CURRENT_DIR)
 
@@ -102,6 +103,121 @@ def get_api_url_for_proxy(proxy_url: str) -> str:
     except Exception:
         pass
     return CLASH_API_URL
+
+
+def _proxy_key(proxy_url=None) -> str:
+    normalized = format_docker_url(proxy_url) if proxy_url else ""
+    return normalized or "__shared__"
+
+
+def _remember_current_node(proxy_url, node_name: str) -> None:
+    if not node_name:
+        return
+    _CURRENT_NODE_BY_PROXY[_proxy_key(proxy_url)] = str(node_name).strip()
+
+
+def _load_runtime_config_for_write() -> dict:
+    config_path = os.path.join(BASE_DIR, "data", "config.yaml")
+    if not os.path.exists(config_path):
+        return {}
+    try:
+        with open(config_path, "r", encoding="utf-8") as handle:
+            return yaml.safe_load(handle) or {}
+    except Exception:
+        return {}
+
+
+def get_current_selected_node(proxy_url=None) -> str:
+    cached = str(_CURRENT_NODE_BY_PROXY.get(_proxy_key(proxy_url), "") or "").strip()
+    if cached:
+        return cached
+
+    current_api_url = get_api_url_for_proxy(proxy_url)
+    headers = {"Authorization": f"Bearer {CLASH_SECRET}"} if CLASH_SECRET else {}
+    try:
+        resp = std_requests.get(f"{current_api_url}/proxies", headers=headers, timeout=5)
+        if resp.status_code != 200:
+            return ""
+        proxies_data = resp.json().get("proxies", {})
+        actual_group_name = resolve_group_name(proxies_data, PROXY_GROUP_NAME)
+        if not actual_group_name:
+            return ""
+        selected = str(proxies_data.get(actual_group_name, {}).get("now", "") or "").strip()
+        if selected:
+            _remember_current_node(proxy_url, selected)
+        return selected
+    except Exception:
+        return ""
+
+
+def get_failure_bucket_id(proxy_url=None) -> str:
+    normalized_proxy = format_docker_url(proxy_url) if proxy_url else ""
+    try:
+        from utils import config as runtime_cfg
+        if runtime_cfg.is_raw_proxy_pool_enabled() and normalized_proxy:
+            return f"raw::{normalized_proxy}"
+    except Exception:
+        pass
+
+    current_node = get_current_selected_node(proxy_url)
+    if current_node:
+        return f"clash::{current_node}"
+    if normalized_proxy:
+        return f"proxy::{normalized_proxy}"
+    return "shared::default"
+
+
+def evict_current_proxy_or_node(proxy_url=None):
+    config_data = _load_runtime_config_for_write()
+    try:
+        from utils import config as runtime_cfg
+    except Exception as exc:
+        return False, f"加载运行配置失败: {exc}"
+
+    normalized_proxy = format_docker_url(proxy_url) if proxy_url else ""
+
+    if runtime_cfg.is_raw_proxy_pool_enabled():
+        raw_conf = config_data.get("raw_proxy_pool", {})
+        entries = raw_conf.get("proxy_list", []) if isinstance(raw_conf, dict) else []
+        target = runtime_cfg.normalize_raw_proxy_entry(normalized_proxy)
+        kept_entries = [
+            entry for entry in entries
+            if runtime_cfg.normalize_raw_proxy_entry(entry) != target
+        ]
+        if len(kept_entries) == len(entries):
+            return False, f"原始代理池里未找到目标代理: {get_display_name(normalized_proxy)}"
+        raw_conf["proxy_list"] = kept_entries
+        config_data["raw_proxy_pool"] = raw_conf
+        runtime_cfg.reload_all_configs(new_config_dict=config_data)
+        if not kept_entries:
+            runtime_cfg.POOL_EXHAUSTED = True
+        return True, f"已从原始代理池移除 {get_display_name(normalized_proxy)}"
+
+    current_node = get_current_selected_node(proxy_url)
+    if not current_node:
+        return False, f"{get_display_name(proxy_url)} 当前未解析到可拉黑节点"
+
+    clash_conf = config_data.get("clash_proxy_pool", {})
+    if not isinstance(clash_conf, dict):
+        clash_conf = {}
+
+    blacklist = clash_conf.get("blacklist", [])
+    if not isinstance(blacklist, list):
+        blacklist = []
+    if current_node not in blacklist:
+        blacklist.append(current_node)
+    clash_conf["blacklist"] = blacklist
+
+    tested_map = clash_conf.get("tested_nodes", {})
+    if isinstance(tested_map, dict):
+        for group_name, nodes in list(tested_map.items()):
+            if isinstance(nodes, list):
+                tested_map[group_name] = [node for node in nodes if node != current_node]
+        clash_conf["tested_nodes"] = tested_map
+
+    config_data["clash_proxy_pool"] = clash_conf
+    runtime_cfg.reload_all_configs(new_config_dict=config_data)
+    return True, f"已拉黑 Clash 节点 [{clean_for_log(current_node)}]"
 
 def test_proxy_liveness(proxy_url=None):
     """测试当前代理是否可用 (脱敏)"""
@@ -261,6 +377,7 @@ def _do_smart_switch(proxy_url=None):
                         if switch_resp.status_code == 204:
                             time.sleep(1)
                             if test_proxy_liveness(proxy_url):
+                                _remember_current_node(proxy_url, best_node)
                                 return True
                             print(f"[{ts()}] [代理池] {display_name} 最快节点测活失败，回退到随机抽卡模式...")
                     else:
@@ -287,6 +404,7 @@ def _do_smart_switch(proxy_url=None):
             if switch_resp.status_code == 204:
                 time.sleep(1.5)
                 if test_proxy_liveness(proxy_url):
+                    _remember_current_node(proxy_url, selected_node)
                     return True
                 print(f"[{ts()}] [代理池] {display_name} 测活失败，重新抽卡...")
             else:

@@ -1,0 +1,101 @@
+import re
+import threading
+from dataclasses import dataclass
+from typing import Optional
+
+
+COUNTABLE_ERROR_LIMIT = 3
+
+_COUNTABLE_RULES = (
+    ("curl_timeout", re.compile(r"Failed to perform,\s*curl:\s*\(28\).*Connection timed out", re.IGNORECASE)),
+    ("submit_email_409", re.compile(r"提交邮箱环节异常[,，]?\s*返回[:：]\s*409")),
+    ("passwordless_send_409", re.compile(r"无密码通道.*邮件发送异常[,，]?\s*返回[:：]\s*409")),
+)
+_IGNORED_RULES = (
+    ("passwordless_oauth_401", re.compile(r"无密码通道OAuth\s*阶段验证失败[:：]\s*401")),
+)
+
+_thread_local = threading.local()
+_tracker_lock = threading.Lock()
+_bucket_counts: dict[str, int] = {}
+
+
+@dataclass
+class TaskContext:
+    bucket_id: str
+    label: str
+
+
+class TaskAbortError(BaseException):
+    def __init__(self, bucket_id: str, count: int, kind: str, message: str, label: str = ""):
+        super().__init__(message)
+        self.bucket_id = bucket_id
+        self.count = count
+        self.kind = kind
+        self.message = message
+        self.label = label or bucket_id
+
+
+def start_task(bucket_id: str, label: str = "") -> None:
+    if not bucket_id:
+        _thread_local.current_task = None
+        return
+    _thread_local.current_task = TaskContext(bucket_id=bucket_id, label=label or bucket_id)
+
+
+def end_task() -> None:
+    _thread_local.current_task = None
+
+
+def classify_log_message(message: str) -> Optional[str]:
+    text = str(message or "").strip()
+    if not text:
+        return None
+
+    for kind, pattern in _IGNORED_RULES:
+        if pattern.search(text):
+            return kind
+
+    for kind, pattern in _COUNTABLE_RULES:
+        if pattern.search(text):
+            return kind
+    return None
+
+
+def get_bucket_count(bucket_id: str) -> int:
+    with _tracker_lock:
+        return int(_bucket_counts.get(bucket_id, 0))
+
+
+def reset_bucket(bucket_id: str) -> None:
+    if not bucket_id:
+        return
+    with _tracker_lock:
+        _bucket_counts.pop(bucket_id, None)
+
+
+def mark_task_success(bucket_id: str) -> None:
+    reset_bucket(bucket_id)
+
+
+def observe_log_message(message: str) -> None:
+    context: Optional[TaskContext] = getattr(_thread_local, "current_task", None)
+    if context is None:
+        return
+
+    kind = classify_log_message(message)
+    if kind is None or kind == "passwordless_oauth_401":
+        return
+
+    with _tracker_lock:
+        next_count = int(_bucket_counts.get(context.bucket_id, 0)) + 1
+        _bucket_counts[context.bucket_id] = next_count
+
+    if next_count >= COUNTABLE_ERROR_LIMIT:
+        raise TaskAbortError(
+            bucket_id=context.bucket_id,
+            count=next_count,
+            kind=kind,
+            message=str(message or "").strip(),
+            label=context.label,
+        )
