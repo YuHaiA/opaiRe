@@ -626,14 +626,40 @@ async def start_task(token: str = Depends(verify_token)):
     args = DummyArgs(proxy=default_proxy if default_proxy else None)
     core_engine.run_stats.update({"success": 0, "failed": 0, "retries": 0, "pwd_blocked": 0, "phone_verify": 0, "start_time": time.time(),"target": 0})
     mail_service.start_mail_domain_runtime_tracking()
+    print(f"[{core_engine.ts()}] [系统] 收到启动请求，正在准备引擎与运行配置...")
     if getattr(core_engine.cfg, 'ENABLE_CPA_MODE', False):
+        print(
+            f"[{core_engine.ts()}] [系统] 本次启动模式: CPA 智能仓管。"
+            f" 启动后将先做仓库巡检，阈值={getattr(core_engine.cfg, 'MIN_ACCOUNTS_THRESHOLD', 0)}，"
+            f" 单次补货={getattr(core_engine.cfg, 'BATCH_REG_COUNT', 0)}，"
+            f" 测活线程={getattr(core_engine.cfg, 'CPA_THREADS', 0)}。"
+        )
         engine.start_cpa(args)
         return {"status": "success", "message": "启动成功：已自动识别并开启 [CPA 智能仓管模式]"}
     elif getattr(core_engine.cfg, 'ENABLE_SUB2API_MODE', False):
+        threshold = getattr(core_engine.cfg, 'SUB2API_MIN_THRESHOLD', 0)
+        if threshold > 0:
+            print(
+                f"[{core_engine.ts()}] [系统] 本次启动模式: Sub2API 仓管。"
+                f" 启动后会先执行全量库存/测活巡检，阈值={threshold}，"
+                f" 单次补货={getattr(core_engine.cfg, 'SUB2API_BATCH_COUNT', 0)}，"
+                f" 测活线程={getattr(core_engine.cfg, 'SUB2API_THREADS', 0)}。"
+                " 若仓库接口较慢，前几十秒主要会看到巡检日志。"
+            )
+        else:
+            print(
+                f"[{core_engine.ts()}] [系统] 本次启动模式: Sub2API 仓管。"
+                f" 当前阈值=0，将跳过云端全量库存巡检，直接按单次补货={getattr(core_engine.cfg, 'SUB2API_BATCH_COUNT', 0)} 执行。"
+            )
         engine.start_sub2api(args)
         return {"status": "success", "message": "启动成功：已自动识别并开启 [Sub2API 仓管模式]"}
     else:
         core_engine.run_stats["target"] = core_engine.cfg.NORMAL_TARGET_COUNT
+        target = getattr(core_engine.cfg, 'NORMAL_TARGET_COUNT', 0)
+        print(
+            f"[{core_engine.ts()}] [系统] 本次启动模式: 常规量产。"
+            + (f" 目标产量={target}。" if target > 0 else " 当前为无限挂机模式。")
+        )
         engine.start_normal(args)
         return {"status": "success", "message": "启动成功：已自动识别并开启 [常规量产模式]"}
 

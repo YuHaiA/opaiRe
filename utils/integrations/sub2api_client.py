@@ -3,7 +3,7 @@ import logging
 import time
 from urllib.parse import urlparse
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, Generator, List, Optional, Tuple
 from utils import config as cfg
 from curl_cffi import requests as cffi_requests
 from utils.integrations.sub2api_proxy import parse_sub2api_proxy
@@ -231,8 +231,7 @@ class Sub2APIClient:
             logger.error("Get Sub2API accounts failed: %s", exc)
             return False, self._build_network_error(exc)
 
-    def get_all_accounts(self, page_size: int = 100) -> Tuple[bool, Any]:
-        all_items: List[dict] = []
+    def iter_account_pages(self, page_size: int = 100) -> Generator[Dict[str, Any], None, None]:
         strategies = []
         for size in (page_size, 50, 25):
             if size not in strategies and size > 0:
@@ -240,7 +239,6 @@ class Sub2APIClient:
 
         last_error: Any = "unknown error"
         for current_page_size in strategies:
-            all_items = []
             page = 1
             page_failed = False
 
@@ -266,55 +264,52 @@ class Sub2APIClient:
                 if not ok:
                     last_error = attempt_error
                     if self._is_dns_resolution_error(attempt_error):
-                        logger.warning(
-                            "Sub2API full inventory aborted because DNS resolution failed on page %s",
-                            page,
-                        )
-                        return False, attempt_error
+                        raise RuntimeError(str(attempt_error))
                     if page == 1:
                         page_failed = True
-                    else:
-                        logger.warning(
-                            "Sub2API pagination failed on page %s; continue with %s fetched accounts",
-                            page,
-                            len(all_items),
-                        )
-                    break
+                        break
+                    logger.warning(
+                        "Sub2API pagination failed on page %s; stop after prior successful pages",
+                        page,
+                    )
+                    return
 
                 inner = data.get("data", {}) if isinstance(data, dict) else {}
                 items = inner.get("items", [])
                 if not items:
-                    break
-
-                all_items.extend(items)
+                    return
 
                 total = inner.get("total", 0)
-                if len(all_items) >= total:
-                    logger.info(
-                        "Fetched %s Sub2API accounts across paginated results (page_size=%s)",
-                        len(all_items),
-                        current_page_size,
-                    )
-                    return True, all_items
+                yield {
+                    "items": items,
+                    "page": page,
+                    "page_size": current_page_size,
+                    "total": int(total or 0),
+                }
 
+                if total and page * current_page_size >= int(total):
+                    return
+                if len(items) < current_page_size:
+                    return
                 page += 1
 
-            if not page_failed:
-                logger.info(
-                    "Fetched %s Sub2API accounts across paginated results (partial, page_size=%s)",
-                    len(all_items),
-                    current_page_size,
-                )
-                return True, all_items
-
             next_sizes = [size for size in strategies if size < current_page_size]
-            if next_sizes:
+            if page_failed and next_sizes:
                 logger.warning(
                     "Retrying Sub2API full inventory with smaller page_size=%s after failure on first page",
                     next_sizes[0],
                 )
 
-        return False, last_error
+        raise RuntimeError(str(last_error))
+
+    def get_all_accounts(self, page_size: int = 100) -> Tuple[bool, Any]:
+        all_items: List[dict] = []
+        try:
+            for page_payload in self.iter_account_pages(page_size=page_size):
+                all_items.extend(page_payload.get("items", []))
+            return True, all_items
+        except Exception as exc:
+            return False, self._build_network_error(exc)
 
     def get_total_count(self) -> Tuple[bool, Any]:
         ok, data = self.get_accounts(page=1, page_size=1)

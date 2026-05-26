@@ -1101,6 +1101,63 @@ def process_sub2api_worker(i: int, total: int, item: dict, client: Any, args: An
     _handle_sub2api_dead_account(item, client, is_disabled=False)
     return False
 
+
+def _is_sub2api_inventory_candidate(item: dict) -> bool:
+    creds = item.get("credentials", {})
+    extra = item.get("extra") or {}
+    return (
+        item.get("platform") == "openai"
+        and str(creds.get("plan_type", "free")).lower() == "free"
+        and extra.get("codex_5h_window_minutes", 0) == 0
+    )
+
+
+def _count_sub2api_inventory_batched(client: Any) -> tuple[int, int]:
+    valid_count = 0
+    total_files = 0
+    for page_payload in client.iter_account_pages(page_size=100):
+        items = page_payload.get("items", [])
+        matched = sum(1 for item in items if _is_sub2api_inventory_candidate(item))
+        valid_count += matched
+        total_files += matched
+        print(
+            f"[{ts()}] [INFO] Sub2API 库存分批统计: 第 {page_payload.get('page', 0)} 页"
+            f" 命中 {matched} 个，累计 {valid_count} 个..."
+        )
+    return valid_count, total_files
+
+
+async def _run_sub2api_check_batched(args, async_stop_event, loop, client, executor=None) -> tuple[int, int]:
+    valid_count = 0
+    total_files = 0
+    for page_payload in client.iter_account_pages(page_size=100):
+        if async_stop_event.is_set():
+            break
+        filtered_items = [item for item in page_payload.get("items", []) if _is_sub2api_inventory_candidate(item)]
+        total_files += len(filtered_items)
+        if not filtered_items:
+            continue
+        print(
+            f"[{ts()}] [INFO] Sub2API 巡检分批执行: 第 {page_payload.get('page', 0)} 页"
+            f" 候选 {len(filtered_items)} 个，累计候选 {total_files} 个。"
+        )
+        if executor is not None:
+            futures = [
+                loop.run_in_executor(executor, process_sub2api_worker, idx, len(filtered_items), item, client, args)
+                for idx, item in enumerate(filtered_items, 1)
+            ]
+            results = await asyncio.gather(*futures)
+        else:
+            with ThreadPoolExecutor(max_workers=cfg.SUB2API_THREADS) as _ex:
+                futures = [
+                    loop.run_in_executor(_ex, process_sub2api_worker, idx, len(filtered_items), item, client, args)
+                    for idx, item in enumerate(filtered_items, 1)
+                ]
+                results = await asyncio.gather(*futures)
+        valid_count += sum(1 for r in results if r)
+        print(f"[{ts()}] [INFO] Sub2API 分批巡检完成: 当前累计有效 {valid_count} / {total_files}")
+    return valid_count, total_files
+
 def normal_main_loop(args, stop_event: threading.Event, executor=None):
     """常规量产模式（纯数据库保存）"""
     sleep_min    = max(1, cfg.NORMAL_SLEEP_MIN)
@@ -1300,35 +1357,17 @@ async def perform_cpa_check(args, async_stop_event, loop, executor=None):
 
 async def perform_sub2api_check(args, async_stop_event, loop, client, executor=None):
     print(f"[{ts()}] [INFO] 开始执行 Sub2API 仓库全量测活巡检...")
-    success, account_list = client.get_all_accounts()
-    if not success:
-        print(f"[{ts()}] [ERROR] 获取 Sub2API 全量库存失败: {account_list}")
+    try:
+        valid_count, total_files = await _run_sub2api_check_batched(
+            args,
+            async_stop_event,
+            loop,
+            client,
+            executor=executor,
+        )
+    except Exception as e:
+        print(f"[{ts()}] [ERROR] 获取 Sub2API 分批巡检数据失败: {e}")
         return 0, 0
-
-    filtered_list = [
-        item for item in account_list
-        if item.get("platform") == "openai"
-           and str(item.get("credentials", {}).get("plan_type", "free")).lower() == "free"
-           and (item.get("extra") or {}).get("codex_5h_window_minutes", 0) == 0
-    ]
-
-    total_files = len(filtered_list)
-
-    if executor is not None:
-        futures = [
-            loop.run_in_executor(executor, process_sub2api_worker, i, total_files, item, client, args)
-            for i, item in enumerate(filtered_list, 1)
-        ]
-        results = await asyncio.gather(*futures)
-    else:
-        with ThreadPoolExecutor(max_workers=cfg.SUB2API_THREADS) as _ex:
-            futures = [
-                loop.run_in_executor(_ex, process_sub2api_worker, i, total_files, item, client, args)
-                for i, item in enumerate(filtered_list, 1)
-            ]
-            results = await asyncio.gather(*futures)
-
-    valid_count = sum(1 for r in results if r)
     print(f"[{ts()}] [INFO] Sub2API 测活结束，当前有效数: {valid_count} / {total_files}")
     return valid_count, total_files
 
@@ -1595,58 +1634,32 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                 print(f"\n[{ts()}] [INFO] Sub2API 库存报警阈值为 0，跳过云端库存获取，直接按单次补发量执行补货。")
             elif cfg.SUB2API_AUTO_CHECK:
                 print(f"\n[{ts()}] [INFO] 开始执行 Sub2API 仓库例行巡检与测活...")
-                success, account_list = client.get_all_accounts()
-                if not success:
-                    print(f"[{ts()}] [ERROR] 获取 Sub2API 全量库存失败: {account_list}")
+                try:
+                    valid_count, total_files = await _run_sub2api_check_batched(
+                        args,
+                        async_stop_event,
+                        loop,
+                        client,
+                        executor=executor,
+                    )
+                except Exception as e:
+                    print(f"[{ts()}] [ERROR] 获取 Sub2API 分批巡检数据失败: {e}")
                     try: await asyncio.wait_for(async_stop_event.wait(), timeout=60)
                     except asyncio.TimeoutError: pass
                     continue
-
-                filtered_list = [
-                    item for item in account_list
-                    if item.get("platform") == "openai"
-                       and str(item.get("credentials", {}).get("plan_type", "free")).lower() == "free"
-                       and (item.get("extra") or {}).get("codex_5h_window_minutes", 0) == 0
-                ]
-
-                total_files = len(filtered_list)
-
-                if executor is not None:
-                    futures = [
-                        loop.run_in_executor(executor, process_sub2api_worker, i, total_files, item, client, args)
-                        for i, item in enumerate(filtered_list, 1)
-                    ]
-                    results = await asyncio.gather(*futures)
-                else:
-                    with ThreadPoolExecutor(max_workers=cfg.SUB2API_THREADS) as _ex:
-                        futures = [
-                            loop.run_in_executor(_ex, process_sub2api_worker, i, total_files, item, client, args)
-                            for i, item in enumerate(filtered_list, 1)
-                        ]
-                        results = await asyncio.gather(*futures)
-
-                valid_count = sum(1 for r in results if r)
                 print(f"[{ts()}] [INFO] 巡检结束，当前 Sub2API 仓库有效数: {valid_count}")
             else:
-                print(f"[{ts()}] [INFO] Sub2API 自动测活已关闭，直接读取云端列表进行补发判断...")
-                success, account_list = client.get_all_accounts()
-                if not success:
-                    print(f"[{ts()}] [ERROR] 获取 Sub2API 全量库存失败: {account_list}")
+                print(f"[{ts()}] [INFO] Sub2API 自动测活已关闭，改为分批读取云端库存，仅做补货判断...")
+                try:
+                    valid_count, total_files = _count_sub2api_inventory_batched(client)
+                except Exception as e:
+                    print(f"[{ts()}] [ERROR] 获取 Sub2API 分批库存失败: {e}")
                     try:
                         await asyncio.wait_for(async_stop_event.wait(), timeout=60)
                     except asyncio.TimeoutError:
                         pass
                     continue
-
-                filtered_list = [
-                    item for item in account_list
-                    if item.get("platform") == "openai"
-                       and str(item.get("credentials", {}).get("plan_type", "free")).lower() == "free"
-                       and (item.get("extra") or {}).get("codex_5h_window_minutes", 0) == 0
-                ]
-                total_files = len(filtered_list)
-                valid_count = total_files
-                print(f"[{ts()}] [INFO] 当前云端总数: {total_files} (未开启自动巡检，默认全部视为有效)")
+                print(f"[{ts()}] [INFO] 当前云端总数: {total_files} (未开启自动巡检，按分批统计结果视为有效)")
 
             if cfg.SUB2API_MIN_THRESHOLD <= 0 or valid_count < cfg.SUB2API_MIN_THRESHOLD:
                 need_to_reg          = cfg.SUB2API_BATCH_COUNT

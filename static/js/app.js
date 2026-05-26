@@ -586,7 +586,9 @@ createApp({
         },
         searchCloud() {
             this.cloudPage = 1;
-            this.fetchCloudAccounts();
+            if (this.currentTab === 'cloud') {
+                this.fetchCloudAccounts();
+            }
         },
         searchMailboxes() {
             this.mailboxPage = 1;
@@ -909,6 +911,22 @@ createApp({
             this.toasts.push({ id, message: this.t(message), type });
             setTimeout(() => { this.toasts = this.toasts.filter(t => t.id !== id); }, 3500);
         },
+        appendSystemLog(text, level = '系统') {
+            const timeStr = formatMainlandTime(new Date());
+            this.logs.push({
+                parsed: true,
+                time: timeStr,
+                level,
+                text: this.t(text),
+                raw: `[${timeStr}] [${level}] ${this.t(text)}`
+            });
+            this.$nextTick(() => {
+                const container = document.getElementById('terminal-container');
+                if (container) {
+                    container.scrollTop = container.scrollHeight;
+                }
+            });
+        },
 
         async customConfirm(message) {
             return new Promise((resolve) => {
@@ -1191,7 +1209,6 @@ createApp({
             }
             this.initSSE();
             this.fetchAccounts();
-            this.fetchCloudAccounts();
             this.fetchTeamAccounts();
             this.fetchMailboxes();
             this.startStatsPolling();
@@ -1199,6 +1216,9 @@ createApp({
             this.fetchInventoryStats();
             if (this.config && this.config.reg_mode === 'extension') {
                 this.listenToExtension();
+            }
+            if (this.currentTab === 'cloud') {
+                this.fetchCloudAccounts();
             }
             if (this.currentTab === 'cluster') {
                 this.fetchClusterSyncTasks();
@@ -2223,12 +2243,17 @@ createApp({
                         await this.dispatchExtensionTask();
 
                     } else {
-                        this.isRunning = true;
                         this.currentTab = 'console';
-                        this.showToast("已启动【协议】模式", "success");
                         let mode = 'normal';
                         if (this.config?.cpa_mode?.enable) mode = 'cpa';
                         if (this.config?.sub2api_mode?.enable) mode = 'sub2api';
+                        this.showToast("正在向后端发送启动请求...", "info");
+                        this.appendSystemLog('正在向后端发送启动请求，准备初始化运行模式...');
+                        if (mode === 'sub2api') {
+                            this.appendSystemLog('当前为 Sub2API 仓管模式，启动后会先执行库存与测活巡检；若仓库接口较慢，短时间没有注册日志属于正常。');
+                        } else if (mode === 'cpa') {
+                            this.appendSystemLog('当前为 CPA 仓管模式，启动后会先执行库存巡检与测活。');
+                        }
                         await this.startTask(mode);
                     }
                 }
@@ -2245,9 +2270,16 @@ createApp({
                     this.currentTab = 'console';
                     this.queuePollStats();
                     await this.fetchMailDomainRuntimeStats({ force: true });
+                    this.appendSystemLog(data.message || '后端已接收启动请求，任务开始运行。');
                     this.showToast(`启动成功`, "success");
-                } else { this.showToast(data.message, "error"); }
-            } catch (e) { this.showToast("启动请求发送失败", "error"); }
+                } else {
+                    this.appendSystemLog(`启动失败: ${data.message || '未知错误'}`);
+                    this.showToast(data.message, "error");
+                }
+            } catch (e) {
+                this.appendSystemLog('启动请求发送失败，请检查后端服务或网络连接。');
+                this.showToast("启动请求发送失败", "error");
+            }
         },
         async stopTask() {
             try {
@@ -3155,6 +3187,7 @@ async exportSub2Api() {
                 return;
             }
             const typeQueue = [...this.cloudFilters];
+            const batchSize = Math.max(50, Math.min(200, this.cloudPageSize * 10));
             this.cloudFetchState = {
                 loading: true,
                 currentType: typeQueue[0] || '',
@@ -3164,17 +3197,44 @@ async exportSub2Api() {
             };
             try {
                 const combined = [];
+                const mergedStats = {
+                    total: 0, enabled: 0,
+                    cpa: 0, cpa_active: 0, cpa_disabled: 0,
+                    sub2api: 0, sub2api_active: 0, sub2api_disabled: 0,
+                    image2api: 0, image2api_active: 0, image2api_disabled: 0
+                };
                 for (let index = 0; index < typeQueue.length; index += 1) {
                     const type = typeQueue[index];
                     this.cloudFetchState.currentType = type;
-                    this.cloudFetchState.message = `正在获取 ${type.toUpperCase()} 数据...`;
-                    const url = `/api/cloud/accounts?types=${type}&status_filter=all&page=1&page_size=2000`;
-                    const res = await this.authFetch(url);
-                    const data = await res.json();
-                    if (data.status !== 'success') {
-                        throw new Error(data.message || `${type} 拉取失败`);
+                    this.cloudFetchState.message = `正在分批获取 ${type.toUpperCase()} 数据...`;
+                    let currentPage = 1;
+                    let totalPages = 1;
+                    do {
+                        const params = new URLSearchParams({
+                            types: type,
+                            status_filter: this.cloudStatusFilter || 'all',
+                            page: String(currentPage),
+                            page_size: String(batchSize)
+                        });
+                        if (this.searchCloud) {
+                            params.set('search', this.searchCloud);
+                        }
+                        const res = await this.authFetch(`/api/cloud/accounts?${params.toString()}`);
+                        const data = await res.json();
+                        if (data.status !== 'success') {
+                            throw new Error(data.message || `${type} 拉取失败`);
+                        }
+                        combined.push(...(data.data || []));
+                        if (currentPage === 1 && data.cloud_stats) {
+                            Object.keys(mergedStats).forEach((key) => {
+                                mergedStats[key] += Number(data.cloud_stats[key] || 0);
+                            });
+                        }
+                        totalPages = Math.max(1, Math.ceil(Number(data.total || 0) / batchSize));
+                        this.cloudFetchState.message = `正在获取 ${type.toUpperCase()} 数据... 第 ${currentPage}/${totalPages} 批`;
+                        currentPage += 1;
                     }
-                    combined.push(...(data.data || []));
+                    while (currentPage <= totalPages);
                     this.cloudFetchState.completed = index + 1;
                 }
                 this.rawCloudAccounts = combined.map(acc => ({
@@ -3183,7 +3243,7 @@ async exportSub2Api() {
                     details: acc.account_type === 'image2api' ? (acc.details || {}) : (this.localCloudDetails[acc.id] || acc.details || {}),
                     _loading: null
                 }));
-                this.inventoryStats.cloud = this.computeCloudStats(this.rawCloudAccounts);
+                this.inventoryStats.cloud = mergedStats;
                 this.applyCloudAccountView();
                 if (typeof this.fetchInventoryStats === 'function') {
                     this.fetchInventoryStats();

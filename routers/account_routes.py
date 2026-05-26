@@ -116,6 +116,89 @@ def parse_sub2api_proxy(proxy_url: str):
     except:
         return None
 
+
+def _normalize_sub2api_status(item: dict) -> str:
+    status = str(item.get("status") or "").lower()
+    if status == "active":
+        return "active"
+    if status == "inactive":
+        return "disabled"
+    return "dead"
+
+
+def _normalize_sub2api_last_check(raw_time: Any) -> str:
+    text = str(raw_time or "-").strip()
+    if text == "-":
+        return text
+    try:
+        return text.split(".")[0].replace("T", " ")
+    except Exception:
+        return text
+
+
+def _build_sub2api_cloud_row(item: dict) -> dict:
+    extra = item.get("extra", {}) if isinstance(item.get("extra", {}), dict) else {}
+    return {
+        "id": str(item.get("id", "")),
+        "account_type": "sub2api",
+        "credential": item.get("name", "未知账号"),
+        "status": _normalize_sub2api_status(item),
+        "last_check": _normalize_sub2api_last_check(item.get("updated_at", "-")),
+        "details": {
+            "plan_type": item.get("credentials", {}).get("plan_type", "未知"),
+            "codex_5h_used_percent": extra.get("codex_5h_used_percent", 0),
+            "codex_7d_used_percent": extra.get("codex_7d_used_percent", 0),
+            "window_stats": {}
+        }
+    }
+
+
+def _matches_cloud_filters(row: dict, status_filter: str = "all", search: Optional[str] = None) -> bool:
+    if status_filter != "all" and row.get("status") != status_filter:
+        return False
+    if search:
+        search_lower = search.lower()
+        if search_lower not in str(row.get("credential", "")).lower() and search_lower not in str(row.get("id", "")).lower():
+            return False
+    return True
+
+
+def _fetch_sub2api_cloud_page(
+    client: Sub2APIClient,
+    status_filter: str,
+    search: Optional[str],
+    page: int,
+    page_size: int,
+) -> tuple[list[dict], int, dict]:
+    start_idx = max(0, (page - 1) * page_size)
+    end_idx = start_idx + page_size
+    filtered_total = 0
+    paged_rows: list[dict] = []
+    stats = {
+        "total": 0,
+        "enabled": 0,
+        "sub2api": 0,
+        "sub2api_active": 0,
+        "sub2api_disabled": 0,
+    }
+    for page_payload in client.iter_account_pages(page_size=max(100, page_size)):
+        for item in page_payload.get("items", []):
+            row = _build_sub2api_cloud_row(item)
+            stats["total"] += 1
+            stats["sub2api"] += 1
+            if row["status"] == "active":
+                stats["enabled"] += 1
+                stats["sub2api_active"] += 1
+            else:
+                stats["sub2api_disabled"] += 1
+            if not _matches_cloud_filters(row, status_filter=status_filter, search=search):
+                continue
+            current_index = filtered_total
+            filtered_total += 1
+            if start_idx <= current_index < end_idx:
+                paged_rows.append(row)
+    return paged_rows, filtered_total, stats
+
 @router.get("/api/accounts")
 async def get_accounts(page: int = Query(1), page_size: int = Query(50), hide_reg: str = Query("0"), search: Optional[str] = Query(None), status_filter: str = Query("all"), token: str = Depends(verify_token)):
     result = db_manager.get_accounts_page(page, page_size, hide_reg=hide_reg, search=search, status_filter=status_filter)
@@ -313,45 +396,43 @@ def get_cloud_accounts(background_tasks: BackgroundTasks, types: str = "sub2api,
                        page_size: int = Query(50), search: Optional[str] = Query(None),
                        token: str = Depends(verify_token)):
     type_list = types.split(",")
+    if len(type_list) == 1 and type_list[0] == "sub2api" and getattr(cfg, 'SUB2API_URL', None) and getattr(cfg, 'SUB2API_KEY', None):
+        try:
+            client = Sub2APIClient(api_url=cfg.SUB2API_URL, api_key=cfg.SUB2API_KEY)
+            paged_data, total_count, sub2api_stats = _fetch_sub2api_cloud_page(
+                client,
+                status_filter=status_filter,
+                search=search,
+                page=page,
+                page_size=page_size,
+            )
+            return {
+                "status": "success",
+                "data": paged_data,
+                "total": total_count,
+                "cloud_stats": {
+                    "total": sub2api_stats["total"],
+                    "enabled": sub2api_stats["enabled"],
+                    "cpa": 0,
+                    "cpa_active": 0,
+                    "cpa_disabled": 0,
+                    "sub2api": sub2api_stats["sub2api"],
+                    "sub2api_active": sub2api_stats["sub2api_active"],
+                    "sub2api_disabled": sub2api_stats["sub2api_disabled"],
+                    "image2api": 0,
+                    "image2api_active": 0,
+                    "image2api_disabled": 0
+                }
+            }
+        except Exception as e:
+            return {"status": "error", "message": f"拉取 Sub2API 云端库存失败: {e}"}
+
     combined_data = []
     if "sub2api" in type_list and getattr(cfg, 'SUB2API_URL', None) and getattr(cfg, 'SUB2API_KEY', None):
         try:
             client = Sub2APIClient(api_url=cfg.SUB2API_URL, api_key=cfg.SUB2API_KEY)
-            success, raw_sub2_data = client.get_all_accounts()
-            if success:
-                def process_single_account(item):
-                    raw_time = item.get("updated_at", "-")
-                    if raw_time != "-":
-                        try:
-                            raw_time = raw_time.split(".")[0].replace("T", " ")
-                        except:
-                            pass
-
-                    extra = item.get("extra", {})
-                    account_id = str(item.get("id", ""))
-                    window_stats = {}
-                    if account_id:
-                        usage_ok, usage_data = client.get_account_usage(account_id)
-                        if usage_ok and isinstance(usage_data, dict):
-                            window_stats = usage_data.get("data", {}).get("five_hour", {}).get("window_stats", {})
-                    return {
-                        "id": account_id,
-                        "account_type": "sub2api",
-                        "credential": item.get("name", "未知账号"),
-                        "status": "disabled" if item.get("status") == "inactive" else (
-                            "active" if item.get("status") == "active" else "dead"),
-                        "last_check": raw_time,
-                        "details": {
-                            "plan_type": item.get("credentials", {}).get("plan_type", "未知"),
-                            "codex_5h_used_percent": extra.get("codex_5h_used_percent", 0),
-                            "codex_7d_used_percent": extra.get("codex_7d_used_percent", 0),
-                            "window_stats": window_stats
-                        }
-                    }
-                with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                    results = list(executor.map(process_single_account, raw_sub2_data))
-                combined_data.extend(results)
-
+            for page_payload in client.iter_account_pages(page_size=max(100, page_size)):
+                combined_data.extend(_build_sub2api_cloud_row(item) for item in page_payload.get("items", []))
         except Exception as e:
             print(f"[{cfg.ts()}] [SUB2API] 拉取 Sub2API 数据异常，如果未填写相关数据可忽略该提示，将跳过: {e}")
 
@@ -680,9 +761,11 @@ def bulk_refresh_api(req: BulkRefreshReq, token: str = Depends(verify_token)):
     if getattr(cfg, 'SUB2API_URL', None) and getattr(cfg, 'SUB2API_KEY', None):
         try:
             client = Sub2APIClient(api_url=cfg.SUB2API_URL, api_key=cfg.SUB2API_KEY)
-            ok, raw_data = client.get_all_accounts()
-            if ok:
-                sub2api_map = {acc.get("name"): acc.get("id") for acc in raw_data if acc.get("name")}
+            for page_payload in client.iter_account_pages(page_size=100):
+                for acc in page_payload.get("items", []):
+                    name = acc.get("name")
+                    if name:
+                        sub2api_map[name] = acc.get("id")
         except Exception as e:
             print(f"[{cfg.ts()}] [系统] 批量刷新前获取 Sub2API 映射失败: {e}")
 
