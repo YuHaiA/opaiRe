@@ -28,6 +28,8 @@ def run(
     worker_index: Optional[int] = None,
 ) -> tuple:
     processed_mails: set = set()
+    if run_ctx is None:
+        run_ctx = {}
     task_log_guard.raise_if_current_batch_aborted()
     proxy = cfg.format_docker_url(proxy)
     if proxy and proxy.startswith("socks5://"):
@@ -47,7 +49,8 @@ def run(
         is_onephone = False
         target_continue_url = ""
 
-        if not _skip_net_check():
+        skip_proxy_net_check = bool(run_ctx.get("skip_proxy_net_check"))
+        if not skip_proxy_net_check and not _skip_net_check():
             try:
                 start = time.time()
                 res = s_reg.get(
@@ -62,6 +65,8 @@ def run(
             except Exception as e:
                 print(f"[{cfg.ts()}] [ERROR] 代理网络检查失败: {e}")
                 return None, None
+        elif skip_proxy_net_check:
+            print(f"[{cfg.ts()}] [INFO] 当前批次已完成共享节点测活，跳过重复代理网络检查。")
         try:
             s_reg.close()
         except:

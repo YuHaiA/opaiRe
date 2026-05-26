@@ -17,6 +17,34 @@
 
 - 修改文件：
   - `utils/core_engine.py`
+  - `utils/auth_pipeline/register.py`
+  - `tests/test_register_shared_batch_net_check.py`
+- 变更内容：
+  - 共享全局 Clash 节点模式下，批次开头完成节点切换与测活后，会通过 `run_ctx.skip_proxy_net_check` 给同批 worker 打标记。
+  - `utils/auth_pipeline/register.py` 现在识别该标记；命中时会跳过每个 worker 自己重复执行的 `cloudflare trace` 代理网络检查，并打印“当前批次已完成共享节点测活，跳过重复代理网络检查”。
+  - 新增定向测试，覆盖“共享批次标记存在时，不应再发起 worker 级代理网络检查”。
+- 修改原因：
+  - 解决共享全局节点模式下“节点池刚测活成功，但 30 个 worker 又各自重复打一遍网络检查，导致批次内大量 curl(28) timeout，再触发下一批继续切节点”的链路放大问题。
+- 影响范围：
+  - 仅影响共享全局 Clash 节点模式下的 worker 级注册前预检查行为。
+  - 原始代理池、独立代理池以及显式 `SKIP_NET_CHECK` 开关逻辑不变。
+
+- 修改文件：
+  - `scripts/rollback_server1_to_f1.ps1`
+- 变更内容：
+  - Server 1 回退脚本不再通过 `ssh ... bash -s` 直接走标准输入传输远端 shell 内容，改为先在本机生成 LF 换行的临时脚本，再通过 `scp` 上传到服务器 `/tmp` 后执行。
+  - 增加 `scp` / `ssh` 退出码检查；远程回退失败时不再误报 `Done`，会直接抛出错误并停止。
+  - 回退目标改为固定切换到现有保底分支 `rollback/f1c243e`，不再为每次回退额外新建时间戳 `rollback/f1-*` 分支。
+- 修改原因：
+  - 修复 Windows PowerShell 手动执行时，远端 bash 把 `set -euo pipefail` 读成带 `\r` 的参数，报出 `invalid option namepefail`，导致回退根本没有真正执行。
+  - 修复脚本在远程失败后仍继续打印“完成”的误导行为。
+  - 对齐当前使用习惯：服务器已经存在固定的 f1 保底分支，回退只需要切回该分支并重启，不需要保留每次新建的回退分支。
+- 影响范围：
+  - 仅影响本机手动执行 `scripts/rollback_server1_to_f1.ps1` 的远程回退流程。
+  - 不影响项目运行逻辑、服务端主流程或面板功能。
+
+- 修改文件：
+  - `utils/core_engine.py`
   - `utils/proxy_manager.py`
   - `tests/test_proxy_manager_node_eviction.py`
 - 变更内容：

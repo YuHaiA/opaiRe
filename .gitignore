@@ -34,4 +34,5 @@ register.py.bak
 .codex/
 AGENTS.md
 stop_openai_cpa.ps1
+scripts/rollback_server1_to_f1.ps1
 code.py

@@ -159,6 +159,17 @@ async def _collect_async_batch_results(futures, batch_id=None) -> tuple[int, boo
             _cancel_pending_futures(futures)
             break
     return success_count, force_switch, retry_403_count
+
+
+def _should_skip_worker_proxy_net_check(skip_switch: bool) -> bool:
+    return bool(
+        skip_switch
+        and getattr(cfg, "_clash_enable", False)
+        and not getattr(cfg, "_clash_pool_mode", False)
+        and not cfg.is_raw_proxy_pool_enabled()
+    )
+
+
 def _load_dotenv(path: str = ".env") -> None:
     if not os.path.exists(path):
         return
@@ -777,6 +788,8 @@ def _execute_registration_run(proxy, args, cpa_upload=False, skip_switch=False, 
 
     result = None
     run_ctx = {}
+    if _should_skip_worker_proxy_net_check(skip_switch):
+        run_ctx["skip_proxy_net_check"] = True
     bucket_id = get_failure_bucket_id(proxy)
     try:
         task_log_guard.start_task(bucket_id, label=bucket_id)
