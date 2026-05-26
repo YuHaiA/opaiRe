@@ -51,6 +51,14 @@ class TaskLogGuardTests(unittest.TestCase):
         task_log_guard.mark_task_success("bucket-b")
         self.assertEqual(task_log_guard.get_bucket_count("bucket-b"), 0)
 
+    def test_sleep_with_batch_abort_interrupts_without_waiting_full_duration(self):
+        task_log_guard.start_task("bucket-a")
+        task_log_guard.bind_task_batch("batch-a")
+        task_log_guard.abort_batch("batch-a")
+
+        with self.assertRaises(task_log_guard.BatchAbortError):
+            task_log_guard.sleep_with_batch_abort(2)
+
 
 if __name__ == "__main__":
     unittest.main()

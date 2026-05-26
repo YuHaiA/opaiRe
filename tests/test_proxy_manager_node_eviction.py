@@ -5,10 +5,11 @@ import utils.proxy_manager as pm
 
 
 class ProxyManagerNodeEvictionTests(unittest.TestCase):
-    def test_evict_failed_switch_candidate_blacklists_and_prunes_tested_nodes(self):
+    def test_evict_failed_switch_candidate_prunes_tested_nodes_without_polluting_keyword_blacklist(self):
         fake_config = {
             "clash_proxy_pool": {
-                "blacklist": ["old-node"],
+                "blacklist": ["港", "HK"],
+                "evicted_nodes": ["old-node"],
                 "tested_nodes": {
                     "节点选择": ["node-a", "node-b"],
                     "其他组": ["node-a", "node-c"],
@@ -29,7 +30,8 @@ class ProxyManagerNodeEvictionTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertIn("node-a", msg)
         result = saved_config["value"]["clash_proxy_pool"]
-        self.assertEqual(["old-node", "node-a"], result["blacklist"])
+        self.assertEqual(["港", "HK"], result["blacklist"])
+        self.assertEqual(["old-node", "node-a"], result["evicted_nodes"])
         self.assertEqual(["node-b"], result["tested_nodes"]["节点选择"])
         self.assertEqual(["node-c"], result["tested_nodes"]["其他组"])
 

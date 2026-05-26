@@ -2,6 +2,7 @@ import urllib.parse
 import random
 import time
 import requests as std_requests
+import copy
 from datetime import datetime
 import yaml
 import os
@@ -18,6 +19,7 @@ FASTEST_MODE = False
 PROXY_GROUP_NAME = "节点选择"
 CLASH_SECRET = ""
 NODE_BLACKLIST = []
+EVICTED_NODES = []
 TESTED_NODES_MAP = {}
 _IS_IN_DOCKER = os.path.exists('/.dockerenv')
 _global_switch_lock = threading.Lock()
@@ -25,6 +27,7 @@ _last_switch_time = 0
 _CURRENT_NODE_BY_PROXY = {}
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(CURRENT_DIR)
+DEFAULT_NODE_BLACKLIST = ["港", "HK", "台", "TW", "中国", "CN"]
 
 def format_docker_url(url: str) -> str:
     """智能检测：如果在 Docker 中运行，自动把 127.0.0.1 转为宿主机魔法地址"""
@@ -39,7 +42,7 @@ def format_docker_url(url: str) -> str:
 
 def reload_proxy_config():
     global CLASH_API_URL, LOCAL_PROXY_URL, ENABLE_NODE_SWITCH, POOL_MODE, \
-           FASTEST_MODE, PROXY_GROUP_NAME, CLASH_SECRET, NODE_BLACKLIST, TESTED_NODES_MAP
+           FASTEST_MODE, PROXY_GROUP_NAME, CLASH_SECRET, NODE_BLACKLIST, EVICTED_NODES, TESTED_NODES_MAP
     config_dir = os.path.join(BASE_DIR, "data")
     config_path = os.path.join(config_dir, "config.yaml")
     if not os.path.exists(config_path):
@@ -58,7 +61,10 @@ def reload_proxy_config():
     
     PROXY_GROUP_NAME = clash_conf.get("group_name", "节点选择")
     CLASH_SECRET = clash_conf.get("secret", "")
-    NODE_BLACKLIST = clash_conf.get("blacklist", ["港", "HK", "台", "TW", "中国", "CN"])
+    raw_blacklist = clash_conf.get("blacklist", DEFAULT_NODE_BLACKLIST)
+    NODE_BLACKLIST = raw_blacklist if isinstance(raw_blacklist, list) else list(DEFAULT_NODE_BLACKLIST)
+    raw_evicted_nodes = clash_conf.get("evicted_nodes", [])
+    EVICTED_NODES = raw_evicted_nodes if isinstance(raw_evicted_nodes, list) else []
     TESTED_NODES_MAP = clash_conf.get("tested_nodes", {}) if isinstance(clash_conf.get("tested_nodes", {}), dict) else {}
    
     print(f"[{ts()}] [系统] 代理管理模块配置已同步更新。")
@@ -117,6 +123,13 @@ def _remember_current_node(proxy_url, node_name: str) -> None:
 
 
 def _load_runtime_config_for_write() -> dict:
+    try:
+        from utils import config as runtime_cfg
+        runtime_config = getattr(runtime_cfg, "_c", None)
+        if isinstance(runtime_config, dict) and runtime_config:
+            return copy.deepcopy(runtime_config)
+    except Exception:
+        pass
     config_path = os.path.join(BASE_DIR, "data", "config.yaml")
     if not os.path.exists(config_path):
         return {}
@@ -201,12 +214,12 @@ def evict_current_proxy_or_node(proxy_url=None):
     if not isinstance(clash_conf, dict):
         clash_conf = {}
 
-    blacklist = clash_conf.get("blacklist", [])
-    if not isinstance(blacklist, list):
-        blacklist = []
-    if current_node not in blacklist:
-        blacklist.append(current_node)
-    clash_conf["blacklist"] = blacklist
+    evicted_nodes = clash_conf.get("evicted_nodes", [])
+    if not isinstance(evicted_nodes, list):
+        evicted_nodes = []
+    if current_node not in evicted_nodes:
+        evicted_nodes.append(current_node)
+    clash_conf["evicted_nodes"] = evicted_nodes
 
     tested_map = clash_conf.get("tested_nodes", {})
     if isinstance(tested_map, dict):
@@ -217,7 +230,7 @@ def evict_current_proxy_or_node(proxy_url=None):
 
     config_data["clash_proxy_pool"] = clash_conf
     runtime_cfg.reload_all_configs(new_config_dict=config_data)
-    return True, f"已拉黑 Clash 节点 [{clean_for_log(current_node)}]"
+    return True, f"已从活节点池移除并拉黑 Clash 节点 [{clean_for_log(current_node)}]"
 
 
 def evict_failed_switch_candidate(proxy_url=None, candidate_name: str = "") -> tuple[bool, str]:
@@ -311,7 +324,8 @@ def _do_smart_switch(proxy_url=None):
         
         valid_nodes = [
             n for n in all_nodes 
-            if not any(kw.upper() in n.upper() for kw in NODE_BLACKLIST)
+            if n not in EVICTED_NODES
+            and not any(kw.upper() in n.upper() for kw in NODE_BLACKLIST)
         ]
 
         tested_candidates = TESTED_NODES_MAP.get(actual_group_name, [])

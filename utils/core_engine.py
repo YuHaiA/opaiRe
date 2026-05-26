@@ -19,7 +19,7 @@ import time
 import string
 import yaml
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional, Tuple
 from curl_cffi import requests, CurlMime
 import queue
@@ -105,9 +105,60 @@ def web_print(*args, **kwargs):
                 except Exception:
                     pass
                 task_log_guard.observe_log_message(msg.strip())
+                task_log_guard.raise_if_current_batch_aborted()
 
 
 builtins.print = web_print
+
+
+def _cancel_pending_futures(futures) -> None:
+    for future in futures:
+        if not future.done():
+            future.cancel()
+
+
+def _collect_sync_batch_results(futures, batch_id=None) -> tuple[int, bool, int]:
+    success_count = 0
+    force_switch = False
+    retry_403_count = 0
+    normalized_batch_id = str(batch_id or "").strip()
+    for future in as_completed(futures):
+        worker_status = future.result()
+        if worker_status == "success":
+            success_count += 1
+            continue
+        if worker_status == "retry_403":
+            retry_403_count += 1
+            continue
+        if worker_status == "switch_node":
+            force_switch = True
+            if normalized_batch_id:
+                task_log_guard.abort_batch(normalized_batch_id)
+            _cancel_pending_futures(futures)
+            break
+    return success_count, force_switch, retry_403_count
+
+
+async def _collect_async_batch_results(futures, batch_id=None) -> tuple[int, bool, int]:
+    success_count = 0
+    force_switch = False
+    retry_403_count = 0
+    normalized_batch_id = str(batch_id or "").strip()
+    for future in asyncio.as_completed(futures):
+        worker_status = await future
+        if worker_status == "success":
+            success_count += 1
+            continue
+        if worker_status == "retry_403":
+            retry_403_count += 1
+            continue
+        if worker_status == "switch_node":
+            force_switch = True
+            if normalized_batch_id:
+                task_log_guard.abort_batch(normalized_batch_id)
+            _cancel_pending_futures(futures)
+            break
+    return success_count, force_switch, retry_403_count
 
 def _load_dotenv(path: str = ".env") -> None:
     if not os.path.exists(path):
@@ -1148,24 +1199,22 @@ def normal_main_loop(args, stop_event: threading.Event, executor=None):
                         executor.submit(_worker, idx, preallocated_domains[idx] if idx < len(preallocated_domains) else None)
                         for idx in range(current_batch)
                     ]
-                    for f in futures:
-                        worker_status = f.result()
-                        if worker_status == "success":
-                            success_count += 1
-                        elif worker_status == "switch_node":
-                            skip_wait_after_round = True
+                    batch_success_count, batch_force_switch, _ = _collect_sync_batch_results(futures, batch_id)
+                    success_count += batch_success_count
+                    skip_wait_after_round = batch_force_switch
                 else:
-                    with ThreadPoolExecutor(max_workers=current_batch) as ex:
+                    ex = ThreadPoolExecutor(max_workers=current_batch)
+                    batch_force_switch = False
+                    try:
                         futures = [
                             ex.submit(_worker, idx, preallocated_domains[idx] if idx < len(preallocated_domains) else None)
                             for idx in range(current_batch)
                         ]
-                        for f in futures:
-                            worker_status = f.result()
-                            if worker_status == "success":
-                                success_count += 1
-                            elif worker_status == "switch_node":
-                                skip_wait_after_round = True
+                        batch_success_count, batch_force_switch, _ = _collect_sync_batch_results(futures, batch_id)
+                        success_count += batch_success_count
+                        skip_wait_after_round = batch_force_switch
+                    finally:
+                        ex.shutdown(wait=not batch_force_switch, cancel_futures=batch_force_switch)
                 task_log_guard.clear_batch(str(batch_id or ""))
             else:
                 if cfg.is_raw_proxy_pool_enabled():
@@ -1446,9 +1495,10 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
                                 )
                                 for idx in range(batch_size)
                             ]
-                            reg_results = await asyncio.gather(*reg_futures)
+                            batch_success_count, batch_force_switch, retry_403_count = await _collect_async_batch_results(reg_futures, batch_id)
                         else:
-                            with ThreadPoolExecutor(max_workers=batch_size) as ex:
+                            ex = ThreadPoolExecutor(max_workers=batch_size)
+                            try:
                                 reg_futures = [
                                     loop.run_in_executor(
                                         ex,
@@ -1459,15 +1509,13 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
                                     )
                                     for idx in range(batch_size)
                                 ]
-                                reg_results = await asyncio.gather(*reg_futures)
-                        for status in reg_results:
-                            if status == "success":
-                                success_in_this_cycle += 1
-                            elif status == "retry_403":
-                                print(f"[{ts()}] [WARNING] 遇到 403 频率限制，给服务器 15 秒冷却时间...")
-                                await asyncio.sleep(15)
-                            elif status == "switch_node":
-                                batch_force_switch = True
+                                batch_success_count, batch_force_switch, retry_403_count = await _collect_async_batch_results(reg_futures, batch_id)
+                            finally:
+                                ex.shutdown(wait=not batch_force_switch, cancel_futures=batch_force_switch)
+                        success_in_this_cycle += batch_success_count
+                        if retry_403_count and not batch_force_switch:
+                            print(f"[{ts()}] [WARNING] 遇到 {retry_403_count} 次 403 频率限制，给服务器 15 秒冷却时间...")
+                            await asyncio.sleep(15)
                     else:
                         print(f"[{ts()}] [INFO] 单线程补货: {success_in_this_cycle}/{need_to_reg}")
                         if cfg.is_raw_proxy_pool_enabled():
@@ -1707,9 +1755,10 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                                 )
                                 for idx in range(batch_size)
                             ]
-                            reg_results = await asyncio.gather(*reg_futures)
+                            batch_success_count, batch_force_switch, retry_403_count = await _collect_async_batch_results(reg_futures, batch_id)
                         else:
-                            with ThreadPoolExecutor(max_workers=batch_size) as ex:
+                            ex = ThreadPoolExecutor(max_workers=batch_size)
+                            try:
                                 reg_futures = [
                                     loop.run_in_executor(
                                         ex,
@@ -1720,17 +1769,14 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                                     )
                                     for idx in range(batch_size)
                                 ]
-                                reg_results = await asyncio.gather(*reg_futures)
-
-                        for status in reg_results:
-                            if status == "success":
-                                success_in_this_cycle += 1
-                            elif status == "retry_403":
-                                print(f"[{ts()}] [WARNING] 遇到 403 频率限制，给服务器 15 秒冷却时间...")
-                                try: await asyncio.wait_for(async_stop_event.wait(), timeout=15)
-                                except asyncio.TimeoutError: pass
-                            elif status == "switch_node":
-                                batch_force_switch = True
+                                batch_success_count, batch_force_switch, retry_403_count = await _collect_async_batch_results(reg_futures, batch_id)
+                            finally:
+                                ex.shutdown(wait=not batch_force_switch, cancel_futures=batch_force_switch)
+                        success_in_this_cycle += batch_success_count
+                        if retry_403_count and not batch_force_switch:
+                            print(f"[{ts()}] [WARNING] 遇到 {retry_403_count} 次 403 频率限制，给服务器 15 秒冷却时间...")
+                            try: await asyncio.wait_for(async_stop_event.wait(), timeout=15)
+                            except asyncio.TimeoutError: pass
 
                     else:
                         print(f"[{ts()}] [INFO] 单线程补货: {success_in_this_cycle}/{need_to_reg}")

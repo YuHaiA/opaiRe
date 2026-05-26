@@ -55,7 +55,7 @@ def _post_form(
             if attempt < retries:
                 print(f"\n[{cfg.ts()}] [WARNING] 换取 Token 时遇到网络异常: {exc}。"
                       f"准备第 {attempt + 1}/{retries} 次重试...")
-                time.sleep(2 * (attempt + 1))
+                task_log_guard.sleep_with_batch_abort(2 * (attempt + 1))
     raise RuntimeError(
         f"token exchange failed after {retries} retries: {last_error}"
     ) from last_error
@@ -93,7 +93,7 @@ def _post_with_retry(
             last_error = e
             if attempt >= retries:
                 break
-            time.sleep(2 * (attempt + 1))
+            task_log_guard.sleep_with_batch_abort(2 * (attempt + 1))
     if last_error:
         raise last_error
     raise RuntimeError("Request failed without exception")

@@ -16,30 +16,35 @@
 ## 最新修改
 
 - 修改文件：
+  - `routers/system_routes.py`
+  - `utils/config_save_guard.py`
+  - `utils/task_log_guard.py`
+  - `utils/auth_pipeline/http_utils.py`
+  - `utils/auth_pipeline/register.py`
   - `utils/core_engine.py`
   - `utils/proxy_manager.py`
-  - `utils/task_log_guard.py`
+  - `config.example.yaml`
+  - `tests/test_proxy_manager_node_eviction.py`
+  - `tests/test_system_routes_config_save.py`
   - `tests/test_task_log_guard.py`
 - 变更内容：
-  - 新增任务级日志守卫 `utils/task_log_guard.py`，专门统计并发注册任务里的可计数节点异常。
-  - 目前纳入“三次熔断”计数的日志包括：
-    - `curl (28) Connection timed out`
-    - `提交邮箱环节异常, 返回: 409`
-    - `无密码通道邮件发送异常, 返回: 409`
-  - `无密码通道OAuth 阶段验证失败: 401` 被明确排除在计数之外，只忽略并继续流程。
-  - 当同一节点累计命中 3 次可计数异常时，会直接中断当前任务、触发节点切换，并对当前节点做池内淘汰：
-    - 原始代理池：从 `raw_proxy_pool.proxy_list` 删除当前代理。
-    - Clash 节点池：把当前节点名追加到 `clash_proxy_pool.blacklist`，并同步从 `tested_nodes` 有效节点池中移除。
-  - 节点切换链路现在也会即时清理活节点池：只要某个候选节点切换成功但随后 `test_proxy_liveness()` 测活失败，就会立即从 `tested_nodes` 活节点池剔除，并同步加入黑名单，避免后续继续被当成“已验证可用节点”反复抽中。
-  - `normal / CPA / Sub2API` 三条注册入口现在统一走同一套熔断逻辑；节点被剔除后会跳过常规等待，立即进入下一轮任务。
-  - 新增 `tests/test_task_log_guard.py`，覆盖 `401` 忽略、`409/timeout` 计数、第三次触发熔断与成功后清零。
-  - 新增 `tests/test_proxy_manager_node_eviction.py`，覆盖切换后测活失败节点会被追加黑名单并从 `tested_nodes` 中移除。
+  - 新增 `utils/config_save_guard.py`，把“普通保存配置时必须保留的 Clash 运行态字段”独立收敛，避免前端旧快照把 `sub_urls / selected_subscription_id / tested_nodes / evicted_nodes` 覆盖回旧值。
+  - `/api/config` 现在会先合并并保留 Clash 运行态，再执行 `reload_all_configs()`；修复了“个人配置保存后运行一段时间又被旧值/默认态顶回去”的核心覆写链路。
+  - Clash 运行时淘汰节点不再污染 `clash_proxy_pool.blacklist` 关键词黑名单；新增 `clash_proxy_pool.evicted_nodes` 专门记录被测活淘汰的具体节点名。
+  - `utils/proxy_manager.py` 切换节点时会同时参考 `blacklist` 关键词和 `evicted_nodes` 精确节点名；坏节点会从 `tested_nodes` 活节点池移除，但不会覆盖用户原有的关键词过滤配置。
+  - `utils/proxy_manager.py` 写回运行配置时现在优先基于内存中的 `cfg._c` 快照，而不是只信磁盘 YAML，降低运行期专用状态被旧文件回写覆盖的概率。
+  - `utils/core_engine.py` 的并发批次收敛逻辑改为：一旦任一 worker 返回 `switch_node`，会立刻标记整批中止、取消未开始的 future，并跳过“等整批 futures 顺序跑完”的旧行为。
+  - 日志打印钩子现在在每次写日志后都会补查 `raise_if_current_batch_aborted()`，让同批其他 worker 在下一次日志输出时能尽快感知熔断并退出，而不是继续把当前坏节点跑到底。
+  - 新增 `task_log_guard.sleep_with_batch_abort()`，把原本固定 `sleep` 改成可中断等待；同批一旦熔断，重试等待、验证码重发等待、注册成功后的同步等待都会尽快提前结束。
+  - `utils/auth_pipeline/register.py` 现在在无密码重发、OTP 重发、OAuth 重试、二次安全验证码重试、OAuth 跳转追踪等长流程入口补了批次熔断检查点，减少“已判定切节点，但其他线程还继续等完整重试周期”的拖尾。
+  - `utils/auth_pipeline/http_utils.py` 的底层重试退避等待也改成可中断，避免网络重试 sleep 自己把同批切节点拖慢。
+  - 新增/更新测试，覆盖配置保存保留运行态、节点淘汰不污染关键词黑名单、以及原有任务熔断守卫链路。
 - 修改原因：
-  - 避免同一坏节点在并发注册中反复消耗邮箱、验证码和任务槽位。
-  - 把“该忽略的 401”和“必须计数的 409/超时”明确拆开，减少误判。
+  - 解决 GitHub 最新代码里三类实际问题：配置会被旧快照回写、节点熔断后同批任务仍继续跑、运行时坏节点写进手动关键词黑名单覆盖用户原配置。
 - 影响范围：
   - 影响常规注册、CPA 补货、Sub2API 补货三条任务调度链路。
-  - 影响代理池 / 节点池的运行时淘汰行为，并会把淘汰结果持久化回配置文件。
+  - 影响 Clash 配置保存链路、活节点池淘汰行为与运行态持久化格式。
+  - 旧配置若仍只有 `blacklist` 而无 `evicted_nodes` 也可继续运行；新逻辑只会把后续淘汰节点写入 `evicted_nodes`。
 
 ## 前端界面要点
 
