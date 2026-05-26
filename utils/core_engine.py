@@ -160,6 +160,17 @@ async def _collect_async_batch_results(futures, batch_id=None) -> tuple[int, boo
             break
     return success_count, force_switch, retry_403_count
 
+
+def _consume_sub2api_shared_switch_signal(
+    shared_global_clash_mode: bool,
+    switch_requested: bool,
+) -> tuple[bool, bool]:
+    if not switch_requested:
+        return False, False
+    if shared_global_clash_mode:
+        return True, False
+    return False, True
+
 def _load_dotenv(path: str = ".env") -> None:
     if not os.path.exists(path):
         return
@@ -1671,6 +1682,8 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                 else:
                     print(f"[{ts()}] [INFO] 库存不足 ({valid_count} < {cfg.SUB2API_MIN_THRESHOLD})，启动补货...")
                 await asyncio.sleep(1)
+                shared_global_clash_mode = cfg._clash_enable and not cfg._clash_pool_mode
+                shared_global_clash_refresh_requested = shared_global_clash_mode
 
                 def _sub2api_run_wrapper(p, skip_switch, assigned_domain=None, batch_id=None, worker_index=None):
                     result, status = _execute_registration_run(
@@ -1741,10 +1754,11 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                     batch_id = int(time.time() * 1000) if batch_size > 1 else None
                     batch_force_switch = False
 
-                    if cfg._clash_enable and not cfg._clash_pool_mode:
+                    if shared_global_clash_mode and shared_global_clash_refresh_requested:
                         print(f"[{ts()}] [INFO] [Sub2API补货] 切换全局节点...")
                         if not smart_switch_node(args.proxy):
                             print(f"[{ts()}] [WARNING] [Sub2API补货] 全局节点切换失败，使用当前 IP 继续...")
+                        shared_global_clash_refresh_requested = False
 
                     if (
                         cfg.ENABLE_MULTI_THREAD_REG
@@ -1785,9 +1799,13 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                                 batch_success_count, batch_force_switch, retry_403_count = await _collect_async_batch_results(reg_futures, batch_id)
                             finally:
                                 ex.shutdown(wait=not batch_force_switch, cancel_futures=batch_force_switch)
-                        if batch_force_switch:
-                            print(f"[{ts()}] [INFO] [Sub2API补货] 检测到节点切换信号，但忽略以避免影响其他任务")
-                            batch_force_switch = False
+                        request_shared_refresh, batch_force_switch = _consume_sub2api_shared_switch_signal(
+                            shared_global_clash_mode,
+                            batch_force_switch,
+                        )
+                        if request_shared_refresh:
+                            shared_global_clash_refresh_requested = True
+                            print(f"[{ts()}] [INFO] [Sub2API补货] 检测到节点故障信号，下一批补货前刷新全局节点...")
                         success_in_this_cycle += batch_success_count
                         if retry_403_count and not batch_force_switch:
                             print(f"[{ts()}] [WARNING] 遇到 {retry_403_count} 次 403 频率限制，给服务器 15 秒冷却时间...")
@@ -1823,8 +1841,13 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                             try: await asyncio.wait_for(async_stop_event.wait(), timeout=10)
                             except asyncio.TimeoutError: pass
                         elif status == "switch_node":
-                            # Sub2API 补货任务失败不应触发全局节点切换，记录并继续
-                            print(f"[{ts()}] [INFO] [Sub2API补货] 检测到节点切换信号，但忽略以避免影响其他任务")
+                            request_shared_refresh, batch_force_switch = _consume_sub2api_shared_switch_signal(
+                                shared_global_clash_mode,
+                                True,
+                            )
+                            if request_shared_refresh:
+                                shared_global_clash_refresh_requested = True
+                                print(f"[{ts()}] [INFO] [Sub2API补货] 检测到节点故障信号，下一批补货前刷新全局节点...")
 
                         if not batch_force_switch:
                             try: await asyncio.wait_for(async_stop_event.wait(), timeout=5)
