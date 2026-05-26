@@ -187,6 +187,7 @@ def run(
                             login_code = ""
                             code_resp = None
                             for resend_attempt in range(max(1, cfg.MAX_OTP_RETRIES)):
+                                task_log_guard.raise_if_current_batch_aborted()
                                 if getattr(cfg, 'GLOBAL_STOP', False): return None, None
                                 if resend_attempt > 0:
                                     print(f"\n[{cfg.ts()}] [INFO] 无密码通道正在请求重新发送登录验证码 {resend_attempt}/{cfg.MAX_OTP_RETRIES}...")
@@ -206,7 +207,7 @@ def run(
                                             headers=resend_headers,
                                             json_body={}, proxies=proxies, timeout=15,
                                         )
-                                        time.sleep(3)
+                                        task_log_guard.sleep_with_batch_abort(3)
                                     except Exception as e:
                                         print(f"[{cfg.ts()}] [WARNING] （{mask_email(email)}）无密码通道重新发送请求异常: {e}")
 
@@ -378,7 +379,7 @@ def run(
                                         headers=resend_headers,
                                         json_body={}, proxies=proxies, timeout=15,
                                     )
-                                    time.sleep(2)
+                                    task_log_guard.sleep_with_batch_abort(2)
                                 except Exception as e:
                                     print(f"[{cfg.ts()}] [WARNING] （{mask_email(email)}）重新发送请求异常: {e}")
                             is_openai_cpa = getattr(cfg, 'EMAIL_API_MODE', '')
@@ -581,9 +582,9 @@ def run(
                     saved_temp_at = data
                     if getattr(cfg, 'TEAM_MODE_ENABLE', False):
                         print(f"[{cfg.ts()}] [INFO] （{mask_email(email)}）即将进入团队静默流程")
-                        time.sleep(random.uniform(0.1, 0.5))
+                        task_log_guard.sleep_with_batch_abort(random.uniform(0.1, 0.5))
                         is_alloc, sys_handle_a, sys_handle_b, sys_handle_c = sys_node_allocate(s_reg, did, data, proxies)
-                time.sleep(wait_time)
+                task_log_guard.sleep_with_batch_abort(wait_time)
 
                 workspace_hint_url = ""
                 if target_continue_url:
@@ -649,6 +650,7 @@ def run(
                 OAUTH_MAX_RETRIES = 2
 
                 for oauth_attempt in range(OAUTH_MAX_RETRIES):
+                    task_log_guard.raise_if_current_batch_aborted()
                     s_log = requests.Session(proxies=proxies, impersonate="chrome110")
                     s_log.headers.update({"Connection": "close"})
                     s_log.cookies.clear()
@@ -749,7 +751,7 @@ def run(
                                         headers=resend_headers,
                                         json_body={}, proxies=proxies, timeout=15,
                                     )
-                                    time.sleep(2)
+                                    task_log_guard.sleep_with_batch_abort(2)
                                 except Exception as e:
                                     print(f"[{cfg.ts()}] [WARNING] （{mask_email(email)}）无密码通道重新发送请求异常: {e}")
 
@@ -861,6 +863,7 @@ def run(
                             code2 = ""
                             code2_resp = None
                             for resend_attempt in range(max(1, cfg.MAX_OTP_RETRIES)):
+                                task_log_guard.raise_if_current_batch_aborted()
                                 if getattr(cfg, 'GLOBAL_STOP', False): return None, None
                                 if resend_attempt > 0:
                                     print(
@@ -880,7 +883,7 @@ def run(
                                             headers=log_resend_headers,
                                             json_body={}, proxies=proxies, timeout=15,
                                         )
-                                        time.sleep(2)
+                                        task_log_guard.sleep_with_batch_abort(2)
                                     except Exception as e:
                                         print(f"[{cfg.ts()}] [WARNING] （{mask_email(email)}）重新发送请求异常: {e}")
                                 code2 = get_oai_code(email, jwt=email_jwt, proxies=proxies,
@@ -926,6 +929,7 @@ def run(
                     error_reason = ""
                     oauth_needs_retry = False
                     while True:
+                        task_log_guard.raise_if_current_batch_aborted()
                         if "code=" in current_url:
                             token_resp = submit_callback_url(
                                 callback_url=current_url,
@@ -1033,14 +1037,14 @@ def run(
                 print(f"[{cfg.ts()}] [ERROR] （{mask_email(email)}） 注册主流程发生严重异常: {e}")
                 if attempt < MAX_REG_RETRIES - 1:
                     print(f"[{cfg.ts()}] [INFO] 正在准备重试...")
-                    time.sleep(2)
+                    task_log_guard.sleep_with_batch_abort(2)
                     continue
                 return None, None
         return None, None
     finally:
         if getattr(cfg, 'TEAM_MODE_ENABLE', False):
             try:
-                time.sleep(random.uniform(0.1, 0.5))
+                task_log_guard.sleep_with_batch_abort(random.uniform(0.1, 0.5))
                 sys_node_release(saved_temp_at, sys_handle_a, sys_handle_b, sys_handle_c, proxies)
             except Exception:
                 pass

@@ -13,6 +13,7 @@ import zipfile
 import io
 import shutil
 import json
+from copy import deepcopy
 from pathlib import Path
 
 from typing import Optional, Any
@@ -24,6 +25,7 @@ from global_state import VALID_TOKENS, CLUSTER_NODES, NODE_COMMANDS, cluster_loc
 from utils import core_engine, db_manager
 from utils.email_providers import mail_service
 from utils.config import reload_all_configs
+from utils.config_save_guard import merge_runtime_owned_clash_state
 from utils.integrations.tg_notifier import send_tg_msg_async
 from utils.memory_predictor import build_memory_report
 from utils.system_maintenance import get_cleanup_status
@@ -73,12 +75,12 @@ class ExtResultReq(BaseModel):
     task_id: Optional[str] = ""
     email: Optional[str] = ""
     password: Optional[str] = ""
+    error_type: Optional[str] = "failed"
     error_msg: Optional[str] = ""
     token_data: Optional[str] = ""
     callback_url: Optional[str] = ""
     code_verifier: Optional[str] = ""
     expected_state: Optional[str] = ""
-    error_type: Optional[str] = "failed"
 
 
 def _run_local_command(command: list[str], timeout: int = 60, cwd: Optional[str] = None) -> dict:
@@ -994,7 +996,7 @@ async def delete_mail_domains(req: MailDomainDeleteReq, token: str = Depends(ver
 @router.post("/api/config")
 async def save_config(new_config: dict, token: str = Depends(verify_token)):
     try:
-        current_config = getattr(core_engine.cfg, '_c', {}).copy()
+        current_config = deepcopy(getattr(core_engine.cfg, '_c', {}) or {})
         if isinstance(new_config.get("sub2api_mode"), dict):
             new_config["sub2api_mode"].pop("min_remaining_weekly_percent", None)
         new_config["local_microsoft"] = _sanitize_local_microsoft_config(new_config.get("local_microsoft"))
@@ -1022,26 +1024,19 @@ async def save_config(new_config: dict, token: str = Depends(verify_token)):
         grouping_error = _normalize_mail_domain_grouping_payload(new_config)
         if grouping_error:
             return {"status": "error", "message": grouping_error}
-        reload_all_configs(new_config_dict=new_config)
-        mail_service.sync_mail_domain_runtime_state_with_config()
-        extra_messages = []
         old_default_proxy = str(current_config.get("default_proxy") or "").strip()
-        new_default_proxy = str(new_config.get("default_proxy") or "").strip()
         old_clash_conf = current_config.get("clash_proxy_pool", {}) if isinstance(current_config.get("clash_proxy_pool"), dict) else {}
+        new_config = merge_runtime_owned_clash_state(current_config, new_config)
+        new_default_proxy = str(new_config.get("default_proxy") or "").strip()
         new_clash_conf = new_config.get("clash_proxy_pool", {}) if isinstance(new_config.get("clash_proxy_pool"), dict) else {}
-        if new_clash_conf:
-            # 订阅列表/选中态由专用 Clash API 维护，普通“保存配置”不允许用前端旧快照把它们覆盖回去。
-            for key in ("sub_urls", "selected_subscription_id", "tested_nodes"):
-                if key in old_clash_conf:
-                    new_clash_conf[key] = old_clash_conf.get(key)
-            if not str(new_clash_conf.get("sub_url") or "").strip() and str(old_clash_conf.get("sub_url") or "").strip():
-                new_clash_conf["sub_url"] = old_clash_conf.get("sub_url")
-            new_config["clash_proxy_pool"] = new_clash_conf
         clash_runtime_related_changed = any([
             old_default_proxy != new_default_proxy,
             str(old_clash_conf.get("api_url") or "").strip() != str(new_clash_conf.get("api_url") or "").strip(),
             str(old_clash_conf.get("secret") or "").strip() != str(new_clash_conf.get("secret") or "").strip(),
         ])
+        reload_all_configs(new_config_dict=new_config)
+        mail_service.sync_mail_domain_runtime_state_with_config()
+        extra_messages = []
         if clash_runtime_related_changed:
             ok, msg = clash_manager.sync_single_core_runtime_from_saved_config()
             if msg:

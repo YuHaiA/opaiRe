@@ -1,4 +1,5 @@
 import re
+import time
 import threading
 from dataclasses import dataclass
 from typing import Optional
@@ -130,6 +131,16 @@ def raise_if_current_batch_aborted() -> None:
             bucket_id=context.bucket_id,
             label=context.label,
         )
+
+
+def sleep_with_batch_abort(total_seconds: float, step_seconds: float = 0.5) -> None:
+    remaining = max(0.0, float(total_seconds or 0.0))
+    step = max(0.05, float(step_seconds or 0.5))
+    while remaining > 0:
+        raise_if_current_batch_aborted()
+        sleep_chunk = min(step, remaining)
+        time.sleep(sleep_chunk)
+        remaining -= sleep_chunk
 
 
 def observe_log_message(message: str) -> None:

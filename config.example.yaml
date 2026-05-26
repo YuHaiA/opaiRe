@@ -191,6 +191,8 @@ clash_proxy_pool:
     - "CN"
     - "China"
     - "回国"
+  # 运行时被测活剔除的节点名：只移出活节点池，不污染上面的关键词黑名单
+  evicted_nodes: []
 
 raw_proxy_pool:
   # 独立于 Clash 的批量代理池；启用后优先使用这里的代理列表

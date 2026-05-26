@@ -183,21 +183,31 @@ def add_subscription(name: str, url: str, make_selected: bool = False) -> tuple[
     for item in subscriptions:
         if item["url"] == url:
             item["name"] = name
+            clash_conf["sub_urls"] = subscriptions
             if make_selected:
+                success, message = patch_and_update(url, "all", item["id"])
+                if not success:
+                    return False, f"订阅已存在，但切换失败：{message}"
                 clash_conf["sub_url"] = url
                 clash_conf["selected_subscription_id"] = item["id"]
-            clash_conf["sub_urls"] = subscriptions
+                config_data["clash_proxy_pool"] = clash_conf
+                cfg.reload_all_configs(new_config_dict=config_data)
+                return True, "订阅已存在，已更新名称并切换为当前订阅。"
             config_data["clash_proxy_pool"] = clash_conf
             cfg.reload_all_configs(new_config_dict=config_data)
             return True, "订阅已存在，已更新名称。"
     subscriptions.append({"id": uuid4().hex[:8], "name": name, "url": url})
     clash_conf["sub_urls"] = subscriptions
+    new_item = subscriptions[-1]
     if make_selected or not str(clash_conf.get("sub_url") or "").strip():
+        success, message = patch_and_update(url, "all", new_item["id"])
+        if not success:
+            return False, f"订阅已添加，但切换失败：{message}"
         clash_conf["sub_url"] = url
-        clash_conf["selected_subscription_id"] = subscriptions[-1]["id"]
+        clash_conf["selected_subscription_id"] = new_item["id"]
     config_data["clash_proxy_pool"] = clash_conf
     cfg.reload_all_configs(new_config_dict=config_data)
-    return True, "订阅已添加。"
+    return True, "订阅已添加并已同步。"
 
 
 def delete_subscription(subscription_id: str) -> tuple[bool, str]:
