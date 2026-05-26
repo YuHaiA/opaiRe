@@ -170,6 +170,10 @@ def _should_skip_worker_proxy_net_check(skip_switch: bool) -> bool:
     )
 
 
+def _shared_global_switch_force_requested(previous_batch_force_switch: bool) -> bool:
+    return bool(previous_batch_force_switch)
+
+
 def _load_dotenv(path: str = ".env") -> None:
     if not os.path.exists(path):
         return
@@ -1127,6 +1131,7 @@ def normal_main_loop(args, stop_event: threading.Event, executor=None):
 
     success_count  = 0
     total_attempts = 0
+    shared_global_force_switch = False
 
     while not stop_event.is_set() and not cfg.POOL_EXHAUSTED:
         skip_wait_after_round = False
@@ -1142,7 +1147,10 @@ def normal_main_loop(args, stop_event: threading.Event, executor=None):
         try:
             if cfg._clash_enable and not cfg._clash_pool_mode:
                 print(f"[{ts()}] [INFO] 触发单端口共享模式，正在进行全局节点切换...")
-                if not smart_switch_node(args.proxy, force=True):
+                if not smart_switch_node(
+                    args.proxy,
+                    force=_shared_global_switch_force_requested(shared_global_force_switch),
+                ):
                     print(f"[{ts()}] [WARNING] 全局节点切换失败，将使用当前 IP 继续尝试...")
 
             if cfg.ENABLE_MULTI_THREAD_REG:
@@ -1266,8 +1274,10 @@ def normal_main_loop(args, stop_event: threading.Event, executor=None):
             break
 
         if skip_wait_after_round:
+            shared_global_force_switch = True
             print(f"[{ts()}] [INFO] 当前节点已淘汰，立即切换到下一轮任务...")
             continue
+        shared_global_force_switch = False
 
         wait_time = random.randint(sleep_min, sleep_max)
         print(f"[{ts()}] [INFO] 缓冲防风控，等待 {wait_time} 秒后继续...")
@@ -1428,6 +1438,7 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
                 else:
                     print(f"[{ts()}] [INFO] 库存不足 ({valid_count} < {cfg.MIN_ACCOUNTS_THRESHOLD})，启动补货...")
                 await asyncio.sleep(1)
+                shared_global_force_switch = False
 
                 def _cpa_worker(worker_index=0, assigned_domain=None, batch_id=None):
                     if async_stop_event.is_set(): return "stopped"
@@ -1482,7 +1493,10 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
 
                     if cfg._clash_enable and not cfg._clash_pool_mode:
                         print(f"[{ts()}] [INFO] [CPA补货] 切换全局节点...")
-                        if not smart_switch_node(args.proxy, force=True):
+                        if not smart_switch_node(
+                            args.proxy,
+                            force=_shared_global_switch_force_requested(shared_global_force_switch),
+                        ):
                             print(f"[{ts()}] [WARNING] [CPA补货] 全局节点切换失败，使用当前 IP 继续...")
 
                     if (
@@ -1562,8 +1576,10 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
                         global_postman_fleet.clear_fleet()
                     task_log_guard.clear_batch(str(batch_id or ""))
                     if batch_force_switch:
+                        shared_global_force_switch = True
                         print(f"[{ts()}] [INFO] 当前故障节点已剔除，立即切换到下一批补货任务...")
                         continue
+                    shared_global_force_switch = False
                 print(f"[{ts()}] [SUCCESS] 本轮补货完成！累计入库: {success_in_this_cycle} 个。")
             else:
                 print(f"[{ts()}] [INFO] 仓库存量充足，无需补发。")
@@ -1670,6 +1686,7 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                 else:
                     print(f"[{ts()}] [INFO] 库存不足 ({valid_count} < {cfg.SUB2API_MIN_THRESHOLD})，启动补货...")
                 await asyncio.sleep(1)
+                shared_global_force_switch = False
 
                 def _sub2api_run_wrapper(p, skip_switch, assigned_domain=None, batch_id=None, worker_index=None):
                     result, status = _execute_registration_run(
@@ -1742,7 +1759,10 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
 
                     if cfg._clash_enable and not cfg._clash_pool_mode:
                         print(f"[{ts()}] [INFO] [Sub2API补货] 切换全局节点...")
-                        if not smart_switch_node(args.proxy, force=True):
+                        if not smart_switch_node(
+                            args.proxy,
+                            force=_shared_global_switch_force_requested(shared_global_force_switch),
+                        ):
                             print(f"[{ts()}] [WARNING] [Sub2API补货] 全局节点切换失败，使用当前 IP 继续...")
 
                     if (
@@ -1828,8 +1848,10 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                         global_postman_fleet.clear_fleet()
                     task_log_guard.clear_batch(str(batch_id or ""))
                     if batch_force_switch:
+                        shared_global_force_switch = True
                         print(f"[{ts()}] [INFO] 当前故障节点已剔除，立即切换到下一批 Sub2API 任务...")
                         continue
+                    shared_global_force_switch = False
                 print(f"[{ts()}] [SUCCESS] 本轮补货完成！累计入库 Sub2API: {success_in_this_cycle} 个。")
             else:
                 print(f"[{ts()}] [INFO] 仓库存量充足，无需补发。")

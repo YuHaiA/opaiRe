@@ -31,6 +31,7 @@ if "utils.auth_core" not in sys.modules:
     sys.modules["utils.auth_core"] = _auth_core_stub
 
 from utils.auth_pipeline import register as register_module
+from utils import core_engine
 
 
 class RegisterSharedBatchNetCheckTests(unittest.TestCase):
@@ -47,6 +48,10 @@ class RegisterSharedBatchNetCheckTests(unittest.TestCase):
 
         self.assertEqual((None, None), result)
         self.assertFalse(dummy_session.get_called)
+
+    def test_shared_switch_force_only_enabled_after_fault_batch(self):
+        self.assertFalse(core_engine._shared_global_switch_force_requested(False))
+        self.assertTrue(core_engine._shared_global_switch_force_requested(True))
 
 
 if __name__ == "__main__":

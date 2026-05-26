@@ -17,6 +17,20 @@
 
 - 修改文件：
   - `utils/core_engine.py`
+  - `tests/test_register_shared_batch_net_check.py`
+- 变更内容：
+  - 共享全局 Clash 节点模式下，常规量产、CPA 补货、Sub2API 补货三条流程不再“每个批次都 `force=True` 真切一次节点”。
+  - 现在只有上一批因 `switch_node` 故障信号被中断时，下一批开头才会强制切节点；正常完成的批次只走普通切换，继续受原有 10 秒冷却保护。
+  - 新增定向断言，覆盖“只有故障批次之后才应请求强制切换”的状态判断。
+- 修改原因：
+  - 对齐 `f1` 更接近的运行体感，减少共享全局节点模式下批次很快结束时的“每批都真切节点”现象。
+  - 保留节点故障后的强制切换能力，避免坏节点刚被淘汰却又被冷却机制吞掉下一批应有的换节点动作。
+- 影响范围：
+  - 影响常规量产、CPA 补货、Sub2API 补货在共享全局 Clash 节点模式下的批次切换时机。
+  - 不影响原始代理池、独立代理池，也不影响故障批次后的强制切换逻辑。
+
+- 修改文件：
+  - `utils/core_engine.py`
   - `utils/auth_pipeline/register.py`
   - `tests/test_register_shared_batch_net_check.py`
 - 变更内容：
