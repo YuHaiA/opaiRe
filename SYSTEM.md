@@ -23,13 +23,16 @@
   - `utils/auth_pipeline/register.py`
   - `utils/core_engine.py`
   - `utils/proxy_manager.py`
+  - `utils/integrations/clash_manager.py`
   - `config.example.yaml`
   - `tests/test_proxy_manager_node_eviction.py`
   - `tests/test_system_routes_config_save.py`
+  - `tests/test_clash_manager_subscription_add.py`
   - `tests/test_task_log_guard.py`
 - 变更内容：
   - 新增 `utils/config_save_guard.py`，把“普通保存配置时必须保留的 Clash 运行态字段”独立收敛，避免前端旧快照把 `sub_urls / selected_subscription_id / tested_nodes / evicted_nodes` 覆盖回旧值。
   - `/api/config` 现在会先合并并保留 Clash 运行态，再执行 `reload_all_configs()`；修复了“个人配置保存后运行一段时间又被旧值/默认态顶回去”的核心覆写链路。
+  - `add_subscription(..., make_selected=True)` 现在会真正调用 `patch_and_update()` 下发订阅到 Mihomo，再回写 `sub_url / selected_subscription_id`；避免“新增时前端看似选中，但核心策略组仍停留在旧订阅”。
   - Clash 运行时淘汰节点不再污染 `clash_proxy_pool.blacklist` 关键词黑名单；新增 `clash_proxy_pool.evicted_nodes` 专门记录被测活淘汰的具体节点名。
   - `utils/proxy_manager.py` 切换节点时会同时参考 `blacklist` 关键词和 `evicted_nodes` 精确节点名；坏节点会从 `tested_nodes` 活节点池移除，但不会覆盖用户原有的关键词过滤配置。
   - `utils/proxy_manager.py` 写回运行配置时现在优先基于内存中的 `cfg._c` 快照，而不是只信磁盘 YAML，降低运行期专用状态被旧文件回写覆盖的概率。
@@ -41,6 +44,7 @@
   - 新增/更新测试，覆盖配置保存保留运行态、节点淘汰不污染关键词黑名单、以及原有任务熔断守卫链路。
 - 修改原因：
   - 解决 GitHub 最新代码里三类实际问题：配置会被旧快照回写、节点熔断后同批任务仍继续跑、运行时坏节点写进手动关键词黑名单覆盖用户原配置。
+  - 解决“新增订阅后策略组不跟着更新”的问题：新增并选中订阅时，必须同步下发到核心，而不是只写配置文件。
 - 影响范围：
   - 影响常规注册、CPA 补货、Sub2API 补货三条任务调度链路。
   - 影响 Clash 配置保存链路、活节点池淘汰行为与运行态持久化格式。
