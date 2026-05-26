@@ -9,8 +9,6 @@ COUNTABLE_ERROR_LIMIT = 3
 
 _COUNTABLE_RULES = (
     ("curl_timeout", re.compile(r"Failed to perform,\s*curl:\s*\(28\).*Connection timed out", re.IGNORECASE)),
-    ("submit_email_409", re.compile(r"提交邮箱环节异常[,，]?\s*返回[:：]\s*409")),
-    ("passwordless_send_409", re.compile(r"无密码通道.*邮件发送异常[,，]?\s*返回[:：]\s*409")),
 )
 _IGNORED_RULES = (
     ("passwordless_oauth_401", re.compile(r"无密码通道OAuth\s*阶段验证失败[:：]\s*401")),

@@ -16,6 +16,21 @@
 ## 最新修改
 
 - 修改文件：
+  - `utils/task_log_guard.py`
+  - `utils/core_engine.py`
+  - `tests/test_task_log_guard.py`
+- 变更内容：
+  - 节点熔断计数规则已收窄，只继续把底层代理超时 `curl (28) Connection timed out` 视为可累计的节点级故障；`提交邮箱 409` 与 `无密码发信 409` 不再触发节点连击熔断。
+  - `Sub2API` 补货主循环在共用 executor 路径下，现已和非 executor 路径一致：即便单个 worker 回传 `switch_node`，也只记录日志，不再把该信号继续上抛成全局切节点。
+  - 更新测试，覆盖“成功后清空 bucket”以及“409 不应累加节点故障计数”两条行为。
+- 修改原因：
+  - 解决新版把业务流程级 `409` 误判成“节点坏了”后，导致服务器在节点测活成功的情况下仍频繁剔除节点、重复切换的问题。
+  - 修复 `d28536a` 仅覆盖 `Sub2API` 非 executor 分支的遗漏，避免桌面/服务端实际常走的共用线程池路径继续触发全局切节点。
+- 影响范围：
+  - 影响新版节点熔断逻辑与 `Sub2API` 补货批次调度。
+  - 对正常的超时类节点故障熔断不变，但流程级 409 不会再污染 Clash 活节点池。
+
+- 修改文件：
   - `utils/integrations/sub2api_client.py`
   - `utils/core_engine.py`
   - `routers/account_routes.py`

@@ -45,10 +45,18 @@ class TaskLogGuardTests(unittest.TestCase):
 
     def test_success_marker_resets_bucket(self):
         task_log_guard.start_task("bucket-b")
-        task_log_guard.observe_log_message("（ts***@***.***）无密码通道邮件发送异常, 返回: 409")
+        task_log_guard.observe_log_message(
+            "请求失败(第 1 次)Failed to perform, curl: (28) Connection timed out after 15002 milliseconds."
+        )
         self.assertEqual(task_log_guard.get_bucket_count("bucket-b"), 1)
 
         task_log_guard.mark_task_success("bucket-b")
+        self.assertEqual(task_log_guard.get_bucket_count("bucket-b"), 0)
+
+    def test_submit_email_409_does_not_increment_counter(self):
+        task_log_guard.start_task("bucket-b")
+        task_log_guard.observe_log_message("（ts***@***.***）提交邮箱环节异常, 返回: 409")
+        task_log_guard.observe_log_message("（ts***@***.***）无密码通道邮件发送异常, 返回: 409")
         self.assertEqual(task_log_guard.get_bucket_count("bucket-b"), 0)
 
     def test_sleep_with_batch_abort_interrupts_without_waiting_full_duration(self):

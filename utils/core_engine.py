@@ -1783,10 +1783,11 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                                     for idx in range(batch_size)
                                 ]
                                 batch_success_count, batch_force_switch, retry_403_count = await _collect_async_batch_results(reg_futures, batch_id)
-                                # Sub2API 补货失败不应触发全局代理切换，忽略 switch 信号
-                                batch_force_switch = False
                             finally:
                                 ex.shutdown(wait=not batch_force_switch, cancel_futures=batch_force_switch)
+                        if batch_force_switch:
+                            print(f"[{ts()}] [INFO] [Sub2API补货] 检测到节点切换信号，但忽略以避免影响其他任务")
+                            batch_force_switch = False
                         success_in_this_cycle += batch_success_count
                         if retry_403_count and not batch_force_switch:
                             print(f"[{ts()}] [WARNING] 遇到 {retry_403_count} 次 403 频率限制，给服务器 15 秒冷却时间...")
