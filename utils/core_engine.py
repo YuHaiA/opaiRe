@@ -108,7 +108,6 @@ def web_print(*args, **kwargs):
 
 
 builtins.print = web_print
-
 def _load_dotenv(path: str = ".env") -> None:
     if not os.path.exists(path):
         return
@@ -1079,7 +1078,7 @@ def normal_main_loop(args, stop_event: threading.Event, executor=None):
         try:
             if cfg._clash_enable and not cfg._clash_pool_mode:
                 print(f"[{ts()}] [INFO] 触发单端口共享模式，正在进行全局节点切换...")
-                if not smart_switch_node(args.proxy):
+                if not smart_switch_node(args.proxy, force=True):
                     print(f"[{ts()}] [WARNING] 全局节点切换失败，将使用当前 IP 继续尝试...")
 
             if cfg.ENABLE_MULTI_THREAD_REG:
@@ -1421,7 +1420,7 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
 
                     if cfg._clash_enable and not cfg._clash_pool_mode:
                         print(f"[{ts()}] [INFO] [CPA补货] 切换全局节点...")
-                        if not smart_switch_node(args.proxy):
+                        if not smart_switch_node(args.proxy, force=True):
                             print(f"[{ts()}] [WARNING] [CPA补货] 全局节点切换失败，使用当前 IP 继续...")
 
                     if (
@@ -1682,7 +1681,7 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
 
                     if cfg._clash_enable and not cfg._clash_pool_mode:
                         print(f"[{ts()}] [INFO] [Sub2API补货] 切换全局节点...")
-                        if not smart_switch_node(args.proxy):
+                        if not smart_switch_node(args.proxy, force=True):
                             print(f"[{ts()}] [WARNING] [Sub2API补货] 全局节点切换失败，使用当前 IP 继续...")
 
                     if (

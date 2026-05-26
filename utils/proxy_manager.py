@@ -254,7 +254,7 @@ def test_proxy_liveness(proxy_url=None):
         return False
 
 
-def smart_switch_node(proxy_url=None):
+def smart_switch_node(proxy_url=None, force=False):
     global _last_switch_time
     if not ENABLE_NODE_SWITCH:
         return True
@@ -264,7 +264,7 @@ def smart_switch_node(proxy_url=None):
         return _do_smart_switch(proxy_url)
 
     with _global_switch_lock:
-        if time.time() - _last_switch_time < 10:
+        if not force and time.time() - _last_switch_time < 10:
             print(f"[{ts()}] [代理池] 其他线程刚完成切换，跳过本次请求...")
             return True
 

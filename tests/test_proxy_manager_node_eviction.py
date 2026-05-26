@@ -33,6 +33,44 @@ class ProxyManagerNodeEvictionTests(unittest.TestCase):
         self.assertEqual(["node-b"], result["tested_nodes"]["节点选择"])
         self.assertEqual(["node-c"], result["tested_nodes"]["其他组"])
 
+    def test_force_switch_bypasses_shared_cooldown(self):
+        previous_last_switch = pm._last_switch_time
+        previous_enable = pm.ENABLE_NODE_SWITCH
+        previous_pool_mode = pm.POOL_MODE
+        try:
+            pm._last_switch_time = 100
+            pm.ENABLE_NODE_SWITCH = True
+            pm.POOL_MODE = False
+            with patch("utils.proxy_manager.time.time", return_value=105), \
+                    patch("utils.proxy_manager._do_smart_switch", return_value=True) as mock_switch:
+                ok = pm.smart_switch_node("http://127.0.0.1:7890", force=True)
+            self.assertTrue(ok)
+            mock_switch.assert_called_once_with("http://127.0.0.1:7890")
+            self.assertEqual(105, pm._last_switch_time)
+        finally:
+            pm._last_switch_time = previous_last_switch
+            pm.ENABLE_NODE_SWITCH = previous_enable
+            pm.POOL_MODE = previous_pool_mode
+
+    def test_non_forced_switch_respects_shared_cooldown(self):
+        previous_last_switch = pm._last_switch_time
+        previous_enable = pm.ENABLE_NODE_SWITCH
+        previous_pool_mode = pm.POOL_MODE
+        try:
+            pm._last_switch_time = 100
+            pm.ENABLE_NODE_SWITCH = True
+            pm.POOL_MODE = False
+            with patch("utils.proxy_manager.time.time", return_value=105), \
+                    patch("utils.proxy_manager._do_smart_switch", return_value=True) as mock_switch:
+                ok = pm.smart_switch_node("http://127.0.0.1:7890")
+            self.assertTrue(ok)
+            mock_switch.assert_not_called()
+            self.assertEqual(100, pm._last_switch_time)
+        finally:
+            pm._last_switch_time = previous_last_switch
+            pm.ENABLE_NODE_SWITCH = previous_enable
+            pm.POOL_MODE = previous_pool_mode
+
 
 if __name__ == "__main__":
     unittest.main()
