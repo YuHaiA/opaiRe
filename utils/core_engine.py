@@ -841,6 +841,9 @@ def _execute_registration_run(proxy, args, cpa_upload=False, skip_switch=False, 
     except task_log_guard.TaskAbortError as abort_error:
         with _stats_lock:
             run_stats["failed"] += 1
+        # Detach the current task context before cleanup so config reload logs
+        # don't re-enter the same aborted batch and crash the whole worker thread.
+        task_log_guard.end_task()
         task_log_guard.reset_bucket(bucket_id)
         removed, remove_msg = evict_current_proxy_or_node(proxy)
         print(

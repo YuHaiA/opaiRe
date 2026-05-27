@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 
-COUNTABLE_ERROR_LIMIT = 3
+COUNTABLE_ERROR_LIMIT = 5
 
 _COUNTABLE_RULES = (
     ("curl_timeout", re.compile(r"Failed to perform,\s*curl:\s*\(28\).*Connection timed out", re.IGNORECASE)),
