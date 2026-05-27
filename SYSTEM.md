@@ -16,6 +16,35 @@
 ## 最新修改
 
 - 修改文件：
+  - `utils/auth_pipeline/register.py`
+  - `tests/test_register_shared_batch_net_check.py`
+- 变更内容：
+  - 修复无密码接管首段 OTP 校验循环的流程缩进错误：验证码校验结果现在会在每轮取码后立即处理，命中 `200` 时直接继续后续 `continue_url` 主流程，不再掉出到外层注册重试循环。
+  - 新增回归测试，覆盖“无密码接管拿到首个验证码并校验通过后，不应再额外触发 `email-otp/resend`，且应继续执行后续登录回调流转”。
+- 修改原因：
+  - 旧逻辑把 `code_resp.status_code` 判断错放到重发循环外，导致验证码已经通过时，流程没有承接到后面的工作区/回调链路，表现成“验证码接上了，但后续没接上”，同时也容易给人造成仍在重复取码/重发的观感。
+- 影响范围：
+  - 影响无密码接管首段 OTP 验证成功后的主流程衔接。
+  - 不影响普通密码注册 OTP 流程，也不改变节点测活和批次切换策略。
+
+- 修改文件：
+  - `utils/integrations/clash_manager.py`
+  - `routers/service_routes.py`
+  - `static/js/app.js`
+  - `index.html`
+  - `tests/test_clash_manager_evicted_nodes_clear.py`
+- 变更内容：
+  - Clash 状态接口现在会把运行期 `evicted_nodes` 拉黑节点池一并返回给前端。
+  - 新增 `/api/clash/evicted_nodes/clear`，可在面板里手动清空被淘汰节点列表，而不影响 `tested_nodes` 有效池与其他 Clash 运行态。
+  - Clash 节点详情页新增“拉黑节点池”数量展示与“清空拉黑池”按钮，方便在确认节点环境恢复后手动放回候选池。
+  - 新增定向测试，覆盖拉黑池清空后的配置写回，以及本地 GUI 模式下状态接口会正确暴露 `evicted_nodes`。
+- 修改原因：
+  - 现在线上已经把坏节点淘汰写入 `clash_proxy_pool.evicted_nodes`，但面板缺少可视化与人工清理入口；一旦需要重新放回候选池，只能手改配置，不利于排障和运营。
+- 影响范围：
+  - 仅影响 Clash 节点池管理面板与相关后端接口。
+  - 不改变主补货流程、节点切换判定、验证码链路与批次熔断逻辑。
+
+- 修改文件：
   - `utils/email_providers/mail_service.py`
 - 变更内容：
   - `OPENAI-CPA` 本地 webhook 等码在正式判定超时前，会额外做两轮短暂宽限补捞，优先接住“第一轮刚超时、第二轮其实已到码”的延迟验证码。

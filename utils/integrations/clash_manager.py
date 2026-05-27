@@ -293,6 +293,29 @@ def clear_tested_nodes(group_name: str) -> tuple[bool, str]:
         return False, str(e)
 
 
+def _get_evicted_nodes(config_data: Optional[dict] = None) -> list[str]:
+    source = config_data if isinstance(config_data, dict) else _read_runtime_config()
+    clash_conf = source.get("clash_proxy_pool", {}) if isinstance(source.get("clash_proxy_pool"), dict) else {}
+    evicted_nodes = clash_conf.get("evicted_nodes", [])
+    if not isinstance(evicted_nodes, list):
+        return []
+    return [str(node).strip() for node in evicted_nodes if str(node).strip()]
+
+
+def clear_evicted_nodes() -> tuple[bool, str]:
+    try:
+        config_data = _read_runtime_config()
+        clash_conf = config_data.get("clash_proxy_pool", {})
+        if not isinstance(clash_conf, dict):
+            clash_conf = {}
+        clash_conf["evicted_nodes"] = []
+        config_data["clash_proxy_pool"] = clash_conf
+        cfg.reload_all_configs(new_config_dict=config_data)
+        return True, "已清空拉黑节点池。"
+    except Exception as e:
+        return False, str(e)
+
+
 def _build_requests_proxies() -> Optional[dict]:
     proxy_url = str(getattr(cfg, "DEFAULT_PROXY", "") or "").strip()
     if not proxy_url:
@@ -683,6 +706,7 @@ def _build_local_gui_status() -> dict:
             }
         ],
         "groups": _merge_runtime_groups(_collect_groups_from_config(MANUAL_CONFIG_PATH)),
+        "evicted_nodes": _get_evicted_nodes(config_data),
         "message": (
             "当前未检测到 Docker，已切换为本地 GUI 模式。网页仅保存订阅链接与 YAML 配置，不直接接管 GUI 进程。"
             + (" 已检测到本地 Clash/Mihomo 正在运行。" if running else " 暂未检测到本地 Clash/Mihomo 控制口或代理口。")
@@ -710,6 +734,7 @@ def _build_single_core_status() -> dict:
             }
         ],
         "groups": _merge_runtime_groups(_collect_groups_from_config(MANUAL_CONFIG_PATH)),
+        "evicted_nodes": _get_evicted_nodes(config_data),
         "message": "当前为 Linux 单核心模式。网页会直接写入 Mihomo 配置并重启本机内核。",
     }
 
@@ -835,6 +860,7 @@ def get_pool_status():
         "subscriptions": get_subscription_state(),
         "instances": instances,
         "groups": _merge_runtime_groups(_collect_groups_from_config(os.path.join(BASE_PATH, "clash_1", "config.yaml"))),
+        "evicted_nodes": _get_evicted_nodes(),
         "message": "当前为 Docker 集群模式。网页可直接调度 Mihomo 容器实例。",
     }
 

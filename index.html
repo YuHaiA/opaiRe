@@ -3278,6 +3278,11 @@
                                                     <span class="w-1.5 h-1.5 rounded-full" :class="getClashHealthyCount(activeClashGroup) ? 'bg-emerald-500' : 'bg-slate-400'"></span>
                                                     有效节点池：{{ getClashHealthyCount(activeClashGroup) }} 个
                                                 </span>
+                                                <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-black shadow-sm"
+                                                      :class="getClashEvictedCount() ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-slate-100 text-slate-500 border-slate-200'">
+                                                    <span class="w-1.5 h-1.5 rounded-full" :class="getClashEvictedCount() ? 'bg-rose-500' : 'bg-slate-400'"></span>
+                                                    拉黑节点池：{{ getClashEvictedCount() }} 个
+                                                </span>
                                                 <span v-if="clashPool.delayResults[activeClashGroup.name]?.healthy_nodes" class="inline-flex items-center px-3 py-1.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 text-xs font-black shadow-sm">
                                                     本次测速已自动保存 {{ clashPool.delayResults[activeClashGroup.name].healthy_nodes.length }} 个
                                                 </span>
@@ -3289,6 +3294,9 @@
                                             </button>
                                             <button @click="clearClashHealthyNodes(activeClashGroup.name)" :disabled="clashPool.delayLoading || !getClashHealthyCount(activeClashGroup)" class="px-4 py-2.5 rounded-xl bg-white text-slate-600 text-sm font-black hover:bg-slate-50 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm border border-slate-200">
                                                 清空有效池
+                                            </button>
+                                            <button @click="clearClashEvictedNodes" :disabled="clashPool.delayLoading || !getClashEvictedCount()" class="px-4 py-2.5 rounded-xl bg-white text-rose-600 text-sm font-black hover:bg-rose-50 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm border border-rose-200">
+                                                清空拉黑池
                                             </button>
                                         </div>
                                     </div>

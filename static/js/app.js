@@ -511,6 +511,7 @@ createApp({
                 count: 5,
                 instances: [],
                 groups: [],
+                evictedNodes: [],
                 subscriptions: [],
                 mode: '',
                 message: '',
@@ -3997,6 +3998,7 @@ async exportSub2Api() {
                 if (d.status === 'success') {
                     this.clashPool.instances = d.data.instances;
                     this.clashPool.groups = d.data.groups;
+                    this.clashPool.evictedNodes = Array.isArray(d.data.evicted_nodes) ? d.data.evicted_nodes : [];
                     this.clashPool.subscriptions = (d.data.subscriptions?.items || []).map((item) => ({
                         ...item,
                         raw_url: item.url,
@@ -4084,6 +4086,9 @@ async exportSub2Api() {
         },
         getClashHealthyCount(group) {
             return this.getClashHealthyNodes(group).length;
+        },
+        getClashEvictedCount() {
+            return Array.isArray(this.clashPool.evictedNodes) ? this.clashPool.evictedNodes.length : 0;
         },
         async handleClashDeploy() {
             this.showToast('正在调整实例规模...', 'info');
@@ -4259,6 +4264,27 @@ async exportSub2Api() {
                 }
             } catch (e) {
                 this.showToast('延迟测试请求失败', 'error');
+            } finally {
+                this.clashPool.delayLoading = false;
+            }
+        },
+        async clearClashEvictedNodes() {
+            const count = this.getClashEvictedCount();
+            if (!count) return;
+            const confirmed = await this.customConfirm(`确定清空拉黑节点池吗？当前共有 ${count} 个被淘汰节点会恢复为可参与后续切换。`);
+            if (!confirmed) return;
+            this.clashPool.delayLoading = true;
+            try {
+                const res = await this.authFetch('/api/clash/evicted_nodes/clear', {
+                    method: 'POST'
+                });
+                const data = await res.json();
+                this.showToast(data.message || '拉黑节点池已清空', data.status);
+                if (data.status === 'success') {
+                    this.clashPool.evictedNodes = [];
+                }
+            } catch (e) {
+                this.showToast('清空拉黑节点池失败', 'error');
             } finally {
                 this.clashPool.delayLoading = false;
             }

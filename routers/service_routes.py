@@ -291,6 +291,11 @@ async def post_clash_tested_nodes_clear(req: ClashTestedNodesClearReq, token: st
     success, msg = clash_manager.clear_tested_nodes(req.group_name)
     return {"status": "success" if success else "error", "message": msg}
 
+@router.post("/api/clash/evicted_nodes/clear")
+async def post_clash_evicted_nodes_clear(token: str = Depends(verify_token)):
+    success, msg = clash_manager.clear_evicted_nodes()
+    return {"status": "success" if success else "error", "message": msg}
+
 @router.post("/api/clash/subscriptions/add")
 async def post_clash_subscription_add(req: ClashSubscriptionAddReq, token: str = Depends(verify_token)):
     success, msg = clash_manager.add_subscription(req.name, req.url, req.make_selected)

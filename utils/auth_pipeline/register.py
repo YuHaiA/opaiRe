@@ -300,12 +300,11 @@ def run(
                                         json_body={"code": login_code}, proxies=proxies,
                                     )
 
-                                if code_resp.status_code == 200:
-                                    print(f"[{cfg.ts()}] [SUCCESS] （{mask_email(email)}）无密码通道接管验证通过！")
-                                    password = "Takeover_NoPassword"
-                                    break
-                                else:
-                                    err_json = code_resp.json()
+                                    if code_resp.status_code == 200:
+                                        print(f"[{cfg.ts()}] [SUCCESS] （{mask_email(email)}）无密码通道接管验证通过！")
+                                        password = "Takeover_NoPassword"
+                                        break
+
                                     print(f"[{cfg.ts()}] [WARNING] （{mask_email(email)}）无密码通道接管验证失败: {code_resp.status_code}")
                                     print(f"[{cfg.ts()}] [INFO] （{mask_email(email)}）无密码通道准备请求新的验证码并重试...")
                                     login_code = ""

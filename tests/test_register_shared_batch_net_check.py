@@ -3,6 +3,7 @@ import sys
 import types
 import unittest
 from concurrent.futures import CancelledError as FuturesCancelledError, Future
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -11,6 +12,7 @@ class _DummySession:
         self.headers = {}
         self.timeout = None
         self.get_called = False
+        self.cookies = _DummyCookies()
 
     def get(self, *args, **kwargs):
         self.get_called = True
@@ -18,6 +20,24 @@ class _DummySession:
 
     def close(self):
         return None
+
+
+class _DummyCookies(dict):
+    def clear(self):
+        super().clear()
+
+    def get(self, key, default=None):
+        return super().get(key, default)
+
+
+class _DummyResponse:
+    def __init__(self, status_code, payload=None):
+        self.status_code = status_code
+        self._payload = payload or {}
+        self.text = ""
+
+    def json(self):
+        return self._payload
 
 
 _auth_core_stub = types.SimpleNamespace(
@@ -75,6 +95,39 @@ class RegisterSharedBatchNetCheckTests(unittest.TestCase):
                 0.0,
                 register_module._get_passwordless_send_delay({"skip_proxy_net_check": True}, 6),
             )
+
+    def test_passwordless_takeover_success_does_not_trigger_extra_resend_and_continues_flow(self):
+        post_calls = []
+
+        def fake_post(*args, **kwargs):
+            url = args[1] if len(args) > 1 else ""
+            post_calls.append(url)
+            if url.endswith("/authorize/continue"):
+                return _DummyResponse(200, {"continue_url": "https://auth.openai.com/email-verification"})
+            if url.endswith("/passwordless/send-otp"):
+                return _DummyResponse(200, {})
+            if url.endswith("/email-otp/validate"):
+                return _DummyResponse(200, {"continue_url": "https://auth.openai.com/sign-in-with-chatgpt/codex/consent"})
+            raise AssertionError(f"unexpected post url: {url}")
+
+        with patch.object(register_module.requests, "Session", side_effect=lambda *args, **kwargs: _DummySession()), \
+                patch.object(register_module, "_skip_net_check", return_value=True), \
+                patch.object(register_module, "get_email_and_token", return_value=("takeover@example.com", "jwt-token")), \
+                patch.object(register_module, "init_auth", return_value=("did-1", "ua-1")), \
+                patch.object(register_module, "generate_payload", return_value="sentinel-token"), \
+                patch.object(register_module, "_oai_headers", return_value={}), \
+                patch.object(register_module, "_post_with_retry", side_effect=fake_post), \
+                patch.object(register_module, "get_oai_code", return_value="123456") as mock_get_code, \
+                patch.object(register_module, "generate_oauth_url", return_value=SimpleNamespace(state="state-1", code_verifier="verifier-1")), \
+                patch.object(register_module, "_follow_redirect_chain_local", return_value=(None, "https://callback.local/?code=abc&state=state-1")), \
+                patch.object(register_module, "submit_callback_url", return_value='{"email":"takeover@example.com"}'), \
+                patch.object(register_module, "image2api_data", return_value=""), \
+                patch.object(register_module.task_log_guard, "sleep_with_batch_abort", return_value=None):
+            result = register_module.run("http://127.0.0.1:7890")
+
+        self.assertEqual(('{"email":"takeover@example.com"}', "Takeover_NoPassword"), result)
+        self.assertEqual(1, mock_get_code.call_count)
+        self.assertNotIn("https://auth.openai.com/api/accounts/email-otp/resend", post_calls)
 
     def test_async_batch_collection_ignores_expected_cancelled_futures(self):
         async def runner():
