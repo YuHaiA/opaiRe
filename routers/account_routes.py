@@ -311,6 +311,7 @@ def _background_sync_cloud_data(combined_data):
 @router.get("/api/cloud/accounts")
 def get_cloud_accounts(background_tasks: BackgroundTasks, types: str = "sub2api,cpa", status_filter: str = Query("all"), page: int = Query(1),
                        page_size: int = Query(50), search: Optional[str] = Query(None),
+                       include_usage: bool = Query(False),
                        token: str = Depends(verify_token)):
     type_list = types.split(",")
     combined_data = []
@@ -330,7 +331,7 @@ def get_cloud_accounts(background_tasks: BackgroundTasks, types: str = "sub2api,
                     extra = item.get("extra", {})
                     account_id = str(item.get("id", ""))
                     window_stats = {}
-                    if account_id:
+                    if include_usage and account_id:
                         usage_ok, usage_data = client.get_account_usage(account_id)
                         if usage_ok and isinstance(usage_data, dict):
                             window_stats = usage_data.get("data", {}).get("five_hour", {}).get("window_stats", {})

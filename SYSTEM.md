@@ -16,6 +16,19 @@
 ## 最新修改
 
 - 修改文件：
+  - `routers/account_routes.py`
+  - `tests/test_cloud_accounts_route.py`
+- 变更内容：
+  - `/api/cloud/accounts` 现在默认不再逐账号请求 `Sub2API /usage`，只有显式传 `include_usage=true` 时才会拉取 usage 细节。
+  - 新增路由测试，覆盖默认路径不会调用 `get_account_usage()`，避免云端库存列表接口在后台把 `Sub2API usage timeout` 放大成业务噪音。
+- 修改原因：
+  - 解决云端库存/详情页默认逐账号拉 usage 时，网络超时会占用线程和网络资源，间接影响主业务补货链路的问题。
+  - 让 `Sub2API usage timeout` 成为“仅影响详情展示”的非关键错误，而不是默认路径上的高开销步骤。
+- 影响范围：
+  - 仅影响云端库存接口 `/api/cloud/accounts` 的 Sub2API 详情加载行为。
+  - 默认展示仍保留账号基础状态、计划类型和现有百分比字段，不影响主业务注册 / 补货流程。
+
+- 修改文件：
   - `utils/core_engine.py`
   - `tests/test_register_shared_batch_net_check.py`
 - 变更内容：
