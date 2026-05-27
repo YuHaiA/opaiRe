@@ -33,7 +33,14 @@ from utils.auth_pipeline.register import run
 from utils.auth_pipeline.oauth import refresh_oauth_token as _refresh_oauth_token
 
 from utils import task_log_guard
-from utils.proxy_manager import smart_switch_node, get_failure_bucket_id, evict_current_proxy_or_node
+from utils.proxy_manager import (
+    smart_switch_node,
+    get_failure_bucket_id,
+    evict_current_proxy_or_node,
+    _is_skip_evict_guard_message,
+    _format_skip_evict_guard_message,
+    mark_current_clash_node_preferred,
+)
 from utils.integrations.sub2api_client import Sub2APIClient
 from utils.integrations.tg_notifier import send_tg_msg_sync
 from utils.email_providers.postman_center import global_postman_fleet
@@ -205,6 +212,21 @@ def _validate_registration_runtime_config() -> tuple[bool, str]:
     if email_mode == "openai_cpa" and not getattr(cfg, "OPENAI_CPA_WEBHOOK_SECRET", ""):
         return False, "当前邮箱模式为 OPENAI-CPA，但未填写 openai_cpa.webhook_secret，主流程无法创建邮箱也无法收取验证码。"
     return True, ""
+
+
+def _promote_preferred_clash_node_after_batch(batch_success_count: int, proxy_url=None, scene_label: str = "") -> None:
+    if batch_success_count < 2:
+        return
+    if not getattr(cfg, "_clash_enable", False) or getattr(cfg, "_clash_pool_mode", False):
+        return
+    if cfg.is_raw_proxy_pool_enabled():
+        return
+    ok, msg = mark_current_clash_node_preferred(proxy_url)
+    label_prefix = f"[{scene_label}] " if scene_label else ""
+    if ok:
+        print(f"[{ts()}] [INFO] {label_prefix}{msg}")
+    else:
+        print(f"[{ts()}] [WARNING] {label_prefix}标优节点记录失败: {msg}")
 
 
 def _load_dotenv(path: str = ".env") -> None:
@@ -852,6 +874,8 @@ def _execute_registration_run(proxy, args, cpa_upload=False, skip_switch=False, 
         )
         if removed:
             print(f"[{ts()}] [INFO] 节点池处理完成: {remove_msg}")
+        elif _is_skip_evict_guard_message(remove_msg):
+            print(f"[{ts()}] [INFO] 节点池触发保底保护: {_format_skip_evict_guard_message(remove_msg)}")
         else:
             print(f"[{ts()}] [WARNING] 节点池处理未完成: {remove_msg}")
         return None, "switch_node"
@@ -1264,6 +1288,7 @@ def normal_main_loop(args, stop_event: threading.Event, executor=None):
                     ]
                     batch_success_count, batch_force_switch, _ = _collect_sync_batch_results(futures, batch_id)
                     success_count += batch_success_count
+                    _promote_preferred_clash_node_after_batch(batch_success_count, args.proxy, "常规量产")
                     skip_wait_after_round = batch_force_switch
                 else:
                     ex = ThreadPoolExecutor(max_workers=current_batch)
@@ -1275,6 +1300,7 @@ def normal_main_loop(args, stop_event: threading.Event, executor=None):
                         ]
                         batch_success_count, batch_force_switch, _ = _collect_sync_batch_results(futures, batch_id)
                         success_count += batch_success_count
+                        _promote_preferred_clash_node_after_batch(batch_success_count, args.proxy, "常规量产")
                         skip_wait_after_round = batch_force_switch
                     finally:
                         ex.shutdown(wait=not batch_force_switch, cancel_futures=batch_force_switch)
@@ -1572,6 +1598,7 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
                                 for idx in range(batch_size)
                             ]
                             batch_success_count, batch_force_switch, retry_403_count = await _collect_async_batch_results(reg_futures, batch_id)
+                            _promote_preferred_clash_node_after_batch(batch_success_count, args.proxy, "CPA补货")
                         else:
                             ex = ThreadPoolExecutor(max_workers=batch_size)
                             try:
@@ -1586,6 +1613,7 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
                                     for idx in range(batch_size)
                                 ]
                                 batch_success_count, batch_force_switch, retry_403_count = await _collect_async_batch_results(reg_futures, batch_id)
+                                _promote_preferred_clash_node_after_batch(batch_success_count, args.proxy, "CPA补货")
                             finally:
                                 ex.shutdown(wait=not batch_force_switch, cancel_futures=batch_force_switch)
                         success_in_this_cycle += batch_success_count
@@ -1852,6 +1880,7 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                                 for idx in range(batch_size)
                             ]
                             batch_success_count, batch_force_switch, retry_403_count = await _collect_async_batch_results(reg_futures, batch_id)
+                            _promote_preferred_clash_node_after_batch(batch_success_count, args.proxy, "Sub2API补货")
                         else:
                             ex = ThreadPoolExecutor(max_workers=batch_size)
                             try:
@@ -1866,6 +1895,7 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                                     for idx in range(batch_size)
                                 ]
                                 batch_success_count, batch_force_switch, retry_403_count = await _collect_async_batch_results(reg_futures, batch_id)
+                                _promote_preferred_clash_node_after_batch(batch_success_count, args.proxy, "Sub2API补货")
                             finally:
                                 ex.shutdown(wait=not batch_force_switch, cancel_futures=batch_force_switch)
                         success_in_this_cycle += batch_success_count

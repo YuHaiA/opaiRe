@@ -12,6 +12,8 @@ class SystemRoutesConfigSaveTests(unittest.TestCase):
                 "sub_urls": [{"id": "a1", "url": "https://current.example/sub.yaml"}],
                 "selected_subscription_id": "a1",
                 "tested_nodes": {"节点选择": ["node-a", "node-b"]},
+                "preferred_nodes": {"节点选择": ["node-b"]},
+                "preferred_only_mode": True,
                 "evicted_nodes": ["bad-node"],
                 "blacklist": ["港", "HK"],
             },
@@ -24,6 +26,8 @@ class SystemRoutesConfigSaveTests(unittest.TestCase):
                 "sub_urls": [{"id": "stale", "url": "https://stale.example/sub.yaml"}],
                 "selected_subscription_id": "stale",
                 "tested_nodes": {"节点选择": ["stale-node"]},
+                "preferred_nodes": {"节点选择": ["stale-node"]},
+                "preferred_only_mode": False,
                 "evicted_nodes": [],
                 "blacklist": ["自动"],
             },
@@ -39,6 +43,8 @@ class SystemRoutesConfigSaveTests(unittest.TestCase):
         self.assertEqual([{"id": "a1", "url": "https://current.example/sub.yaml"}], clash_conf["sub_urls"])
         self.assertEqual("a1", clash_conf["selected_subscription_id"])
         self.assertEqual({"节点选择": ["node-a", "node-b"]}, clash_conf["tested_nodes"])
+        self.assertEqual({"节点选择": ["node-b"]}, clash_conf["preferred_nodes"])
+        self.assertTrue(clash_conf["preferred_only_mode"])
         self.assertEqual(["bad-node"], clash_conf["evicted_nodes"])
 
 

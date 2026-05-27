@@ -3283,6 +3283,11 @@
                                                     <span class="w-1.5 h-1.5 rounded-full" :class="getClashEvictedCount() ? 'bg-rose-500' : 'bg-slate-400'"></span>
                                                     拉黑节点池：{{ getClashEvictedCount() }} 个
                                                 </span>
+                                                <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-black shadow-sm"
+                                                      :class="getClashPreferredCount(activeClashGroup) ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-slate-100 text-slate-500 border-slate-200'">
+                                                    <span class="w-1.5 h-1.5 rounded-full" :class="getClashPreferredCount(activeClashGroup) ? 'bg-amber-500' : 'bg-slate-400'"></span>
+                                                    标优节点池：{{ getClashPreferredCount(activeClashGroup) }} 个
+                                                </span>
                                                 <span v-if="clashPool.delayResults[activeClashGroup.name]?.healthy_nodes" class="inline-flex items-center px-3 py-1.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 text-xs font-black shadow-sm">
                                                     本次测速已自动保存 {{ clashPool.delayResults[activeClashGroup.name].healthy_nodes.length }} 个
                                                 </span>
@@ -3294,6 +3299,10 @@
                                             </button>
                                             <button @click="clearClashHealthyNodes(activeClashGroup.name)" :disabled="clashPool.delayLoading || !getClashHealthyCount(activeClashGroup)" class="px-4 py-2.5 rounded-xl bg-white text-slate-600 text-sm font-black hover:bg-slate-50 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm border border-slate-200">
                                                 清空有效池
+                                            </button>
+                                            <button @click="toggleClashPreferredOnlyMode" :disabled="clashPool.delayLoading" class="px-4 py-2.5 rounded-xl text-sm font-black active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm border"
+                                                    :class="clashPool.preferredOnlyMode ? 'bg-amber-500 text-amber-950 border-amber-300 hover:bg-amber-400' : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-50'">
+                                                {{ clashPool.preferredOnlyMode ? '仅用标优中' : '只用标优' }}
                                             </button>
                                             <button @click="clearClashEvictedNodes" :disabled="clashPool.delayLoading || !getClashEvictedCount()" class="px-4 py-2.5 rounded-xl bg-white text-rose-600 text-sm font-black hover:bg-rose-50 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm border border-rose-200">
                                                 清空拉黑池
@@ -3316,7 +3325,10 @@
                                         <div class="max-h-[420px] overflow-y-auto custom-scrollbar">
                                             <div v-for="row in getClashDelayRows(activeClashGroup)" :key="row.nodeName" class="grid grid-cols-12 px-4 py-3 border-b border-slate-50 items-center gap-2 text-sm" :class="row.isCurrent ? 'bg-emerald-50/50' : row.isSelected ? 'bg-sky-50/50' : 'bg-white'">
                                                 <div class="col-span-6 md:col-span-5 min-w-0">
-                                                    <div class="font-bold text-slate-700 truncate">{{ row.nodeName }}</div>
+                                                    <div class="flex items-center gap-2 min-w-0">
+                                                        <div class="font-bold text-slate-700 truncate">{{ row.nodeName }}</div>
+                                                        <span v-if="row.isPreferred" class="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 text-[10px] font-black tracking-wide">标优</span>
+                                                    </div>
                                                     <div v-if="row.isCurrent" class="text-[11px] font-black text-emerald-700 mt-1">当前节点</div>
                                                 </div>
                                                 <div class="col-span-3 md:col-span-2 font-black">
@@ -3325,11 +3337,14 @@
                                                     <span v-else class="text-slate-400">未测</span>
                                                 </div>
                                                 <div class="hidden md:block md:col-span-2 text-[11px] font-bold text-slate-500">
-                                                    {{ row.isSelected ? '已选中' : row.isCurrent ? '运行中' : '待切换' }}
+                                                    {{ row.isPreferred ? '标优池' : row.isSelected ? '已选中' : row.isCurrent ? '运行中' : '待切换' }}
                                                 </div>
                                                 <div class="col-span-3 flex justify-end">
                                                     <button @click="clashPool.nodeSelections[activeClashGroup.name] = row.nodeName; switchClashGroupNode(activeClashGroup.name)" class="px-3 py-2 rounded-xl text-xs font-black transition-all" :class="row.isCurrent ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95'" :disabled="row.isCurrent">切换</button>
                                                 </div>
+                                            </div>
+                                            <div v-if="getClashDelayRows(activeClashGroup).length === 0" class="px-4 py-10 text-center text-sm font-bold text-slate-400 bg-white">
+                                                {{ clashPool.preferredOnlyMode ? '当前已开启仅用标优，但这个策略组还没有标优节点。' : '当前暂无可展示节点。' }}
                                             </div>
                                         </div>
                                     </div>

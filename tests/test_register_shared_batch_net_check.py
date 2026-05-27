@@ -150,6 +150,15 @@ class RegisterSharedBatchNetCheckTests(unittest.TestCase):
         self.assertEqual((0, True, 0), result)
         task_log_guard.clear_batch("batch-a")
 
+    def test_promote_preferred_clash_node_after_batch_only_marks_shared_clash_batches(self):
+        with patch.object(core_engine.cfg, "_clash_enable", True), \
+                patch.object(core_engine.cfg, "_clash_pool_mode", False), \
+                patch.object(core_engine.cfg, "is_raw_proxy_pool_enabled", return_value=False), \
+                patch.object(core_engine, "mark_current_clash_node_preferred", return_value=(True, "ok")) as mock_mark:
+            core_engine._promote_preferred_clash_node_after_batch(2, "http://127.0.0.1:7890", "测试")
+
+        mock_mark.assert_called_once_with("http://127.0.0.1:7890")
+
 
 if __name__ == "__main__":
     unittest.main()

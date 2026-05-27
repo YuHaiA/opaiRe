@@ -31,6 +31,7 @@ class ClashRuntimeReq(BaseModel): action: str
 class ClashSwitchReq(BaseModel): group_name: str; proxy_name: str; target: str = "all"
 class ClashDelayReq(BaseModel): group_name: str; target: str = "all"
 class ClashTestedNodesClearReq(BaseModel): group_name: str
+class ClashPreferredModeReq(BaseModel): enabled: bool
 class ClashSubscriptionAddReq(BaseModel): name: str = ""; url: str; make_selected: bool = False
 class ClashSubscriptionSelectReq(BaseModel): subscription_id: str; target: str = "all"; resolved_url: str = ""
 class ClashSubscriptionDeleteReq(BaseModel): subscription_id: str
@@ -294,6 +295,11 @@ async def post_clash_tested_nodes_clear(req: ClashTestedNodesClearReq, token: st
 @router.post("/api/clash/evicted_nodes/clear")
 async def post_clash_evicted_nodes_clear(token: str = Depends(verify_token)):
     success, msg = clash_manager.clear_evicted_nodes()
+    return {"status": "success" if success else "error", "message": msg}
+
+@router.post("/api/clash/preferred_mode")
+async def post_clash_preferred_mode(req: ClashPreferredModeReq, token: str = Depends(verify_token)):
+    success, msg = clash_manager.set_preferred_only_mode(req.enabled)
     return {"status": "success" if success else "error", "message": msg}
 
 @router.post("/api/clash/subscriptions/add")

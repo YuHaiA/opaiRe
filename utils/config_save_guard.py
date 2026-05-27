@@ -6,6 +6,8 @@ CLASH_RUNTIME_PRESERVED_KEYS = (
     "sub_urls",
     "selected_subscription_id",
     "tested_nodes",
+    "preferred_nodes",
+    "preferred_only_mode",
     "evicted_nodes",
 )
 

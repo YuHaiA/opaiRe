@@ -16,6 +16,93 @@
 ## 最新修改
 
 - 修改文件：
+  - `utils/proxy_manager.py`
+  - `utils/integrations/clash_manager.py`
+  - `utils/core_engine.py`
+  - `routers/service_routes.py`
+  - `static/js/app.js`
+  - `index.html`
+  - `utils/config_save_guard.py`
+  - `tests/test_proxy_manager_node_eviction.py`
+  - `tests/test_clash_manager_evicted_nodes_clear.py`
+  - `tests/test_register_shared_batch_net_check.py`
+  - `tests/test_system_routes_config_save.py`
+  - `SYSTEM.md`
+- 变更内容：
+  - Clash 节点池新增 `preferred_nodes` 标优池与 `preferred_only_mode` 运行态开关。
+  - 共享 Clash 并发批次在同一批内成功产出 `2` 个账号后，会把当前节点自动标记为“标优”，并确保它同时进入当前策略组的活节点池显示范围。
+  - 节点页新增“标优节点池”计数、“只用标优”切换按钮，以及表格中的“标优”标签。
+  - 当前端开启“只用标优”后，后端自动切换与手动切换都会严格限制在该策略组的标优池内，不再退回普通活节点候选。
+  - 配置保存链路现在会保留 `preferred_nodes` 与 `preferred_only_mode`，避免节点页切换后的运行态被旧配置覆盖回去。
+- 修改原因：
+  - 用户希望把“实际在生产批次里跑出结果的节点”沉淀为更可信的候选池，并能一键切到“只用标优节点”模式。
+  - 现有 `tested_nodes` 只代表测速通过，不等于真实注册/补货表现稳定；引入标优池后，可把“测速可用”和“实战产出”分层管理。
+- 影响范围：
+  - 影响 Clash 节点池切换策略、节点页展示与运行态配置保存。
+  - 不改变原始代理池、邮箱逻辑、云端库存逻辑或非 Clash 场景下的切换行为。
+
+- 修改文件：
+  - `utils/proxy_manager.py`
+  - `utils/core_engine.py`
+  - `tests/test_proxy_manager_node_eviction.py`
+  - `SYSTEM.md`
+- 变更内容：
+  - Clash 节点淘汰前现在会先计算当前策略组剩余有效候选数；当有效节点只剩 `5` 个或更少时，触发保底保护，跳过写入 `evicted_nodes`。
+  - 保底保护优先按当前策略组的“测速通过节点池”计算；若该池为空，则回退按当前策略组过滤后的有效节点总数判断。
+  - 节点测活失败但命中保底保护时，日志会明确显示“触发保底保护”，不再误报成普通剔除失败。
+  - 新增回归测试，分别覆盖“候选池充足时正常拉黑”和“候选池只剩 5 个时跳过拉黑”两条路径。
+- 修改原因：
+  - 现有逻辑在节点连续异常时会持续把坏节点加入 `evicted_nodes`，当有效节点池已经很薄时，容易把候选池越拉越空。
+  - 用户希望先落地一个更保守的保底规则，避免节点池在低存量阶段被自动拉黑机制抽干。
+- 影响范围：
+  - 仅影响 Clash 节点淘汰与相关日志输出策略。
+  - 不改变批次切换、原始代理池处理、账号成功保存逻辑或其他邮箱/验证码链路。
+
+- 修改文件：
+  - 删除 `stop_openai_cpa.ps1`
+  - `SYSTEM.md`
+- 变更内容：
+  - 清理了根目录未被项目文档、前端、后端路由或部署配置引用的历史本地停止脚本 `stop_openai_cpa.ps1`。
+  - 保留 `scripts/server_disk_cleanup.sh` 与 `scripts/rollback_server1_to_f1.ps1`，因为这两者仍有系统维护代码或文档记录依赖。
+- 修改原因：
+  - `stop_openai_cpa.ps1` 仅用于本机按进程名强停旧版启动方式，当前仓库内没有任何入口引用它，继续保留只会增加根目录噪音。
+  - 相比之下，其他维护脚本仍属于项目已知运维路径，不能误删。
+- 影响范围：
+  - 仅影响本地历史辅助脚本存量。
+  - 不改变业务逻辑、接口行为、测试流程或现有部署链路。
+
+- 修改文件：
+  - `tests/test_cloud_accounts_route.py`
+  - `tests/test_local_microsoft_service_abuse_mode.py`
+  - 删除 `tests/test_mail_service_abuse_mode.py`
+  - 删除 `tests/test_reg_engine_executor_cleanup.py`
+  - `SYSTEM.md`
+- 变更内容：
+  - 清理了两份与当前实现脱节或依赖过时内部结构的测试文件，减少本地无关测试噪音。
+  - `test_cloud_accounts_route.py` 改为直接覆盖 FastAPI 依赖，不再通过 `sys.modules` 注入残缺假模块污染整套测试环境。
+  - `test_local_microsoft_service_abuse_mode.py` 改为拦截 `builtins.print` 验证告警日志，避免受 `core_engine` 全局打印代理影响而产生假失败。
+- 修改原因：
+  - 本地继续清理项目无关/过时测试代码时，发现少数旧测试会引用已移除的内部函数，或通过全局模块替身把其他测试一起带崩。
+  - 这类测试不仅失去回归价值，还会干扰真实有效的测试结果判断。
+- 影响范围：
+  - 仅影响测试层的稳定性与可维护性。
+  - 不改变业务逻辑、接口行为或运行配置。
+
+- 修改文件：
+  - `SYSTEM.md`
+  - 本地运行日志 `run.out.log`、`run.err.log`
+  - 非 `.venv` 目录下的 `__pycache__/` 与 `.pyc/.pyo` 缓存文件
+- 变更内容：
+  - 清理了仓库工作区里的本地运行产物，仅移除非源码缓存与日志文件。
+  - 保留 `tests/` 下的正式回归测试源码，不把项目验证资产误删成“测试垃圾”。
+- 修改原因：
+  - 当前工作区存在一批与正式源码无关的 Python 编译缓存和运行日志，容易干扰本地排查与目录可读性。
+  - `.gitignore` 已覆盖这些产物，适合做一次定向保洁。
+- 影响范围：
+  - 仅影响本地工作区整洁度与磁盘占用。
+  - 不改变任何业务逻辑、接口行为、测试源码或运行配置。
+
+- 修改文件：
   - `utils/task_log_guard.py`
   - `utils/core_engine.py`
   - `tests/test_task_log_guard.py`

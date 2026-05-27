@@ -3,6 +3,7 @@ import sys
 import types
 import unittest
 from contextlib import redirect_stdout
+import builtins
 from unittest.mock import patch
 
 fake_requests_module = types.SimpleNamespace(post=None, get=None)
@@ -75,13 +76,15 @@ class LocalMicrosoftServiceAbuseModeTests(unittest.TestCase):
             "_exchange_refresh_token",
             side_effect=MailboxAbuseModeError("user@example.com"),
         ):
-            captured = io.StringIO()
-            with redirect_stdout(captured):
+            with patch.object(builtins, "print") as print_mock:
                 messages = service.fetch_openai_messages(mailbox)
 
         self.assertEqual([], messages)
         self.assertEqual("abuse_mode", mailbox.get("_polling_stopped"))
-        output = captured.getvalue()
+        output = "\n".join(
+            " ".join(str(arg) for arg in call.args)
+            for call in print_mock.call_args_list
+        )
         self.assertIn("service abuse mode", output)
         self.assertNotIn("[DEBUG-GRAPH]", output)
 

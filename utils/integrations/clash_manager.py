@@ -276,6 +276,41 @@ def _persist_tested_nodes(group_name: str, healthy_nodes: list[str]) -> None:
     cfg.reload_all_configs(new_config_dict=config_data)
 
 
+def _get_preferred_nodes_map(config_data: Optional[dict] = None) -> dict[str, list[str]]:
+    source = config_data if isinstance(config_data, dict) else _read_runtime_config()
+    clash_conf = source.get("clash_proxy_pool", {}) if isinstance(source.get("clash_proxy_pool"), dict) else {}
+    preferred_map = clash_conf.get("preferred_nodes", {})
+    if not isinstance(preferred_map, dict):
+        return {}
+    normalized = {}
+    for group_name, nodes in preferred_map.items():
+        if isinstance(nodes, list):
+            cleaned = [str(node).strip() for node in nodes if str(node).strip()]
+            if cleaned:
+                normalized[str(group_name)] = cleaned
+    return normalized
+
+
+def _get_preferred_only_mode(config_data: Optional[dict] = None) -> bool:
+    source = config_data if isinstance(config_data, dict) else _read_runtime_config()
+    clash_conf = source.get("clash_proxy_pool", {}) if isinstance(source.get("clash_proxy_pool"), dict) else {}
+    return bool(clash_conf.get("preferred_only_mode", False))
+
+
+def set_preferred_only_mode(enabled: bool) -> tuple[bool, str]:
+    try:
+        config_data = _read_runtime_config()
+        clash_conf = config_data.get("clash_proxy_pool", {})
+        if not isinstance(clash_conf, dict):
+            clash_conf = {}
+        clash_conf["preferred_only_mode"] = bool(enabled)
+        config_data["clash_proxy_pool"] = clash_conf
+        cfg.reload_all_configs(new_config_dict=config_data)
+        return True, "已开启仅用标优节点模式。" if enabled else "已恢复为全部候选节点模式。"
+    except Exception as e:
+        return False, str(e)
+
+
 def clear_tested_nodes(group_name: str) -> tuple[bool, str]:
     try:
         config_data = _read_runtime_config()
@@ -492,6 +527,7 @@ def _merge_runtime_groups(config_groups: list[dict], target: str = "all") -> lis
     tested_map = clash_conf.get("tested_nodes", {})
     if not isinstance(tested_map, dict):
         tested_map = {}
+    preferred_map = _get_preferred_nodes_map(config_data)
     try:
         proxy_map = _fetch_controller_proxies(target)
     except Exception:
@@ -501,6 +537,9 @@ def _merge_runtime_groups(config_groups: list[dict], target: str = "all") -> lis
             healthy_nodes = tested_map.get(str(group.get("name", "")), [])
             if isinstance(healthy_nodes, list) and healthy_nodes:
                 item["healthy_nodes"] = healthy_nodes
+            preferred_nodes = preferred_map.get(str(group.get("name", "")), [])
+            if isinstance(preferred_nodes, list) and preferred_nodes:
+                item["preferred_nodes"] = preferred_nodes
             merged.append(item)
         return merged
 
@@ -512,6 +551,9 @@ def _merge_runtime_groups(config_groups: list[dict], target: str = "all") -> lis
         healthy_nodes = tested_map.get(str(group.get("name", "")), [])
         if isinstance(healthy_nodes, list) and healthy_nodes:
             item["healthy_nodes"] = healthy_nodes
+        preferred_nodes = preferred_map.get(str(group.get("name", "")), [])
+        if isinstance(preferred_nodes, list) and preferred_nodes:
+            item["preferred_nodes"] = preferred_nodes
         if isinstance(runtime, dict):
             nodes = runtime.get("all")
             if isinstance(nodes, list) and nodes:
@@ -555,6 +597,12 @@ def switch_proxy_group(group_name: str, proxy_name: str, target: str = "all") ->
         runtime_group_name = _resolve_runtime_group_name(group_name, target)
         if not runtime_group_name:
             return False, f"未找到策略组 [{group_name}]。"
+        config_data = _read_runtime_config()
+        if _get_preferred_only_mode(config_data):
+            preferred_map = _get_preferred_nodes_map(config_data)
+            preferred_nodes = preferred_map.get(runtime_group_name, preferred_map.get(group_name, []))
+            if proxy_name not in preferred_nodes:
+                return False, f"当前已开启仅用标优节点，节点 [{proxy_name}] 不在标优池内。"
         encoded_name = urllib.parse.quote(runtime_group_name, safe="")
         res = requests.put(
             f"{base_url}/proxies/{encoded_name}",
@@ -707,6 +755,7 @@ def _build_local_gui_status() -> dict:
         ],
         "groups": _merge_runtime_groups(_collect_groups_from_config(MANUAL_CONFIG_PATH)),
         "evicted_nodes": _get_evicted_nodes(config_data),
+        "preferred_only_mode": _get_preferred_only_mode(config_data),
         "message": (
             "当前未检测到 Docker，已切换为本地 GUI 模式。网页仅保存订阅链接与 YAML 配置，不直接接管 GUI 进程。"
             + (" 已检测到本地 Clash/Mihomo 正在运行。" if running else " 暂未检测到本地 Clash/Mihomo 控制口或代理口。")
@@ -735,6 +784,7 @@ def _build_single_core_status() -> dict:
         ],
         "groups": _merge_runtime_groups(_collect_groups_from_config(MANUAL_CONFIG_PATH)),
         "evicted_nodes": _get_evicted_nodes(config_data),
+        "preferred_only_mode": _get_preferred_only_mode(config_data),
         "message": "当前为 Linux 单核心模式。网页会直接写入 Mihomo 配置并重启本机内核。",
     }
 
@@ -861,6 +911,7 @@ def get_pool_status():
         "instances": instances,
         "groups": _merge_runtime_groups(_collect_groups_from_config(os.path.join(BASE_PATH, "clash_1", "config.yaml"))),
         "evicted_nodes": _get_evicted_nodes(),
+        "preferred_only_mode": _get_preferred_only_mode(),
         "message": "当前为 Docker 集群模式。网页可直接调度 Mihomo 容器实例。",
     }
 

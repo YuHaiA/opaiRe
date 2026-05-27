@@ -21,6 +21,8 @@ CLASH_SECRET = ""
 NODE_BLACKLIST = []
 EVICTED_NODES = []
 TESTED_NODES_MAP = {}
+PREFERRED_NODES_MAP = {}
+PREFERRED_ONLY_MODE = False
 _IS_IN_DOCKER = os.path.exists('/.dockerenv')
 _global_switch_lock = threading.Lock()
 _last_switch_time = 0
@@ -28,6 +30,7 @@ _CURRENT_NODE_BY_PROXY = {}
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(CURRENT_DIR)
 DEFAULT_NODE_BLACKLIST = ["港", "HK", "台", "TW", "中国", "CN"]
+MIN_CLASH_CANDIDATES_BEFORE_EVICT = 5
 
 def format_docker_url(url: str) -> str:
     """智能检测：如果在 Docker 中运行，自动把 127.0.0.1 转为宿主机魔法地址"""
@@ -42,7 +45,8 @@ def format_docker_url(url: str) -> str:
 
 def reload_proxy_config():
     global CLASH_API_URL, LOCAL_PROXY_URL, ENABLE_NODE_SWITCH, POOL_MODE, \
-           FASTEST_MODE, PROXY_GROUP_NAME, CLASH_SECRET, NODE_BLACKLIST, EVICTED_NODES, TESTED_NODES_MAP
+           FASTEST_MODE, PROXY_GROUP_NAME, CLASH_SECRET, NODE_BLACKLIST, EVICTED_NODES, TESTED_NODES_MAP, \
+           PREFERRED_NODES_MAP, PREFERRED_ONLY_MODE
     config_dir = os.path.join(BASE_DIR, "data")
     config_path = os.path.join(config_dir, "config.yaml")
     if not os.path.exists(config_path):
@@ -66,6 +70,8 @@ def reload_proxy_config():
     raw_evicted_nodes = clash_conf.get("evicted_nodes", [])
     EVICTED_NODES = raw_evicted_nodes if isinstance(raw_evicted_nodes, list) else []
     TESTED_NODES_MAP = clash_conf.get("tested_nodes", {}) if isinstance(clash_conf.get("tested_nodes", {}), dict) else {}
+    PREFERRED_NODES_MAP = clash_conf.get("preferred_nodes", {}) if isinstance(clash_conf.get("preferred_nodes", {}), dict) else {}
+    PREFERRED_ONLY_MODE = bool(clash_conf.get("preferred_only_mode", False))
    
     print(f"[{ts()}] [系统] 代理管理模块配置已同步更新。")
 
@@ -180,6 +186,161 @@ def get_failure_bucket_id(proxy_url=None) -> str:
     return "shared::default"
 
 
+def _is_skip_evict_guard_message(message: str) -> bool:
+    return str(message or "").startswith("SKIP_EVICT_GUARD:")
+
+
+def _format_skip_evict_guard_message(message: str) -> str:
+    raw = str(message or "")
+    if _is_skip_evict_guard_message(raw):
+        return raw.split(":", 1)[1].strip()
+    return raw
+
+
+def _lookup_group_nodes(node_map: dict, actual_group_name: str, configured_group_name: str) -> list[str]:
+    if not isinstance(node_map, dict):
+        return []
+    preferred = node_map.get(actual_group_name)
+    if isinstance(preferred, list):
+        return [str(node).strip() for node in preferred if str(node).strip()]
+    fallback = node_map.get(configured_group_name)
+    if isinstance(fallback, list):
+        return [str(node).strip() for node in fallback if str(node).strip()]
+    return []
+
+
+def _resolve_group_candidate_nodes(proxies_data: dict, group_name: str, current_node: str = "", clash_conf: dict | None = None):
+    actual_group_name = resolve_group_name(proxies_data, group_name)
+    if not actual_group_name:
+        return "", [], {"preferred_only_mode": False, "preferred_nodes": [], "tested_nodes": [], "valid_nodes": []}
+
+    source_conf = clash_conf if isinstance(clash_conf, dict) else {}
+    evicted_nodes = source_conf.get("evicted_nodes", EVICTED_NODES)
+    if not isinstance(evicted_nodes, list):
+        evicted_nodes = EVICTED_NODES
+    tested_map = source_conf.get("tested_nodes", TESTED_NODES_MAP)
+    if not isinstance(tested_map, dict):
+        tested_map = TESTED_NODES_MAP
+    preferred_map = source_conf.get("preferred_nodes", PREFERRED_NODES_MAP)
+    if not isinstance(preferred_map, dict):
+        preferred_map = PREFERRED_NODES_MAP
+    preferred_only_mode = bool(source_conf.get("preferred_only_mode", PREFERRED_ONLY_MODE))
+
+    runtime_group = proxies_data.get(actual_group_name, {})
+    all_nodes = runtime_group.get("all", []) if isinstance(runtime_group, dict) else []
+    valid_nodes = [
+        node for node in all_nodes
+        if node != current_node
+        and node not in evicted_nodes
+        and not any(kw.upper() in str(node).upper() for kw in NODE_BLACKLIST)
+    ]
+    preferred_nodes = [
+        node for node in _lookup_group_nodes(preferred_map, actual_group_name, group_name)
+        if node in valid_nodes
+    ]
+    tested_nodes = [
+        node for node in _lookup_group_nodes(tested_map, actual_group_name, group_name)
+        if node in valid_nodes
+    ]
+
+    if preferred_only_mode:
+        candidates = preferred_nodes
+    elif tested_nodes:
+        candidates = tested_nodes
+    else:
+        candidates = valid_nodes
+    return actual_group_name, candidates, {
+        "preferred_only_mode": preferred_only_mode,
+        "preferred_nodes": preferred_nodes,
+        "tested_nodes": tested_nodes,
+        "valid_nodes": valid_nodes,
+    }
+
+
+def _resolve_effective_candidate_count(proxy_url, clash_conf: dict, current_node: str) -> int | None:
+    current_api_url = get_api_url_for_proxy(proxy_url)
+    headers = {"Authorization": f"Bearer {CLASH_SECRET}"} if CLASH_SECRET else {}
+
+    try:
+        resp = std_requests.get(f"{current_api_url}/proxies", headers=headers, timeout=5)
+        if resp.status_code == 200:
+            proxies_data = resp.json().get("proxies", {})
+            _, candidate_nodes, _ = _resolve_group_candidate_nodes(
+                proxies_data,
+                PROXY_GROUP_NAME,
+                current_node=current_node,
+                clash_conf=clash_conf,
+            )
+            return len(candidate_nodes)
+    except Exception:
+        pass
+
+    preferred_only_mode = bool(clash_conf.get("preferred_only_mode", PREFERRED_ONLY_MODE))
+    fallback_map = clash_conf.get("preferred_nodes", PREFERRED_NODES_MAP) if preferred_only_mode else clash_conf.get("tested_nodes", TESTED_NODES_MAP)
+    if not isinstance(fallback_map, dict):
+        fallback_map = PREFERRED_NODES_MAP if preferred_only_mode else TESTED_NODES_MAP
+    fallback_candidates = fallback_map.get(PROXY_GROUP_NAME, [])
+    if isinstance(fallback_candidates, list) and fallback_candidates:
+        filtered = [node for node in fallback_candidates if node != current_node]
+        return len(filtered)
+    return None
+
+
+def mark_current_clash_node_preferred(proxy_url=None) -> tuple[bool, str]:
+    config_data = _load_runtime_config_for_write()
+    current_node = get_current_selected_node(proxy_url)
+    if not current_node:
+        return False, f"{get_display_name(proxy_url)} 当前未解析到可标优节点"
+
+    clash_conf = config_data.get("clash_proxy_pool", {})
+    if not isinstance(clash_conf, dict):
+        clash_conf = {}
+
+    group_name = PROXY_GROUP_NAME
+    current_api_url = get_api_url_for_proxy(proxy_url)
+    headers = {"Authorization": f"Bearer {CLASH_SECRET}"} if CLASH_SECRET else {}
+    try:
+        resp = std_requests.get(f"{current_api_url}/proxies", headers=headers, timeout=5)
+        if resp.status_code == 200:
+            proxies_data = resp.json().get("proxies", {})
+            resolved_group = resolve_group_name(proxies_data, PROXY_GROUP_NAME)
+            if resolved_group:
+                group_name = resolved_group
+    except Exception:
+        pass
+
+    preferred_map = clash_conf.get("preferred_nodes", {})
+    if not isinstance(preferred_map, dict):
+        preferred_map = {}
+    preferred_nodes = preferred_map.get(group_name, [])
+    if not isinstance(preferred_nodes, list):
+        preferred_nodes = []
+    if current_node in preferred_nodes:
+        return True, f"Clash 节点 [{clean_for_log(current_node)}] 已在标优池中"
+    preferred_nodes.append(current_node)
+    preferred_map[group_name] = preferred_nodes
+    clash_conf["preferred_nodes"] = preferred_map
+
+    tested_map = clash_conf.get("tested_nodes", {})
+    if not isinstance(tested_map, dict):
+        tested_map = {}
+    tested_nodes = tested_map.get(group_name, [])
+    if not isinstance(tested_nodes, list):
+        tested_nodes = []
+    if current_node not in tested_nodes:
+        tested_nodes.append(current_node)
+    tested_map[group_name] = tested_nodes
+    clash_conf["tested_nodes"] = tested_map
+
+    config_data["clash_proxy_pool"] = clash_conf
+    try:
+        from utils import config as runtime_cfg
+        runtime_cfg.reload_all_configs(new_config_dict=config_data)
+    except Exception as exc:
+        return False, f"保存标优节点失败: {exc}"
+    return True, f"已将 Clash 节点标记为标优 [{clean_for_log(current_node)}]"
+
+
 def evict_current_proxy_or_node(proxy_url=None):
     config_data = _load_runtime_config_for_write()
     try:
@@ -213,6 +374,14 @@ def evict_current_proxy_or_node(proxy_url=None):
     clash_conf = config_data.get("clash_proxy_pool", {})
     if not isinstance(clash_conf, dict):
         clash_conf = {}
+
+    remaining_candidates = _resolve_effective_candidate_count(proxy_url, clash_conf, current_node)
+    if remaining_candidates is not None and remaining_candidates <= MIN_CLASH_CANDIDATES_BEFORE_EVICT:
+        return False, (
+            "SKIP_EVICT_GUARD: "
+            f"当前策略组有效节点仅剩 {remaining_candidates} 个，触发保底保护，跳过拉黑 "
+            f"[{clean_for_log(current_node)}]"
+        )
 
     evicted_nodes = clash_conf.get("evicted_nodes", [])
     if not isinstance(evicted_nodes, list):
@@ -307,7 +476,7 @@ def _do_smart_switch(proxy_url=None):
         proxies_data = resp.json().get('proxies', {})
 
         actual_group_name = resolve_group_name(proxies_data, PROXY_GROUP_NAME)
-                
+
         if not actual_group_name:
             available_groups = [
                 key for key, value in proxies_data.items()
@@ -320,21 +489,16 @@ def _do_smart_switch(proxy_url=None):
             return False
             
         safe_group_name = urllib.parse.quote(actual_group_name)
-        all_nodes = proxies_data[actual_group_name].get('all', [])
-        
-        valid_nodes = [
-            n for n in all_nodes 
-            if n not in EVICTED_NODES
-            and not any(kw.upper() in n.upper() for kw in NODE_BLACKLIST)
-        ]
+        _, valid_nodes, pool_meta = _resolve_group_candidate_nodes(proxies_data, actual_group_name)
+        if pool_meta["preferred_only_mode"]:
+            if valid_nodes:
+                print(f"[{ts()}] [代理池] {display_name} 已锁定到标优节点池，共 {len(valid_nodes)} 个。")
+            else:
+                print(f"[{ts()}] [ERROR] {display_name} 当前已开启仅用标优节点，但策略组暂无标优节点。")
+                return False
+        elif pool_meta["tested_nodes"]:
+            print(f"[{ts()}] [代理池] {display_name} 已锁定到测速通过节点池，共 {len(valid_nodes)} 个。")
 
-        tested_candidates = TESTED_NODES_MAP.get(actual_group_name, [])
-        if isinstance(tested_candidates, list):
-            tested_candidates = [n for n in tested_candidates if n in valid_nodes]
-            if tested_candidates:
-                valid_nodes = tested_candidates
-                print(f"[{ts()}] [代理池] {display_name} 已锁定到测速通过节点池，共 {len(valid_nodes)} 个。")
-        
         if not valid_nodes:
             print(f"[{ts()}] [ERROR] {display_name} 过滤后无可用节点，请检查黑名单。")
             return False
@@ -403,6 +567,11 @@ def _do_smart_switch(proxy_url=None):
                             removed, remove_msg = evict_failed_switch_candidate(proxy_url, best_node)
                             if removed:
                                 print(f"[{ts()}] [代理池] {display_name} 测活失败，已剔除节点: {remove_msg}")
+                            elif _is_skip_evict_guard_message(remove_msg):
+                                print(
+                                    f"[{ts()}] [代理池] {display_name} 测活失败，但已触发保底保护: "
+                                    f"{_format_skip_evict_guard_message(remove_msg)}"
+                                )
                             else:
                                 print(f"[{ts()}] [代理池] {display_name} 测活失败，剔除节点失败: {remove_msg}")
                             valid_nodes = [n for n in valid_nodes if n != best_node]
@@ -437,6 +606,11 @@ def _do_smart_switch(proxy_url=None):
                 removed, remove_msg = evict_failed_switch_candidate(proxy_url, selected_node)
                 if removed:
                     print(f"[{ts()}] [代理池] {display_name} 测活失败，已剔除节点: {remove_msg}")
+                elif _is_skip_evict_guard_message(remove_msg):
+                    print(
+                        f"[{ts()}] [代理池] {display_name} 测活失败，但已触发保底保护: "
+                        f"{_format_skip_evict_guard_message(remove_msg)}"
+                    )
                 else:
                     print(f"[{ts()}] [代理池] {display_name} 测活失败，剔除节点失败: {remove_msg}")
                 random_candidates = [name for name in random_candidates if name != selected_node]

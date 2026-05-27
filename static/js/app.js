@@ -512,6 +512,7 @@ createApp({
                 instances: [],
                 groups: [],
                 evictedNodes: [],
+                preferredOnlyMode: false,
                 subscriptions: [],
                 mode: '',
                 message: '',
@@ -3999,6 +4000,7 @@ async exportSub2Api() {
                     this.clashPool.instances = d.data.instances;
                     this.clashPool.groups = d.data.groups;
                     this.clashPool.evictedNodes = Array.isArray(d.data.evicted_nodes) ? d.data.evicted_nodes : [];
+                    this.clashPool.preferredOnlyMode = !!d.data.preferred_only_mode;
                     this.clashPool.subscriptions = (d.data.subscriptions?.items || []).map((item) => ({
                         ...item,
                         raw_url: item.url,
@@ -4015,6 +4017,7 @@ async exportSub2Api() {
                     if (this.config && this.config.clash_proxy_pool) {
                         this.config.clash_proxy_pool.sub_url = d.data.subscriptions?.selected_url || this.clashPool.subUrl || '';
                         this.config.clash_proxy_pool.selected_subscription_id = d.data.subscriptions?.selected_id || '';
+                        this.config.clash_proxy_pool.preferred_only_mode = this.clashPool.preferredOnlyMode;
                         this.config.clash_proxy_pool.sub_urls = this.clashPool.subscriptions.map((item) => ({
                             id: item.id,
                             name: item.name,
@@ -4061,18 +4064,31 @@ async exportSub2Api() {
             }
             return Array.isArray(group.healthy_nodes) ? group.healthy_nodes.filter(Boolean) : [];
         },
+        getClashPreferredNodes(group) {
+            if (!group?.name) return [];
+            return Array.isArray(group.preferred_nodes) ? group.preferred_nodes.filter(Boolean) : [];
+        },
         getClashDelayRows(group) {
             if (!group || !Array.isArray(group.nodes)) return [];
             const resultMap = this.clashPool.delayResults[group.name]?.results || {};
             const healthyNodes = this.getClashHealthyNodes(group);
-            const sourceNodes = healthyNodes.length ? healthyNodes : group.nodes;
+            const preferredNodes = this.getClashPreferredNodes(group);
+            let sourceNodes = group.nodes;
+            if (this.clashPool.preferredOnlyMode) {
+                sourceNodes = preferredNodes;
+            } else if (healthyNodes.length) {
+                sourceNodes = [...new Set([...preferredNodes, ...healthyNodes])];
+            }
             const rows = sourceNodes.map((nodeName) => ({
                 nodeName,
                 result: resultMap[nodeName] || null,
                 isCurrent: group.current === nodeName,
-                isSelected: this.clashPool.nodeSelections[group.name] === nodeName
+                isSelected: this.clashPool.nodeSelections[group.name] === nodeName,
+                isPreferred: preferredNodes.includes(nodeName)
             }));
             rows.sort((a, b) => {
+                if (a.isPreferred && !b.isPreferred) return -1;
+                if (!a.isPreferred && b.isPreferred) return 1;
                 const aOk = a.result?.status === 'ok';
                 const bOk = b.result?.status === 'ok';
                 if (aOk && bOk) return (a.result.delay || Number.MAX_SAFE_INTEGER) - (b.result.delay || Number.MAX_SAFE_INTEGER);
@@ -4087,8 +4103,37 @@ async exportSub2Api() {
         getClashHealthyCount(group) {
             return this.getClashHealthyNodes(group).length;
         },
+        getClashPreferredCount(group) {
+            return this.getClashPreferredNodes(group).length;
+        },
         getClashEvictedCount() {
             return Array.isArray(this.clashPool.evictedNodes) ? this.clashPool.evictedNodes.length : 0;
+        },
+        async toggleClashPreferredOnlyMode() {
+            const nextEnabled = !this.clashPool.preferredOnlyMode;
+            this.clashPool.delayLoading = true;
+            try {
+                const res = await this.authFetch('/api/clash/preferred_mode', {
+                    method: 'POST',
+                    body: JSON.stringify({ enabled: nextEnabled })
+                });
+                const data = await res.json();
+                this.showToast(data.message || '标优筛选已更新', data.status);
+                if (data.status === 'success') {
+                    this.clashPool.preferredOnlyMode = nextEnabled;
+                    if (this.config?.clash_proxy_pool) {
+                        this.config.clash_proxy_pool.preferred_only_mode = nextEnabled;
+                    }
+                    const activeGroup = this.activeClashGroup;
+                    if (nextEnabled && activeGroup && !this.getClashPreferredCount(activeGroup)) {
+                        this.showToast('当前策略组暂无标优节点，后续自动切换会严格等待标优池。', 'warning');
+                    }
+                }
+            } catch (e) {
+                this.showToast('更新标优筛选失败', 'error');
+            } finally {
+                this.clashPool.delayLoading = false;
+            }
         },
         async handleClashDeploy() {
             this.showToast('正在调整实例规模...', 'info');
