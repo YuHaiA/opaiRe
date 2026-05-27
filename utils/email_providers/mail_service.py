@@ -1565,8 +1565,19 @@ def _resolve_code_wait_attempts(default_attempts: int, mode: str) -> int:
     if not getattr(cfg, "ENABLE_MULTI_THREAD_REG", False):
         return attempts
     reg_threads = max(1, int(getattr(cfg, "REG_THREADS", 1) or 1))
-    scaled_attempts = min(20, max(8, reg_threads // 2))
+    scaled_attempts = min(10, max(6, reg_threads // 3))
     return max(attempts, scaled_attempts)
+
+
+def _consume_code_pool_code(target_email: str, ignore_code=None) -> str:
+    from utils.auth_core import code_pool
+
+    raw_text = code_pool.get(target_email, "")
+    current_code = _extract_otp_code(_clean_html_to_text(raw_text))
+    if not current_code or current_code == ignore_code:
+        return ""
+    code_pool.pop(target_email, None)
+    return current_code
 
 
 def _extract_otp_code(content: str) -> str:
@@ -2364,19 +2375,19 @@ def get_oai_code(
             elif mode == "openai_cpa":
                 if getattr(cfg, 'OPENAI_CPA_WEBHOOK_SECRET', ""):
                     try:
-                        from utils.auth_core import code_pool
                         target_email = email.lower().strip()
                         for attempt in range(max_attempts):
-                            if target_email in code_pool:
-                                raw_text = code_pool.get(target_email, "")
-                                current_code = _extract_otp_code(_clean_html_to_text(raw_text))
-                                if current_code and current_code != ignore_code:
-                                    code_pool.pop(target_email, None)
-                                    print(f"[{cfg.ts()}] [SUCCESS] 项目专属邮箱 OPENAI-CPA ({mask_email(target_email)}) 提取成功: {current_code}")
-                                    return current_code
-                                elif current_code == ignore_code:
-                                    pass
+                            current_code = _consume_code_pool_code(target_email, ignore_code=ignore_code)
+                            if current_code:
+                                print(f"[{cfg.ts()}] [SUCCESS] 项目专属邮箱 OPENAI-CPA ({mask_email(target_email)}) 提取成功: {current_code}")
+                                return current_code
                             time.sleep(2)
+                        for _ in range(2):
+                            time.sleep(2)
+                            current_code = _consume_code_pool_code(target_email, ignore_code=ignore_code)
+                            if current_code:
+                                print(f"[{cfg.ts()}] [SUCCESS] 项目专属邮箱 OPENAI-CPA ({mask_email(target_email)}) 宽限补捞成功: {current_code}")
+                                return current_code
                         print(f"[{cfg.ts()}] [ERROR] 超时未获取到不同于 {ignore_code} 的新验证码")
                         return ""
                     except ImportError:

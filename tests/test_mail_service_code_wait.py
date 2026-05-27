@@ -13,7 +13,7 @@ class MailServiceCodeWaitTests(unittest.TestCase):
         with patch.object(mail_service.cfg, "ENABLE_MULTI_THREAD_REG", True), \
                 patch.object(mail_service.cfg, "REG_THREADS", 30):
             attempts = mail_service._resolve_code_wait_attempts(4, "openai_cpa")
-        self.assertEqual(15, attempts)
+        self.assertEqual(10, attempts)
 
     def test_openai_cpa_batch_id_without_assigned_domain_still_falls_back_to_domain_pick(self):
         with patch.object(mail_service.cfg, "EMAIL_API_MODE", "openai_cpa"), \

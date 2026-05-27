@@ -193,9 +193,9 @@ def _shared_global_switch_force_requested(previous_batch_force_switch: bool) -> 
 async def _wait_after_empty_shared_batch(async_stop_event: asyncio.Event, batch_success_count: int, retry_403_count: int, batch_force_switch: bool, label: str) -> None:
     if batch_force_switch or batch_success_count > 0 or retry_403_count > 0:
         return
-    print(f"[{ts()}] [INFO] [{label}] 当前批次 0 成功，执行 3 秒缓冲，避免同批发码过密后立即切下一节点...")
+    print(f"[{ts()}] [INFO] [{label}] 当前批次 0 成功，执行 1 秒缓冲，避免同批发码过密后立即切下一节点...")
     try:
-        await asyncio.wait_for(async_stop_event.wait(), timeout=3)
+        await asyncio.wait_for(async_stop_event.wait(), timeout=1)
     except asyncio.TimeoutError:
         pass
 

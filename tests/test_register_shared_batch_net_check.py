@@ -61,14 +61,14 @@ class RegisterSharedBatchNetCheckTests(unittest.TestCase):
         with patch.object(register_module.cfg, "EMAIL_API_MODE", "openai_cpa"):
             self.assertGreater(
                 register_module._get_shared_batch_start_delay({"skip_proxy_net_check": True}, 5),
-                0.5,
+                0.1,
             )
 
     def test_passwordless_send_delay_only_applies_to_openai_cpa_shared_batch(self):
         with patch.object(register_module.cfg, "EMAIL_API_MODE", "openai_cpa"):
             self.assertGreater(
                 register_module._get_passwordless_send_delay({"skip_proxy_net_check": True}, 6),
-                0.3,
+                0.1,
             )
         with patch.object(register_module.cfg, "EMAIL_API_MODE", "generator_email"):
             self.assertEqual(

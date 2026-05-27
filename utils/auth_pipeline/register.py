@@ -21,7 +21,7 @@ from .common import _extract_next_url, _parse_workspace_from_auth_cookie, _otp_v
 from .oauth import generate_oauth_url, submit_callback_url
 from .user_utils import _generate_password
 
-_SHARED_PASSWORDLESS_GATE = threading.BoundedSemaphore(value=8)
+_SHARED_PASSWORDLESS_GATE = threading.BoundedSemaphore(value=12)
 
 
 def _is_shared_batch_stagger_enabled(run_ctx: dict) -> bool:
@@ -34,8 +34,8 @@ def _get_shared_batch_start_delay(run_ctx: dict, worker_index: Optional[int]) ->
     if worker_index is None or worker_index <= 0:
         return 0.0
     if str(getattr(cfg, "EMAIL_API_MODE", "") or "").strip().lower() == "openai_cpa":
-        return min(4.8, worker_index * 0.14 + (worker_index % 4) * 0.03)
-    return min(2.4, worker_index * 0.08 + (worker_index % 3) * 0.02)
+        return min(1.8, worker_index * 0.045 + (worker_index % 4) * 0.015)
+    return min(1.0, worker_index * 0.035 + (worker_index % 3) * 0.01)
 
 
 def _get_passwordless_send_delay(run_ctx: dict, worker_index: Optional[int]) -> float:
@@ -45,7 +45,7 @@ def _get_passwordless_send_delay(run_ctx: dict, worker_index: Optional[int]) -> 
         return 0.0
     if str(getattr(cfg, "EMAIL_API_MODE", "") or "").strip().lower() != "openai_cpa":
         return 0.0
-    return min(2.4, worker_index * 0.08 + (worker_index % 5) * 0.03)
+    return min(1.0, worker_index * 0.03 + (worker_index % 5) * 0.015)
 
 
 def _should_gate_passwordless_flow(run_ctx: dict, worker_index: Optional[int]) -> bool:
