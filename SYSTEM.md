@@ -16,6 +16,48 @@
 ## 最新修改
 
 - 修改文件：
+  - `utils/email_providers/mail_service.py`
+  - `tests/test_mail_service_code_wait.py`
+- 变更内容：
+  - 修复 `get_email_and_token()` 对“批次域名预分配”的误判：现在只有在 `assigned_domain` 真正存在时，才会把该 worker 视为预分配域名批次。
+  - 新增定向测试，覆盖“仅有 `batch_id/worker_index`、但未预分配域名”时，`openai_cpa` 仍应正常回退到主域名池生成邮箱。
+- 修改原因：
+  - 新版把 `batch_id` 扩大用于批次熔断后，`mail_service` 仍沿用旧语义把 `batch_id + worker_index` 当成“域名已预分配”，导致共享批次里未启用域名运行时控制时直接 `return None, None`。
+  - 这会让主流程在“创建邮箱”之前短路，既看不到正常补货推进，也不会留下失败统计，表现为 `0/1000`、`失败 0`、然后继续切节点。
+- 影响范围：
+  - 影响所有使用 `batch_id` 做批次控制、但未启用域名预分配的多线程注册链路。
+  - 修复后，批次熔断与主域名回退逻辑重新解耦。
+
+- 修改文件：
+  - `utils/auth_pipeline/register.py`
+  - `utils/email_providers/mail_service.py`
+- 变更内容：
+  - 共享全局节点批次在跳过重复代理网络检查后，仍会按 `worker_index` 做轻量错峰，但已把延迟从保守值回调到更接近 `f1` 的较快节奏。
+  - `OPENAI-CPA` 无密码接管链路仍保留发码前并发闸门与轻量节流，但并发槽位已放宽、单 worker 延迟已明显缩短，减少总耗时。
+  - `get_oai_code()` 对依赖本地 webhook / `code_pool` 的邮箱模式，在线程并发较高时会自动放宽最小等待轮数，避免 `OTP_POLL_MAX_ATTEMPTS` 很低时批量发信后 8 秒内集体超时。
+- 修改原因：
+  - 在修复 `batch_id` 衔接 bug 后，之前为排障加上的重节流已经明显拖慢流程，需要回调到更适合长期运行的轻量节奏。
+  - 保留必要的洪峰保护，但避免因为防护过重让主流程体感明显慢于 `f1`。
+- 影响范围：
+  - 影响共享全局节点模式下的批次推进节奏。
+  - 不改变节点切换规则本身，只调整批次内 worker 进入邮箱 / OTP 阶段的速度与本地 webhook 等码容忍度。
+
+- 修改文件：
+  - `utils/core_engine.py`
+  - `utils/auth_pipeline/register.py`
+  - `tests/test_register_shared_batch_net_check.py`
+- 变更内容：
+  - `_collect_sync_batch_results()` 与 `_collect_async_batch_results()` 现在会把“批次已熔断后产生的预期取消 future”当作正常批次收尾处理，不再让 `CancelledError` 直接炸掉 `Sub2API` / `CPA` 主线程。
+  - 共享全局节点模式下，`当前批次已完成共享节点测活，跳过重复代理网络检查` 这条日志现在只在每批首个 worker 打一次，不再 30 线程刷满整屏。
+  - 新增定向测试，覆盖同步/异步批次收敛阶段对已取消 future 的容错。
+- 修改原因：
+  - 解决主流程启动后，批次里一旦出现预期取消，`CancelledError` 会直接把补货线程打崩，表现成“看起来只是在测活、后面流程没继续跑”。
+  - 减少共享批次日志噪音，让真正的邮箱、OTP、OAuth 或节点故障日志能露出来。
+- 影响范围：
+  - 影响常规量产、CPA 补货、Sub2API 补货三条主流程在批次熔断后的收尾行为。
+  - 不改变节点切换策略本身，只修正批次取消时的异常传播和日志可读性。
+
+- 修改文件：
   - `routers/account_routes.py`
   - `tests/test_cloud_accounts_route.py`
 - 变更内容：

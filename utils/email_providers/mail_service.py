@@ -1291,7 +1291,11 @@ def get_email_and_token(
     prefix, ai_enabled = _get_ai_data_package()
     use_domain_runtime_control = is_mail_domain_runtime_control_enabled(mode)
 
-    batch_preallocated = batch_id is not None and worker_index is not None
+    batch_preallocated = (
+        batch_id is not None
+        and worker_index is not None
+        and assigned_domain is not None
+    )
     skip_domain_fallback = batch_preallocated and assigned_domain is None
 
     if cfg.ENABLE_SUB_DOMAINS:
@@ -1543,6 +1547,28 @@ def _extract_mail_fields(mail: dict) -> dict:
 OTP_CODE_PATTERN = r"(?<!\d)(\d{6})(?!\d)"
 
 
+def _is_code_pool_mail_mode(mode: str) -> bool:
+    normalized = str(mode or "").strip().lower()
+    if normalized == "openai_cpa":
+        return True
+    if normalized == "freemail" and getattr(cfg, "FREEMAIL_LOCAL_WEBHOOK", False):
+        return True
+    if normalized == "cloudmail" and getattr(cfg, "CM_LOCAL_WEBHOOK", False):
+        return True
+    return False
+
+
+def _resolve_code_wait_attempts(default_attempts: int, mode: str) -> int:
+    attempts = max(1, int(default_attempts or 1))
+    if not _is_code_pool_mail_mode(mode):
+        return attempts
+    if not getattr(cfg, "ENABLE_MULTI_THREAD_REG", False):
+        return attempts
+    reg_threads = max(1, int(getattr(cfg, "REG_THREADS", 1) or 1))
+    scaled_attempts = min(20, max(8, reg_threads // 2))
+    return max(attempts, scaled_attempts)
+
+
 def _extract_otp_code(content: str) -> str:
     if not content:
         return ""
@@ -1588,6 +1614,7 @@ def get_oai_code(
             proxy_str = str(mail_proxies)
     base_url = cfg.GPTMAIL_BASE.rstrip("/")
     mode = cfg.EMAIL_API_MODE
+    max_attempts = _resolve_code_wait_attempts(max_attempts, mode)
 
     print(f"\n[{cfg.ts()}] [INFO] 等待接收验证码 ({mask_email(email)})...")
 

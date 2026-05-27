@@ -1,6 +1,8 @@
+import asyncio
 import sys
 import types
 import unittest
+from concurrent.futures import CancelledError as FuturesCancelledError, Future
 from unittest.mock import patch
 
 
@@ -52,6 +54,48 @@ class RegisterSharedBatchNetCheckTests(unittest.TestCase):
     def test_shared_switch_force_only_enabled_after_fault_batch(self):
         self.assertFalse(core_engine._shared_global_switch_force_requested(False))
         self.assertTrue(core_engine._shared_global_switch_force_requested(True))
+
+    def test_shared_batch_start_delay_only_applies_to_later_workers(self):
+        self.assertEqual(0.0, register_module._get_shared_batch_start_delay({}, 3))
+        self.assertEqual(0.0, register_module._get_shared_batch_start_delay({"skip_proxy_net_check": True}, 0))
+        with patch.object(register_module.cfg, "EMAIL_API_MODE", "openai_cpa"):
+            self.assertGreater(
+                register_module._get_shared_batch_start_delay({"skip_proxy_net_check": True}, 5),
+                0.5,
+            )
+
+    def test_passwordless_send_delay_only_applies_to_openai_cpa_shared_batch(self):
+        with patch.object(register_module.cfg, "EMAIL_API_MODE", "openai_cpa"):
+            self.assertGreater(
+                register_module._get_passwordless_send_delay({"skip_proxy_net_check": True}, 6),
+                0.3,
+            )
+        with patch.object(register_module.cfg, "EMAIL_API_MODE", "generator_email"):
+            self.assertEqual(
+                0.0,
+                register_module._get_passwordless_send_delay({"skip_proxy_net_check": True}, 6),
+            )
+
+    def test_async_batch_collection_ignores_expected_cancelled_futures(self):
+        async def runner():
+            task_log_guard = __import__("utils.task_log_guard", fromlist=["task_log_guard"])
+            task_log_guard.abort_batch("batch-a")
+            future = asyncio.get_running_loop().create_future()
+            future.cancel()
+            result = await core_engine._collect_async_batch_results([future], batch_id="batch-a")
+            self.assertEqual((0, True, 0), result)
+            task_log_guard.clear_batch("batch-a")
+
+        asyncio.run(runner())
+
+    def test_sync_batch_collection_ignores_expected_cancelled_futures(self):
+        task_log_guard = __import__("utils.task_log_guard", fromlist=["task_log_guard"])
+        task_log_guard.abort_batch("batch-a")
+        future = Future()
+        future.set_exception(FuturesCancelledError())
+        result = core_engine._collect_sync_batch_results([future], batch_id="batch-a")
+        self.assertEqual((0, True, 0), result)
+        task_log_guard.clear_batch("batch-a")
 
 
 if __name__ == "__main__":

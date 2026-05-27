@@ -1,7 +1,9 @@
 import random
 import re
+import threading
 import time
 import uuid
+from contextlib import contextmanager
 from typing import Optional
 import json
 from curl_cffi import requests
@@ -18,6 +20,56 @@ from .http_utils import _ssl_verify, _skip_net_check, _post_with_retry, _oai_hea
 from .common import _extract_next_url, _parse_workspace_from_auth_cookie, _otp_verify_loop, _create_account_about_you
 from .oauth import generate_oauth_url, submit_callback_url
 from .user_utils import _generate_password
+
+_SHARED_PASSWORDLESS_GATE = threading.BoundedSemaphore(value=8)
+
+
+def _is_shared_batch_stagger_enabled(run_ctx: dict) -> bool:
+    return bool(isinstance(run_ctx, dict) and run_ctx.get("skip_proxy_net_check"))
+
+
+def _get_shared_batch_start_delay(run_ctx: dict, worker_index: Optional[int]) -> float:
+    if not isinstance(run_ctx, dict) or not run_ctx.get("skip_proxy_net_check"):
+        return 0.0
+    if worker_index is None or worker_index <= 0:
+        return 0.0
+    if str(getattr(cfg, "EMAIL_API_MODE", "") or "").strip().lower() == "openai_cpa":
+        return min(4.8, worker_index * 0.14 + (worker_index % 4) * 0.03)
+    return min(2.4, worker_index * 0.08 + (worker_index % 3) * 0.02)
+
+
+def _get_passwordless_send_delay(run_ctx: dict, worker_index: Optional[int]) -> float:
+    if not _is_shared_batch_stagger_enabled(run_ctx):
+        return 0.0
+    if worker_index is None or worker_index <= 0:
+        return 0.0
+    if str(getattr(cfg, "EMAIL_API_MODE", "") or "").strip().lower() != "openai_cpa":
+        return 0.0
+    return min(2.4, worker_index * 0.08 + (worker_index % 5) * 0.03)
+
+
+def _should_gate_passwordless_flow(run_ctx: dict, worker_index: Optional[int]) -> bool:
+    if not _is_shared_batch_stagger_enabled(run_ctx):
+        return False
+    if worker_index is None:
+        return False
+    return str(getattr(cfg, "EMAIL_API_MODE", "") or "").strip().lower() == "openai_cpa"
+
+
+@contextmanager
+def _passwordless_flow_slot(run_ctx: dict, worker_index: Optional[int]):
+    if not _should_gate_passwordless_flow(run_ctx, worker_index):
+        yield
+        return
+
+    while True:
+        task_log_guard.raise_if_current_batch_aborted()
+        if _SHARED_PASSWORDLESS_GATE.acquire(timeout=0.2):
+            break
+    try:
+        yield
+    finally:
+        _SHARED_PASSWORDLESS_GATE.release()
 
 
 def run(
@@ -65,7 +117,7 @@ def run(
             except Exception as e:
                 print(f"[{cfg.ts()}] [ERROR] 代理网络检查失败: {e}")
                 return None, None
-        elif skip_proxy_net_check:
+        elif skip_proxy_net_check and worker_index in (None, 0):
             print(f"[{cfg.ts()}] [INFO] 当前批次已完成共享节点测活，跳过重复代理网络检查。")
         try:
             s_reg.close()
@@ -73,6 +125,10 @@ def run(
             pass
         del s_reg
         s_reg = None
+
+        shared_batch_start_delay = _get_shared_batch_start_delay(run_ctx, worker_index)
+        if shared_batch_start_delay > 0:
+            task_log_guard.sleep_with_batch_abort(shared_batch_start_delay)
 
         email, email_jwt = get_email_and_token(
             proxies,
@@ -178,67 +234,71 @@ def run(
                                 except Exception as e:
                                     print(f"[{cfg.ts()}] [WARNING] LuckMail 可用性检测异常(忽略并继续): {e}")
 
-                            print(f"[{cfg.ts()}] [INFO] （{mask_email(email)}）无密码通道注册发信...")
-                            sentinel_login_resp = _post_with_retry(
-                                s_reg,
-                                "https://auth.openai.com/api/accounts/passwordless/send-otp",
-                                headers=login_send_headers, proxies=proxies, timeout=30,
-                            )
-
-                            if sentinel_login_resp.status_code != 200:
-                                print(f"[{cfg.ts()}] [ERROR] （{mask_email(email)}）无密码通道邮件发送异常, 返回: {sentinel_login_resp.status_code}")
-                                return None, None
-
-                            login_code = ""
-                            code_resp = None
-                            for resend_attempt in range(max(1, cfg.MAX_OTP_RETRIES)):
-                                task_log_guard.raise_if_current_batch_aborted()
-                                if getattr(cfg, 'GLOBAL_STOP', False): return None, None
-                                if resend_attempt > 0:
-                                    print(f"\n[{cfg.ts()}] [INFO] 无密码通道正在请求重新发送登录验证码 {resend_attempt}/{cfg.MAX_OTP_RETRIES}...")
-                                    try:
-                                        sentinel_resend = generate_payload(did=did, flow="authorize_continue", proxy=proxy,
-                                                                           user_agent=current_ua, impersonate="chrome110",
-                                                                           ctx=login_ctx)
-                                        resend_headers = _oai_headers(did, {
-                                            "Referer": "https://auth.openai.com/email-verification",
-                                            "content-type": "application/json"
-                                        })
-                                        if sentinel_resend:
-                                            resend_headers["openai-sentinel-token"] = sentinel_resend
-                                        _post_with_retry(
-                                            s_reg,
-                                            "https://auth.openai.com/api/accounts/email-otp/resend",
-                                            headers=resend_headers,
-                                            json_body={}, proxies=proxies, timeout=15,
-                                        )
-                                        task_log_guard.sleep_with_batch_abort(3)
-                                    except Exception as e:
-                                        print(f"[{cfg.ts()}] [WARNING] （{mask_email(email)}）无密码通道重新发送请求异常: {e}")
-
-                                login_code = get_oai_code(email, jwt=email_jwt, proxies=proxies,
-                                                          processed_mail_ids=processed_mails)
-
-                                if not login_code:
-                                    print(f"[{cfg.ts()}] [WARNING] {mask_email(email)}无密码通道本轮未拉取到验证码，准备重发...")
-                                    continue
-
-                                login_sentinel_otp = generate_payload(did=did, flow="authorize_continue", proxy=proxy,
-                                                                      user_agent=current_ua,
-                                                                      impersonate="chrome110", ctx=login_ctx)
-                                val_headers = _oai_headers(did, {
-                                    "Referer": "https://auth.openai.com/email-verification",
-                                    "content-type": "application/json",
-                                })
-                                if login_sentinel_otp:
-                                    val_headers["openai-sentinel-token"] = login_sentinel_otp
-
-                                code_resp = _post_with_retry(
+                            with _passwordless_flow_slot(run_ctx, worker_index):
+                                passwordless_send_delay = _get_passwordless_send_delay(run_ctx, worker_index)
+                                if passwordless_send_delay > 0:
+                                    task_log_guard.sleep_with_batch_abort(passwordless_send_delay)
+                                print(f"[{cfg.ts()}] [INFO] （{mask_email(email)}）无密码通道注册发信...")
+                                sentinel_login_resp = _post_with_retry(
                                     s_reg,
-                                    "https://auth.openai.com/api/accounts/email-otp/validate",
-                                    headers=val_headers,
-                                    json_body={"code": login_code}, proxies=proxies,
+                                    "https://auth.openai.com/api/accounts/passwordless/send-otp",
+                                    headers=login_send_headers, proxies=proxies, timeout=30,
                                 )
+
+                                if sentinel_login_resp.status_code != 200:
+                                    print(f"[{cfg.ts()}] [ERROR] （{mask_email(email)}）无密码通道邮件发送异常, 返回: {sentinel_login_resp.status_code}")
+                                    return None, None
+
+                                login_code = ""
+                                code_resp = None
+                                for resend_attempt in range(max(1, cfg.MAX_OTP_RETRIES)):
+                                    task_log_guard.raise_if_current_batch_aborted()
+                                    if getattr(cfg, 'GLOBAL_STOP', False): return None, None
+                                    if resend_attempt > 0:
+                                        print(f"\n[{cfg.ts()}] [INFO] 无密码通道正在请求重新发送登录验证码 {resend_attempt}/{cfg.MAX_OTP_RETRIES}...")
+                                        try:
+                                            sentinel_resend = generate_payload(did=did, flow="authorize_continue", proxy=proxy,
+                                                                               user_agent=current_ua, impersonate="chrome110",
+                                                                               ctx=login_ctx)
+                                            resend_headers = _oai_headers(did, {
+                                                "Referer": "https://auth.openai.com/email-verification",
+                                                "content-type": "application/json"
+                                            })
+                                            if sentinel_resend:
+                                                resend_headers["openai-sentinel-token"] = sentinel_resend
+                                            _post_with_retry(
+                                                s_reg,
+                                                "https://auth.openai.com/api/accounts/email-otp/resend",
+                                                headers=resend_headers,
+                                                json_body={}, proxies=proxies, timeout=15,
+                                            )
+                                            task_log_guard.sleep_with_batch_abort(3)
+                                        except Exception as e:
+                                            print(f"[{cfg.ts()}] [WARNING] （{mask_email(email)}）无密码通道重新发送请求异常: {e}")
+
+                                    login_code = get_oai_code(email, jwt=email_jwt, proxies=proxies,
+                                                              processed_mail_ids=processed_mails)
+
+                                    if not login_code:
+                                        print(f"[{cfg.ts()}] [WARNING] {mask_email(email)}无密码通道本轮未拉取到验证码，准备重发...")
+                                        continue
+
+                                    login_sentinel_otp = generate_payload(did=did, flow="authorize_continue", proxy=proxy,
+                                                                          user_agent=current_ua,
+                                                                          impersonate="chrome110", ctx=login_ctx)
+                                    val_headers = _oai_headers(did, {
+                                        "Referer": "https://auth.openai.com/email-verification",
+                                        "content-type": "application/json",
+                                    })
+                                    if login_sentinel_otp:
+                                        val_headers["openai-sentinel-token"] = login_sentinel_otp
+
+                                    code_resp = _post_with_retry(
+                                        s_reg,
+                                        "https://auth.openai.com/api/accounts/email-otp/validate",
+                                        headers=val_headers,
+                                        json_body={"code": login_code}, proxies=proxies,
+                                    )
 
                                 if code_resp.status_code == 200:
                                     print(f"[{cfg.ts()}] [SUCCESS] （{mask_email(email)}）无密码通道接管验证通过！")

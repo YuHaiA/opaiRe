@@ -19,7 +19,7 @@ import time
 import string
 import yaml
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import CancelledError as FuturesCancelledError, ThreadPoolExecutor, as_completed
 from typing import Any, Optional, Tuple
 from curl_cffi import requests, CurlMime
 import queue
@@ -117,13 +117,23 @@ def _cancel_pending_futures(futures) -> None:
             future.cancel()
 
 
+def _is_expected_batch_cancellation(normalized_batch_id: str, force_switch: bool) -> bool:
+    return bool(force_switch or (normalized_batch_id and task_log_guard.is_batch_aborted(normalized_batch_id)))
+
+
 def _collect_sync_batch_results(futures, batch_id=None) -> tuple[int, bool, int]:
     success_count = 0
     force_switch = False
     retry_403_count = 0
     normalized_batch_id = str(batch_id or "").strip()
     for future in as_completed(futures):
-        worker_status = future.result()
+        try:
+            worker_status = future.result()
+        except FuturesCancelledError:
+            if _is_expected_batch_cancellation(normalized_batch_id, force_switch):
+                force_switch = True
+                continue
+            raise
         if worker_status == "success":
             success_count += 1
             continue
@@ -145,7 +155,13 @@ async def _collect_async_batch_results(futures, batch_id=None) -> tuple[int, boo
     retry_403_count = 0
     normalized_batch_id = str(batch_id or "").strip()
     for future in asyncio.as_completed(futures):
-        worker_status = await future
+        try:
+            worker_status = await future
+        except asyncio.CancelledError:
+            if _is_expected_batch_cancellation(normalized_batch_id, force_switch):
+                force_switch = True
+                continue
+            raise
         if worker_status == "success":
             success_count += 1
             continue
@@ -172,6 +188,23 @@ def _should_skip_worker_proxy_net_check(skip_switch: bool) -> bool:
 
 def _shared_global_switch_force_requested(previous_batch_force_switch: bool) -> bool:
     return bool(previous_batch_force_switch)
+
+
+async def _wait_after_empty_shared_batch(async_stop_event: asyncio.Event, batch_success_count: int, retry_403_count: int, batch_force_switch: bool, label: str) -> None:
+    if batch_force_switch or batch_success_count > 0 or retry_403_count > 0:
+        return
+    print(f"[{ts()}] [INFO] [{label}] 当前批次 0 成功，执行 3 秒缓冲，避免同批发码过密后立即切下一节点...")
+    try:
+        await asyncio.wait_for(async_stop_event.wait(), timeout=3)
+    except asyncio.TimeoutError:
+        pass
+
+
+def _validate_registration_runtime_config() -> tuple[bool, str]:
+    email_mode = str(getattr(cfg, "EMAIL_API_MODE", "") or "").strip().lower()
+    if email_mode == "openai_cpa" and not getattr(cfg, "OPENAI_CPA_WEBHOOK_SECRET", ""):
+        return False, "当前邮箱模式为 OPENAI-CPA，但未填写 openai_cpa.webhook_secret，主流程无法创建邮箱也无法收取验证码。"
+    return True, ""
 
 
 def _load_dotenv(path: str = ".env") -> None:
@@ -1129,6 +1162,13 @@ def normal_main_loop(args, stop_event: threading.Event, executor=None):
     else:
         print(f"[{ts()}] [系统] 任务目标: 无限挂机注册 (按 Ctrl+C 停止)")
 
+    config_ok, config_error = _validate_registration_runtime_config()
+    if not config_ok:
+        print(f"[{ts()}] [ERROR] 启动前检查失败：{config_error}")
+        cfg.GLOBAL_STOP = True
+        stop_event.set()
+        return
+
     success_count  = 0
     total_attempts = 0
     shared_global_force_switch = False
@@ -1399,6 +1439,13 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
     )
     print("=" * 60)
 
+    config_ok, config_error = _validate_registration_runtime_config()
+    if not config_ok:
+        print(f"[{ts()}] [ERROR] 启动前检查失败：{config_error}")
+        cfg.GLOBAL_STOP = True
+        async_stop_event.set()
+        return
+
     loop = asyncio.get_running_loop()
 
     while not async_stop_event.is_set() and not cfg.POOL_EXHAUSTED:
@@ -1542,6 +1589,13 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
                         if retry_403_count and not batch_force_switch:
                             print(f"[{ts()}] [WARNING] 遇到 {retry_403_count} 次 403 频率限制，给服务器 15 秒冷却时间...")
                             await asyncio.sleep(15)
+                        await _wait_after_empty_shared_batch(
+                            async_stop_event,
+                            batch_success_count,
+                            retry_403_count,
+                            batch_force_switch,
+                            "CPA补货",
+                        )
                     else:
                         print(f"[{ts()}] [INFO] 单线程补货: {success_in_this_cycle}/{need_to_reg}")
                         if cfg.is_raw_proxy_pool_enabled():
@@ -1610,6 +1664,13 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
     print(f"\n[{ts()}] [系统] Sub2API 目标库存阈值: {cfg.SUB2API_MIN_THRESHOLD} | 单次补发量: {cfg.SUB2API_BATCH_COUNT}")
     print(f"\n[{ts()}] [系统] Sub2API 限额处理: 仅在真实耗尽后禁用或剔除")
     print("=" * 60)
+
+    config_ok, config_error = _validate_registration_runtime_config()
+    if not config_ok:
+        print(f"[{ts()}] [ERROR] 启动前检查失败：{config_error}")
+        cfg.GLOBAL_STOP = True
+        async_stop_event.set()
+        return
 
     loop = asyncio.get_running_loop()
     client = Sub2APIClient(api_url=cfg.SUB2API_URL, api_key=cfg.SUB2API_KEY)
@@ -1809,6 +1870,13 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                             print(f"[{ts()}] [WARNING] 遇到 {retry_403_count} 次 403 频率限制，给服务器 15 秒冷却时间...")
                             try: await asyncio.wait_for(async_stop_event.wait(), timeout=15)
                             except asyncio.TimeoutError: pass
+                        await _wait_after_empty_shared_batch(
+                            async_stop_event,
+                            batch_success_count,
+                            retry_403_count,
+                            batch_force_switch,
+                            "Sub2API补货",
+                        )
 
                     else:
                         print(f"[{ts()}] [INFO] 单线程补货: {success_in_this_cycle}/{need_to_reg}")
