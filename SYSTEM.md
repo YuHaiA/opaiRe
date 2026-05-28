@@ -515,3 +515,170 @@
 - 影响范围：
   - 不影响项目代码与运行逻辑。
   - 已清理的旧 session 当前不再保留本地备份，如需追溯，不能再从该本机的备份目录恢复。
+
+## Server 3 轻量部署记录
+
+- 修改文件：
+  - `AGENTS.md`
+  - `.codex/skills/project-memory/SKILL.md`
+  - `SYSTEM.md`
+- 修改原因：
+  - 将新建的 Server 3 从历史 session 中抽取为稳定项目记忆，避免后续部署和排障时反复追溯旧对话。
+  - 明确 Oracle E2 小规格服务器的轻量部署边界，避免误走 Docker / Watchtower 这类重部署方式。
+- Server 3 当前记录：
+  - 当前公网 IP：`132.226.99.236`
+  - SSH 用户：`opc`
+  - SSH key：`C:\Users\admin\Desktop\file\ssh-key-2026-05-27.key`
+  - 推荐远端项目路径：`/home/opc/opaiRe`
+  - 已知 swap 状态：`/swapfile-oci` 已扩容为 `4G`，总 swap 约 `4.5GiB`
+- 轻量部署决策：
+  - Server 3 默认用于 opaiRe Web 面板和轻量管理，不作为高并发执行机。
+  - 默认不使用 Docker、Watchtower、浏览器 worker 或 Clash 重任务。
+  - 推荐使用 Python 3.11 venv 源码部署，并控制为单 worker、低并发、固定 `WEB_PORT`。
+  - 上传代码时应排除 `.git`、`.venv`、`__pycache__`、`.pytest_cache`、`tests` 与不必要的大型运行态数据。
+- 影响范围：
+  - 本次只更新项目文档与长期记忆，不改变业务逻辑、接口行为或现有 Server 1 / Server 2 部署方式。
+  - 后续用户说 `detect 3`、`restart 3` 或部署到 Server 3 时，应按此记录优先处理。
+
+## Server 3 轻量源码部署执行记录
+
+- 修改文件：
+  - `SYSTEM.md`
+- 远端变更：
+  - 将本地项目打包为轻量源码包并上传到 Server 3。
+  - 远端项目路径：`/home/opc/opaiRe`
+  - 轻量包大小：约 `10.5MB`
+  - 解压后源码目录大小：约 `27MB`
+  - 已排除 `.git`、`.venv`、`data`、`__pycache__`、`tests`、`.codex`、`.github`、Docker 相关文件和本地 `config.yaml`。
+  - 远端自动生成默认 `data/config.yaml` 与 `data/data.db`。
+  - 已安装 Oracle Linux 包：`python3.11`、`python3.11-pip`
+  - 已在 `/home/opc/opaiRe/.venv` 创建 Python 3.11 venv 并安装 `requirements.txt`。
+  - 已创建并启用 systemd 服务：`opaire-lite.service`
+- 运行方式：
+  - 服务仅绑定 `127.0.0.1:8000`，不直接暴露公网端口。
+  - systemd 使用 `/bin/bash -lc` 启动 venv Python，避免 Oracle Linux / systemd 直接执行 home 目录 venv symlink 时触发 `203/EXEC` 权限问题。
+  - 访问建议使用 SSH tunnel：`ssh -i C:\Users\admin\Desktop\file\ssh-key-2026-05-27.key -L 8000:127.0.0.1:8000 opc@132.226.99.236`
+- 验证结果：
+  - `systemctl is-active opaire-lite.service` 返回 `active`。
+  - `ss -ltnp` 显示服务监听 `127.0.0.1:8000`。
+  - 远端 `curl http://127.0.0.1:8000/` 返回 `200`。
+  - 当前进程 RSS 约 `22MB`，启动峰值约 `98MB`，Server 3 总 swap 约 `4.5GiB`。
+- 注意事项：
+  - 当前未开放 OS 防火墙或 OCI 安全组的公网 `8000` 入站，避免默认密码面板裸露公网。
+  - 若后续需要公网访问，应先修改默认密码，再考虑限制来源 IP 或改用 Nginx/HTTPS。
+  - Server 3 仍只适合 Web 面板和轻量管理，不适合高并发注册、Clash 重任务、浏览器 worker 或 Docker/Watchtower。
+
+## Server 3 Nginx 反代记录
+
+- 修改文件：
+  - `AGENTS.md`
+  - `.codex/skills/project-memory/SKILL.md`
+  - `SYSTEM.md`
+- 远端变更：
+  - Server 3 已安装 `nginx`。
+  - 新增 Nginx 反代配置：`/etc/nginx/conf.d/opaire.conf`
+  - Nginx 监听宿主机 `80`，反代到 `http://127.0.0.1:8000`。
+  - `opaire-lite.service` 仍只绑定 `127.0.0.1:8000`，不直接暴露 Python 服务。
+  - 已通过 `firewall-cmd --permanent --add-service=http` 放行 OS firewalld 的 HTTP 服务。
+  - 已启用 SELinux 标准反代布尔值 `httpd_can_network_connect`，允许 Nginx 连接本机后端端口。
+- 验证结果：
+  - `nginx -t` 通过。
+  - `systemctl is-active nginx` 返回 `active`。
+  - `systemctl is-active opaire-lite.service` 返回 `active`。
+  - Server 3 本机 `curl http://127.0.0.1/` 返回 `200`。
+  - Server 3 本机 `curl http://127.0.0.1:8000/` 返回 `200`。
+  - 本机到 Server 3 公网 `22/tcp` 可达，但 `80/tcp` 仍超时。
+- 当前阻塞：
+  - Server OS 内部已经完成反代与防火墙放行。
+  - 外网访问仍需在 OCI 控制台的 VCN Security List 或 NSG 中新增入站规则：source `0.0.0.0/0`，protocol `TCP`，destination port `80`。
+- 安全说明：
+  - 当前只做 HTTP 反代，未配置 HTTPS。
+  - 若要长期公网访问，应尽快改掉面板默认密码，并优先配置域名、HTTPS 或来源 IP 限制。
+
+## Server 3 域名与 HTTPS 准备记录
+
+- 修改文件：
+  - `SYSTEM.md`
+- 域名状态：
+  - `dazhou.bond` A 记录已解析到 `132.226.99.236`。
+  - `www.dazhou.bond` A 记录已解析到 `132.226.99.236`。
+- Server 端绑定：
+  - `/etc/nginx/conf.d/opaire.conf` 的 `server_name` 已配置为 `dazhou.bond www.dazhou.bond 132.226.99.236`。
+  - Server 3 本机使用 `Host: dazhou.bond` 请求 `http://127.0.0.1/` 返回 `200`。
+  - firewalld 已放行 `http` 与 `https` 服务。
+- 当前 HTTPS 阻塞：
+  - 本机外网访问 `http://dazhou.bond/` 超时。
+  - 本机外网访问 `https://dazhou.bond/` 超时。
+  - Server 内部 Nginx 与 opaiRe 均正常，阻塞点仍是 OCI VCN Security List 或 NSG 未放行公网 `80/tcp` 与 `443/tcp`。
+- 下一步：
+  - 在 OCI 控制台添加入站规则：`80/tcp` 与 `443/tcp`，来源 `0.0.0.0/0`。
+  - 放行后再安装/运行 ACME 客户端签发 Let’s Encrypt 证书，并将 Nginx 切换到 HTTPS。
+
+## Server 3 HTTPS 启用记录
+
+- 修改文件：
+  - `AGENTS.md`
+  - `.codex/skills/project-memory/SKILL.md`
+  - `SYSTEM.md`
+- 远端变更：
+  - 已通过 certbot webroot 模式为 `dazhou.bond` 与 `www.dazhou.bond` 签发 Let's Encrypt 证书。
+  - 证书路径：`/etc/letsencrypt/live/dazhou.bond/fullchain.pem`
+  - 私钥路径：`/etc/letsencrypt/live/dazhou.bond/privkey.pem`
+  - 证书有效期至：`2026-08-26 04:38:59 UTC`
+  - Nginx 已配置 `80` 跳转到 HTTPS。
+  - Nginx 已配置 `443 ssl http2`，反代到 `http://127.0.0.1:8000`。
+  - 已新增 `certbot-renew.service` 与 `certbot-renew.timer`，每天两次检查续期，续期后自动 reload Nginx。
+- 验证结果：
+  - 外网 `http://dazhou.bond/` 返回 `301` 到 `https://dazhou.bond/`。
+  - 外网 `https://dazhou.bond/` 可返回 opaiRe 页面 HTML。
+  - 外网 `https://www.dazhou.bond/` 使用同一证书并能到达 Nginx / 后端。
+  - Server 3 本机 `curl --resolve dazhou.bond:443:127.0.0.1 https://dazhou.bond/` 返回 `200`。
+  - `nginx`、`opaire-lite.service` 与 `certbot-renew.timer` 均处于启用 / 运行状态。
+- 安全说明：
+  - 当前面板已经可公网 HTTPS 访问，应尽快修改默认面板密码。
+  - 若后续需要更严格访问控制，可在 Nginx 或 OCI Security List / NSG 限制来源 IP。
+
+## Server 3 Mihomo 轻量接管记录
+
+- 修改文件：
+  - `SYSTEM.md`
+  - `utils/integrations/clash_manager.py`
+- 远端变更：
+  - 已安装 MetaCubeX Mihomo `v1.19.25` 的 `linux-amd64-v1` 二进制到 `/usr/local/bin/mihomo`。
+  - 曾临时创建独立 `mihomo-lite.service` 用于验证本机轻量核心可运行，后续已停用并 disable。
+  - 当前选择让 opaiRe 自带 Clash/Mihomo 管理模块接管 Mihomo，而不是使用独立 systemd Mihomo 服务。
+- 当前 opaiRe Clash 配置：
+  - `clash_proxy_pool.enable: true`
+  - `clash_proxy_pool.pool_mode: false`
+  - `default_proxy: http://127.0.0.1:7897`
+  - `clash_proxy_pool.api_url: http://127.0.0.1:9097`
+  - `clash_proxy_pool.test_proxy_url: http://127.0.0.1:7897`
+  - `clash_proxy_pool.secret` 已设置，但不在文档中记录明文。
+- 当前运行状态：
+  - opaiRe 已识别为 `linux_single_core` 模式。
+  - 订阅保存后，`data/mihomo-pool/manual-config.yaml` 已生成，`mihomo-local` 可由 opaiRe 直接启动。
+  - Linux 单核心模式写入 Mihomo 配置时会强制使用 `allow-lan: false` 与 `bind-address: 127.0.0.1`，避免轻量服务器把代理端口暴露到公网网卡。
+- 注意事项：
+  - Server 3 只适合轻量单核心使用，不适合 Docker Clash 池、多实例或高频测速。
+  - Mihomo 端口应保持只监听本机回环地址，不对公网开放。
+  - 若面板显示本地单核心停止，优先检查 `data/mihomo-pool/manual-config.yaml` 是否存在、`7897/9097` 是否监听，以及 `data/mihomo-pool/mihomo-core.log`。
+
+## Server 3 Sub2API 与 Mihomo 启动排障记录
+
+- 修改文件：
+  - `utils/core_engine.py`
+  - `utils/integrations/clash_manager.py`
+  - `SYSTEM.md`
+- 变更内容：
+  - `RegEngine.stop()` 现在会先通知任务停止并短暂等待当前线程退出，再决定是否关闭共享 executor，避免任务线程仍在调用 `loop.run_in_executor()` 时出现 `cannot schedule new futures after shutdown`。
+  - `_ensure_executor()` 会在检测到 executor 已 shutdown 时重建线程池，避免旧线程池状态污染后续 Sub2API / CPA 补货任务。
+  - Linux 单核心 Mihomo 写入配置时固定 `allow-lan: false` 与 `bind-address: 127.0.0.1`，避免 `7897` 代理端口监听公网网卡。
+- Server 3 验证结果：
+  - `utils/core_engine.py` 与 `utils/integrations/clash_manager.py` 已同步到 `/home/opc/opaiRe`。
+  - `python -m py_compile utils/integrations/clash_manager.py` 通过。
+  - `sync_single_core_runtime_from_saved_config()` 返回成功，`mihomo-local` 为 `running`。
+  - `ss -ltnp` 显示 opaiRe 监听 `127.0.0.1:8000`，Mihomo 监听 `127.0.0.1:7897` 与 `127.0.0.1:9097`。
+  - `opaire-lite.service`、`nginx`、`certbot-renew.timer` 均为 `active`，本机 `curl http://127.0.0.1:8000/` 返回 `200`。
+- 影响范围：
+  - 只影响任务停止 / 重启时的线程池生命周期，以及 Linux 单核心 Mihomo 的监听安全边界。
+  - 不改变订阅保存、节点策略组、HTTPS 反代或 Docker Clash 池逻辑。

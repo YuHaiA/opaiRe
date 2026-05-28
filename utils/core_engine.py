@@ -2019,7 +2019,7 @@ class RegEngine:
         self._executor         = None
 
     def _ensure_executor(self, max_workers=None):
-        if self._executor is None:
+        if self._executor is None or getattr(self._executor, "_shutdown", False):
             workers = max_workers or max(cfg.REG_THREADS, getattr(cfg, 'CPA_THREADS', 4), getattr(cfg, 'SUB2API_THREADS', 4))
             self._executor = ThreadPoolExecutor(max_workers=workers)
         return self._executor
@@ -2036,6 +2036,7 @@ class RegEngine:
         self.async_stop_event = None
         if self.current_thread is threading.current_thread():
             self._shutdown_executor()
+            self.current_thread = None
 
     def start_normal(self, args):
         if self.is_running():
@@ -2125,7 +2126,10 @@ class RegEngine:
         if self.loop and self.async_stop_event:
             self.loop.call_soon_threadsafe(self.async_stop_event.set)
         time.sleep(0.5)
-        self._shutdown_executor()
+        if self.current_thread and self.current_thread.is_alive():
+            self.current_thread.join(timeout=2)
+        if not (self.current_thread and self.current_thread.is_alive()):
+            self._shutdown_executor()
         if cfg.EMAIL_API_MODE in ["local_microsoft", "gmail_fission"]:
             try:
                 from utils.email_providers.postman_center import global_postman_fleet

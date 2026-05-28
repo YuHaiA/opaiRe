@@ -798,7 +798,7 @@ def _detect_runtime_mode(client) -> str:
 
 
 def _build_sample_container_config():
-    return {"allow-lan": True, "mixed-port": 7890}
+    return {"allow-lan": False, "bind-address": "127.0.0.1", "mixed-port": 7890}
 
 
 def _strip_conflicting_listener_ports(config_dict: dict, mixed_port: int) -> dict:
@@ -823,7 +823,8 @@ def _write_single_core_config(raw_yaml: dict) -> dict:
     patched.update(
         {
             "mixed-port": mixed_port,
-            "allow-lan": True,
+            "allow-lan": False,
+            "bind-address": "127.0.0.1",
             "external-controller": f"127.0.0.1:{controller_port}",
         }
     )
