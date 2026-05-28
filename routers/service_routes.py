@@ -43,6 +43,16 @@ class CFZoneBaseReq(BaseModel):domains: str; api_email: str; api_key: str
 class CFSetupRoutingReq(CFZoneBaseReq):worker_name: str
 
 
+def _preserve_worker_resource_bindings(bindings: list) -> list:
+    preserved_types = {"d1", "kv_namespace", "r2_bucket", "durable_object_namespace", "service"}
+    safe_keys = {"name", "type", "id", "database_id", "namespace_id", "bucket_name", "service", "environment"}
+    return [
+        {key: value for key, value in binding.items() if key in safe_keys}
+        for binding in bindings
+        if binding.get("type") in preserved_types
+    ]
+
+
 @router.post("/api/config/add_wildcard_dns")
 async def add_wildcard_dns(req: CFSyncExistingReq, token: str = Depends(verify_token)):
     try:
@@ -555,9 +565,16 @@ async def cloudflare_deploy_worker(req: CFDeployWorkerReq, token: str = Depends(
             check_worker = await client.get(
                 f"https://api.cloudflare.com/client/v4/accounts/{account_id}/workers/scripts/{req.worker_name}",
                 headers=headers)
+            preserved_bindings = []
             if check_worker.status_code == 200:
-                print(f"[{core_engine.ts()}] [CF Worker] ✅ Worker [{req.worker_name}] 已经存在，安全跳过覆盖部署。")
-                return {"status": "success", "message": f"✅ Worker [{req.worker_name}] 已存在，无需重复部署"}
+                print(f"[{core_engine.ts()}] [CF Worker] Worker [{req.worker_name}] 已存在，将继续更新代码与环境变量。")
+                settings_resp = await client.get(
+                    f"https://api.cloudflare.com/client/v4/accounts/{account_id}/workers/scripts/{req.worker_name}/settings",
+                    headers=headers,
+                )
+                if settings_resp.status_code == 200:
+                    settings = settings_resp.json().get("result", {})
+                    preserved_bindings = _preserve_worker_resource_bindings(settings.get("bindings", []))
 
             print(f"[{core_engine.ts()}] [CF Worker] 正在从 Github 拉取最新源码...")
             code_resp = await client.get(WORKER_RAW_URL)
@@ -572,7 +589,7 @@ async def cloudflare_deploy_worker(req: CFDeployWorkerReq, token: str = Depends(
                     {"name": "EMAIL_WEBHOOK_URL", "type": "plain_text", "text": req.webhook_url},
                     {"name": "EMAIL_WEBHOOK_TIMEOUT_MS", "type": "plain_text", "text": "10000"},
                     {"name": "EMAIL_WEBHOOK_SECRET", "type": "secret_text", "text": req.webhook_secret}
-                ]
+                ] + preserved_bindings
             }
 
             files = {

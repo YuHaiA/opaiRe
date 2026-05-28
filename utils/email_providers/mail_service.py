@@ -1544,6 +1544,46 @@ def _extract_mail_fields(mail: dict) -> dict:
     return {"sender": sender, "subject": subject, "body": body_text, "raw": raw}
 
 
+def _extract_mail_results(response) -> list:
+    try:
+        data = response.json()
+    except Exception:
+        return []
+    results = data.get("results") if isinstance(data, dict) else []
+    return results if isinstance(results, list) else []
+
+
+def _fetch_cloudflare_temp_email_results(base_url: str, email: str, jwt: str, mail_proxies):
+    response = None
+    if jwt:
+        response = requests.get(
+            f"{base_url}/api/mails",
+            params={"limit": 20, "offset": 0},
+            headers={
+                "Authorization": f"Bearer {jwt}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            proxies=mail_proxies, verify=_ssl_verify(), timeout=15,
+        )
+        results = _extract_mail_results(response) if response.status_code == 200 else []
+        if results or not getattr(cfg, "ADMIN_AUTH", ""):
+            return response, results
+
+    if getattr(cfg, "ADMIN_AUTH", ""):
+        admin_response = requests.get(
+            f"{base_url}/admin/mails",
+            params={"limit": 20, "offset": 0, "address": email},
+            headers={"x-admin-auth": cfg.ADMIN_AUTH},
+            proxies=mail_proxies, verify=_ssl_verify(), timeout=15,
+        )
+        if admin_response.status_code == 200:
+            return admin_response, _extract_mail_results(admin_response)
+        return admin_response, []
+
+    return response, []
+
+
 OTP_CODE_PATTERN = r"(?<!\d)(\d{6})(?!\d)"
 
 
@@ -2483,29 +2523,37 @@ def get_oai_code(
                 except Exception as e:
                     pass
             else:
-                if jwt:
-                    res = requests.get(
-                        f"{base_url}/api/mails",
-                        params={"limit": 20, "offset": 0},
-                        headers={
-                            "Authorization": f"Bearer {jwt}",
-                            "Content-Type": "application/json",
-                            "Accept": "application/json",
-                        },
-                        proxies=mail_proxies, verify=_ssl_verify(), timeout=15,
+                if mode == "cloudflare_temp_email":
+                    res, results = _fetch_cloudflare_temp_email_results(
+                        base_url, email, jwt, mail_proxies
                     )
                 else:
-                    res = requests.get(
-                        f"{base_url}/admin/mails",
-                        params={"limit": 20, "offset": 0, "address": email},
-                        headers={"x-admin-auth": cfg.ADMIN_AUTH},
-                        proxies=mail_proxies, verify=_ssl_verify(), timeout=15,
-                    )
+                    if jwt:
+                        res = requests.get(
+                            f"{base_url}/api/mails",
+                            params={"limit": 20, "offset": 0},
+                            headers={
+                                "Authorization": f"Bearer {jwt}",
+                                "Content-Type": "application/json",
+                                "Accept": "application/json",
+                            },
+                            proxies=mail_proxies, verify=_ssl_verify(), timeout=15,
+                        )
+                    else:
+                        res = requests.get(
+                            f"{base_url}/admin/mails",
+                            params={"limit": 20, "offset": 0, "address": email},
+                            headers={"x-admin-auth": cfg.ADMIN_AUTH},
+                            proxies=mail_proxies, verify=_ssl_verify(), timeout=15,
+                        )
+                    results = _extract_mail_results(res) if res.status_code == 200 else []
+                if res is None:
+                    time.sleep(3)
+                    continue
                 if res.status_code != 200:
                     print(f"\n[{cfg.ts()}] [ERROR] ({mask_email(email)})邮箱接口请求失败 (HTTP {res.status_code}): {res.text}")
                     time.sleep(3)
                     continue
-                results = res.json().get("results")
                 if results:
                     for mail in results:
                         mail_id = mail.get("id")

@@ -682,3 +682,27 @@
 - 影响范围：
   - 只影响任务停止 / 重启时的线程池生命周期，以及 Linux 单核心 Mihomo 的监听安全边界。
   - 不改变订阅保存、节点策略组、HTTPS 反代或 Docker Clash 池逻辑。
+
+## OpenAI-CPA 内存池收信排障记录
+
+- 修改文件：
+  - `routers/service_routes.py`
+  - `utils/email_providers/mail_service.py`
+  - `tests/test_mail_service_code_wait.py`
+  - `SYSTEM.md`
+- 问题现象：
+  - Cloudflare Email Routing 后台可看到发往 `zsae1du.qzz.io` 的 OpenAI 验证邮件，但 opaiRe 日志显示 OpenAI-CPA 内存池未拉取到验证码。
+- 根因：
+  - Server 3 当前使用 `email_api_mode: openai_cpa`，验证码不直接从 CF 邮件列表查询，而是依赖 Worker 将邮件 POST 到面板 `/api/webhook/email` 后写入 60 秒 TTL 内存池。
+  - 线上 `openai-cpa` Worker 的 `EMAIL_WEBHOOK_URL` 仍指向旧面板 `https://mycodexy.duckdns.org`，导致邮件被推送到旧地址，当前 Server 3 内存池收不到。
+- 远端修复：
+  - 已将 Cloudflare Worker `openai-cpa` 的 `EMAIL_WEBHOOK_URL` 更新为 `https://dazhou.bond`。
+  - 已验证 Worker 原有 `TEMP_MAIL_DB` D1 绑定被保留。
+  - 已用测试 webhook 验证 Server 3 `/api/webhook/email -> 内存池 -> /api/ext/get_mail_code` 链路可正确取码。
+- 代码修复：
+  - `/api/cloudflare/deploy_worker` 不再因为 Worker 已存在就直接跳过；后续会继续更新 Worker 代码与 webhook 环境变量。
+  - 重新部署既有 Worker 时会保留 D1 / KV / R2 / Durable Object / Service 等资源型 binding，避免更新 webhook 时误删已有资源绑定。
+  - `cloudflare_temp_email` 模式增加管理端按地址补捞逻辑：当 mailbox JWT 查询为空时，可用 `admin_auth` 从 `/admin/mails?address=...` 再查一次。
+- 注意事项：
+  - OpenAI-CPA 内存池 TTL 为 60 秒，项目重启或 webhook 延迟超过 TTL 都会造成 CF 后台有信但项目取不到。
+  - 后续更换面板域名、服务器或 Worker 名称时，必须重新部署 / 更新 Worker 环境变量，不能只改 CF 邮件路由。

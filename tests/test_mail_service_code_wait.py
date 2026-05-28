@@ -30,6 +30,33 @@ class MailServiceCodeWaitTests(unittest.TestCase):
         self.assertTrue(email.endswith("@example.com"))
         self.assertEqual("", token)
 
+    def test_cloudflare_temp_email_falls_back_to_admin_address_lookup(self):
+        class FakeResponse:
+            def __init__(self, status_code, results):
+                self.status_code = status_code
+                self.text = "{}"
+                self._results = results
+
+            def json(self):
+                return {"results": self._results}
+
+        mailbox_response = FakeResponse(200, [])
+        admin_response = FakeResponse(200, [{"id": "m1", "subject": "code"}])
+
+        with patch.object(mail_service.cfg, "ADMIN_AUTH", "admin-secret"), \
+                patch.object(mail_service, "_ssl_verify", return_value=True), \
+                patch.object(mail_service.requests, "get", side_effect=[mailbox_response, admin_response]) as mock_get:
+            response, results = mail_service._fetch_cloudflare_temp_email_results(
+                "https://worker.example",
+                "user@example.com",
+                "mailbox-jwt",
+                None,
+            )
+
+        self.assertIs(response, admin_response)
+        self.assertEqual([{"id": "m1", "subject": "code"}], results)
+        self.assertEqual(2, mock_get.call_count)
+
 
 if __name__ == "__main__":
     unittest.main()
