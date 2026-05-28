@@ -706,3 +706,21 @@
 - 注意事项：
   - OpenAI-CPA 内存池 TTL 为 60 秒，项目重启或 webhook 延迟超过 TTL 都会造成 CF 后台有信但项目取不到。
   - 后续更换面板域名、服务器或 Worker 名称时，必须重新部署 / 更新 Worker 环境变量，不能只改 CF 邮件路由。
+
+## 服务器更新方式与授权状态保护记录
+
+- 修改文件：
+  - `AGENTS.md`
+  - `.codex/skills/project-memory/SKILL.md`
+  - `SYSTEM.md`
+- 更新规则：
+  - Server 1 默认按 Git 方式更新；只有远端 Git / HTTPS fetch 异常时，才改用本地到服务器的文件同步兜底。
+  - Server 3 默认按轻量源代码覆盖方式更新，不使用 Docker / Watchtower，不把本地 `.git`、`.venv`、`data`、测试目录或缓存上传到远端。
+  - Server 3 更新必须是原地覆盖源码，保留远端 `data/`、`.venv`、`.codex`、`data/mihomo-pool` 等运行态目录。
+- 授权 / 机器码说明：
+  - 当前项目页面与后端路由显示授权文件、HWID 与租约状态会存放在系统库中，例如 `auth_license_file`、`auth_hwid_data` 等键。
+  - Server 3 使用源代码包覆盖源码本身不会让项目识别成新机器；只要仍是同一台服务器，并且远端 `data/data.db` 与配置状态被保留，授权 / HWID 状态应继续沿用。
+  - 风险点是删除、重建或用本地文件覆盖 Server 3 的 `data/data.db` / `data/config.yaml`，或把其他机器的数据库迁移到 Server 3；这种情况下才可能触发机器码 / 授权不匹配。
+- 执行约束：
+  - 普通 Server 3 更新禁止同步本地 `data/`。
+  - 如确实要迁移数据库或清理授权 / HWID，必须先单独确认，因为这会影响机器识别和授权状态。
