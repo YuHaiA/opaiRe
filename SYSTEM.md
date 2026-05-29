@@ -835,3 +835,39 @@
 - 后续建议：
   - 若 Server 4 仍周期性卡死，优先考虑减少系统监控守护进程常驻内存，例如 PCP/openmetrics 相关服务，而不是继续改 opaiRe 配置。
   - Server 4 仍应只承担 Web 面板、Mihomo 单核心和个人轻量使用，不建议叠加系统包安装、Docker、多实例 Clash 或高并发任务。
+
+## 上游 v16.0.0 吸收記錄
+
+- 修改文件：
+  - `config.example.yaml`
+  - `index.html`
+  - `routers/account_routes.py`
+  - `static/js/app.js`
+  - `utils/auth_pipeline/register.py`
+  - `utils/config.py`
+  - `utils/core_engine.py`
+  - `utils/db_manager.py`
+  - `utils/integrations/sub2api_client.py`
+  - `SYSTEM.md`
+- 上游來源：
+  - 已從 `upstream/main` 吸收至上游標籤 `v16.0.0`。
+  - 本地 `APP_VERSION` 同步更新為 `v16.0.0`。
+- 本次吸收內容：
+  - 新增半成品庫頁籤與 `/api/image_accounts` 查詢接口，用於展示 `image2api` 狀態帳號。
+  - 新增半成品帳號 OAuth 提權流程：前端可對單筆、選中或全部半成品帳號提交提權任務；後端透過 `engine.start_oauth_upgrade()` 啟動獨立任務。
+  - `utils/auth_pipeline/register.py` 新增 `run_oauth_only()`，用於既有帳號重新走 OAuth 授權並生成新 token。
+  - `utils/core_engine.py` 新增提權結果處理、提權主循環，以及 CPA/Sub2API 測活失敗後可選的自動重新 OAuth 搶救流程。
+  - CPA / Sub2API 配置新增 `auto_re_oauth`；Sub2API 測活模型預設改為 `gpt-5.4-mini`。
+  - 雲端庫 Sub2API 使用率改為前端選中後批量按鈕獲取，避免列表載入時同步拉取每個帳號的用量。
+  - Sub2API 推送模型映射移除 `gpt-5.4`，保留 `gpt-5.4-mini` 與 `gpt-5.5`。
+- 本地合併決策：
+  - `routers/account_routes.py` 保留本地既有 `include_usage` 按需查詢邏輯，並吸收上游新增的批量 usage 接口。
+  - `utils/auth_pipeline/register.py` 保留本地 `task_log_guard.sleep_with_batch_abort()`，讓批次中止仍可打斷上游新增流程中的等待。
+  - `utils/db_manager.get_image_accounts_page()` 額外返回 `token_data`，避免「全部半成品提權」無法讀取既有 `access_token/device_id/user_agent`。
+- 影響範圍：
+  - Web 面板新增半成品庫與提權操作入口。
+  - 測活流程新增可配置的失敗後重新 OAuth 搶救路徑；預設配置為關閉，不改變既有測活預設行為。
+  - 雲端庫頁面不再預設載入 Sub2API usage，需手動按鈕批量獲取。
+- 待驗證事項：
+  - 需要在有實際半成品帳號、郵箱與代理環境時驗證完整 OAuth 提權鏈路。
+  - 需要在連通 Sub2API 的環境中驗證批量 usage 按鈕與自動重新 OAuth 搶救效果。
