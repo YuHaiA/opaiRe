@@ -810,3 +810,28 @@
 - 注意事项：
   - Server 4 内存约 `498MiB`，安装系统包时可能显著拖慢 SSH / Nginx / opaiRe。
   - Server 4 不建议再安装 `python3-certbot-nginx` 这类较重插件；后续域名证书优先沿用 `acme.sh` + webroot。
+
+## Server 4 卡顿排查与 swap 对齐记录
+
+- 修改文件：
+  - `SYSTEM.md`
+- 问题现象：
+  - Server 4 重启前出现 `22/80/443` 端口可达，但 SSH banner exchange 超时、HTTP/HTTPS 连接后长时间不返回。
+  - 用户确认 OCI 面板显示 Server 3 与 Server 4 都是 `VM.Standard.E2.1.Micro`、`1 OCPU`、`1GB` 内存。
+- 排查结果：
+  - Server 4 重启后服务恢复，`opaire-lite.service`、`nginx`、`sshd`、`firewalld` 均为 `active`。
+  - Server 4 opaiRe 进程 RSS 约 `253M`，Mihomo RSS 约 `50M`，明显高于 Server 3 当时的 opaiRe 约 `142M`、Mihomo 约 `26M`。
+  - Server 4 还存在较高 RSS 的 `firewalld`、PCP `openmetrics`、`nfsclient`、`tuned` 等系统进程，导致可用内存缓冲较薄。
+  - Server 4 原本 `/swapfile-oci` 仅 `2G`，加上 `/.swapfile` 后总 swap 约 `2.5G`；Server 3 的 `/swapfile-oci` 已是 `4G`，总 swap 约 `4.5G`。
+  - 因未启用 persistent journal，重启前的内核级 OOM / hang 证据未被保留下来；后续若需精确追因，应考虑启用持久 journal 或独立轻量监控。
+- 本次修复：
+  - 已将 Server 4 `/swapfile-oci` 扩容为 `4G`，并确保 `/etc/fstab` 持久挂载。
+  - Server 4 当前总 swap 约 `4.5G`，与 Server 3 对齐。
+- 验证结果：
+  - 扩容后 `systemctl is-active opaire-lite.service nginx sshd firewalld` 均为 `active`。
+  - Server 4 本机 `http://127.0.0.1:8000/` 返回 `200`。
+  - Server 4 本机 HTTPS 反代返回 `200`。
+  - 外网 `https://xh-ai.cyou/` 与 `https://www.xh-ai.cyou/` 均返回 `200`。
+- 后续建议：
+  - 若 Server 4 仍周期性卡死，优先考虑减少系统监控守护进程常驻内存，例如 PCP/openmetrics 相关服务，而不是继续改 opaiRe 配置。
+  - Server 4 仍应只承担 Web 面板、Mihomo 单核心和个人轻量使用，不建议叠加系统包安装、Docker、多实例 Clash 或高并发任务。
