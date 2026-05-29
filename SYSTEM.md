@@ -794,9 +794,19 @@
   - 公网 `http://www.xh-ai.cyou/` 曾返回 `200`。
   - 对 `/` 发 `HEAD` 会返回 `405`，这是后端只允许 `GET` 的表现，不代表域名绑定失败。
 - HTTPS 状态：
-  - 尝试在 Server 4 安装 `certbot` / `python3-certbot-nginx` 以签发 `xh-ai.cyou` 与 `www.xh-ai.cyou` 证书。
-  - `dnf install` 在 Server 4 小规格实例上长时间未返回，并导致 SSH banner exchange 超时、HTTP 请求超时。
-  - 当前需要等待实例自行恢复，或从 OCI 控制台重启 Server 4 后再继续 HTTPS 收尾。
+  - 最初尝试在 Server 4 安装 `certbot` / `python3-certbot-nginx`，但 `dnf install` 在小规格实例上长时间未返回，并导致 SSH banner exchange 超时、HTTP 请求超时。
+  - 重启后已清理 `/var/cache/dnf`，缓存从约 `681M` 降为 `0`。
+  - 后续改用更轻的 `acme.sh` + webroot HTTP-01 方式签发 Let's Encrypt 证书。
+  - 已在 Nginx 中增加 `/.well-known/acme-challenge/` 静态路径，webroot 为 `/var/www/acme-challenge`。
+  - 已安装证书到 `/etc/nginx/ssl/xh-ai.cyou/fullchain.cer`，私钥到 `/etc/nginx/ssl/xh-ai.cyou/xh-ai.cyou.key`。
+  - 已新增 Nginx `443 ssl` server block，反代到 `http://127.0.0.1:8000`。
+  - 已通过 firewalld 放行 `https`。
+  - `acme.sh` 已安装 cron 自动续期任务，续期后 reload Nginx。
+- HTTPS 验证结果：
+  - 外网 `https://xh-ai.cyou/` 返回 `200`。
+  - 外网 `https://www.xh-ai.cyou/` 返回 `200`。
+  - Server 4 本机 `curl --resolve xh-ai.cyou:443:127.0.0.1 https://xh-ai.cyou/` 返回 `200`。
+  - 证书签发方为 Let's Encrypt，当前证书到期时间为 `2026-08-27 02:33:38 GMT`。
 - 注意事项：
   - Server 4 内存约 `498MiB`，安装系统包时可能显著拖慢 SSH / Nginx / opaiRe。
-  - HTTPS 尚未验证完成，不能声称 `https://xh-ai.cyou/` 可用。
+  - Server 4 不建议再安装 `python3-certbot-nginx` 这类较重插件；后续域名证书优先沿用 `acme.sh` + webroot。
