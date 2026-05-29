@@ -724,3 +724,38 @@
 - 执行约束：
   - 普通 Server 3 更新禁止同步本地 `data/`。
   - 如确实要迁移数据库或清理授权 / HWID，必须先单独确认，因为这会影响机器识别和授权状态。
+
+## Server 4 轻量部署与 Mihomo 接管记录
+
+- 修改文件：
+  - `AGENTS.md`
+  - `.codex/skills/project-memory/SKILL.md`
+  - `SYSTEM.md`
+- 远端变更：
+  - 新增 Server 4：`137.131.12.149`，SSH 用户 `opc`，SSH key `C:\Users\admin\Desktop\file\ssh-key-2026-05-27.key`。
+  - 按 Server 3 的轻量方式部署到 `/home/opc/opaiRe`，不使用 Docker / Watchtower。
+  - 已安装 `python3.11`、`python3.11-pip`、`policycoreutils-python-utils`，并在 `/home/opc/opaiRe/.venv` 创建 venv 后安装 `requirements.txt`。
+  - 已创建并启用 `opaire-lite.service`，固定 `WEB_HOST=127.0.0.1`、`WEB_PORT=8000`、`WEB_PORT_STRICT=1`。
+  - 已启用 `nginx`，主 Nginx 配置当前反代到 `http://127.0.0.1:8000`。
+  - 已通过 firewalld 放行 `http`，并开启 SELinux `httpd_can_network_connect`。
+  - 已安装 MetaCubeX Mihomo `v1.19.25` 到 `/usr/local/bin/mihomo`。
+- Mihomo 决策：
+  - Server 4 与 Server 3 保持一致，由 opaiRe 自带 Clash/Mihomo 管理模块接管 Mihomo。
+  - 不使用独立 `mihomo-lite.service`，避免与面板保存订阅、端口和控制接口状态分叉。
+  - 当前配置为 `clash_proxy_pool.enable: true`、`clash_proxy_pool.pool_mode: false`、`default_proxy: http://127.0.0.1:7897`、控制接口 `http://127.0.0.1:9097`。
+  - `clash_proxy_pool.secret` 已设置，但不在文档中记录明文。
+  - 当前尚未保存订阅，因此 `data/mihomo-pool/manual-config.yaml` 尚未生成，`7897/9097` 未监听属于正常状态。
+- 验证结果：
+  - `python -m py_compile wfxl_openai_regst.py routers/service_routes.py utils/email_providers/mail_service.py` 已通过。
+  - `systemctl is-active opaire-lite.service` 返回 `active`。
+  - `systemctl is-active nginx` 返回 `active`。
+  - `systemctl is-enabled opaire-lite.service` 与 `systemctl is-enabled nginx` 均返回 `enabled`。
+  - 远端 `curl http://127.0.0.1:8000/` 返回 `200`。
+  - 远端 `curl http://127.0.0.1/` 返回 `200`。
+  - 本机外网访问 `http://137.131.12.149/` 返回 `200`。
+  - opaiRe `get_pool_status()` 返回 `linux_single_core`，实例数为 `1`。
+- 注意事项：
+  - Server 4 规格很小，约 `498MiB` RAM、约 `2.5GiB` swap、约 `30GiB` root disk，只适合 Web 面板和个人轻量使用。
+  - 普通更新必须保留远端 `data/`、`.venv`、`.codex`、`data/mihomo-pool`，禁止用本地 `data/` 覆盖远端运行态。
+  - 若后续保存订阅后排查 Mihomo，应同时核对 `data/config.yaml`、`data/mihomo-pool/manual-config.yaml`、`7897/9097` 监听与 `data/mihomo-pool/mihomo-core.log`。
+  - 当前 Server 4 尚未绑定域名或 HTTPS；若需要 HTTPS，应先提供域名并确认 DNS A 记录指向 `137.131.12.149`。
