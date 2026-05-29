@@ -759,3 +759,22 @@
   - 普通更新必须保留远端 `data/`、`.venv`、`.codex`、`data/mihomo-pool`，禁止用本地 `data/` 覆盖远端运行态。
   - 若后续保存订阅后排查 Mihomo，应同时核对 `data/config.yaml`、`data/mihomo-pool/manual-config.yaml`、`7897/9097` 监听与 `data/mihomo-pool/mihomo-core.log`。
   - 当前 Server 4 尚未绑定域名或 HTTPS；若需要 HTTPS，应先提供域名并确认 DNS A 记录指向 `137.131.12.149`。
+
+## Server 4 代理保存卡顿排查记录
+
+- 修改文件：
+  - `routers/service_routes.py`
+  - `SYSTEM.md`
+- 问题现象：
+  - Server 4 代理开启后保存配置体感较慢，用户怀疑 Clash/Mihomo 鉴权 `SECRET` 不正确。
+- 排查结果：
+  - Server 4 `clash_proxy_pool.secret` 已设置，未在日志或文档中记录明文。
+  - 使用当前配置访问 Mihomo 控制端 `/version` 与 `/proxies` 返回 `200`，说明 `SECRET` 与控制端匹配。
+  - opaiRe 识别模式为 `linux_single_core`，`7897` 与 `9097` 均只监听 `127.0.0.1`。
+  - `sync_single_core_runtime_from_saved_config()` 实测耗时约 `3.15s`，主要来自写入运行配置、重启 Mihomo 并等待控制端恢复；在 Server 4 约 `498MiB` RAM 的小规格上属于可预期延迟。
+  - 日志发现 `/api/sub2api/groups` 在 `SUB2API_KEY` 为 `None` 时会触发 `None.strip()`，可能让配置保存后的前端刷新看起来卡顿或异常。
+- 本次修复：
+  - `routers/service_routes.py` 对 `SUB2API_URL` 与 `SUB2API_KEY` 增加 `None` 安全转换，空值时返回“请先保存 Sub2API URL 和 API key”，不再抛 500。
+- 影响范围：
+  - 只影响 Sub2API 分组读取接口的空配置容错。
+  - 不改变 Mihomo `SECRET`、订阅保存、单核心启动或节点切换逻辑。

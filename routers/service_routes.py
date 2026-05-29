@@ -241,8 +241,8 @@ async def clear_gmail_token(token: str = Depends(verify_token)):
 @router.get("/api/sub2api/groups")
 def get_sub2api_groups(token: str = Depends(verify_token)):
     from curl_cffi import requests as cffi_requests
-    sub2api_url = getattr(core_engine.cfg, "SUB2API_URL", "").strip()
-    sub2api_key = getattr(core_engine.cfg, "SUB2API_KEY", "").strip()
+    sub2api_url = str(getattr(core_engine.cfg, "SUB2API_URL", "") or "").strip()
+    sub2api_key = str(getattr(core_engine.cfg, "SUB2API_KEY", "") or "").strip()
     if not sub2api_url or not sub2api_key: return {"status": "error",
                                                    "message": "Please save the Sub2API URL and API key first."}
     try:
