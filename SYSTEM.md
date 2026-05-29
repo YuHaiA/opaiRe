@@ -778,3 +778,25 @@
 - 影响范围：
   - 只影响 Sub2API 分组读取接口的空配置容错。
   - 不改变 Mihomo `SECRET`、订阅保存、单核心启动或节点切换逻辑。
+
+## Server 4 xh-ai.cyou 域名绑定记录
+
+- 修改文件：
+  - `SYSTEM.md`
+- 远端变更：
+  - DNS 检查显示 `xh-ai.cyou` 与 `www.xh-ai.cyou` 均已解析到 Server 4：`137.131.12.149`。
+  - 已备份并修改 Server 4 `/etc/nginx/nginx.conf`，将主 server block 的 `server_name` 更新为 `xh-ai.cyou www.xh-ai.cyou 137.131.12.149 _`。
+  - Nginx 仍反代到 `http://127.0.0.1:8000`，不直接暴露 Python 服务。
+- 验证结果：
+  - 修改后 `nginx -t` 通过。
+  - Server 4 本机使用 `Host: xh-ai.cyou` 请求 `http://127.0.0.1/` 返回 `200`。
+  - Server 4 本机使用 `Host: www.xh-ai.cyou` 请求 `http://127.0.0.1/` 返回 `200`。
+  - 公网 `http://www.xh-ai.cyou/` 曾返回 `200`。
+  - 对 `/` 发 `HEAD` 会返回 `405`，这是后端只允许 `GET` 的表现，不代表域名绑定失败。
+- HTTPS 状态：
+  - 尝试在 Server 4 安装 `certbot` / `python3-certbot-nginx` 以签发 `xh-ai.cyou` 与 `www.xh-ai.cyou` 证书。
+  - `dnf install` 在 Server 4 小规格实例上长时间未返回，并导致 SSH banner exchange 超时、HTTP 请求超时。
+  - 当前需要等待实例自行恢复，或从 OCI 控制台重启 Server 4 后再继续 HTTPS 收尾。
+- 注意事项：
+  - Server 4 内存约 `498MiB`，安装系统包时可能显著拖慢 SSH / Nginx / opaiRe。
+  - HTTPS 尚未验证完成，不能声称 `https://xh-ai.cyou/` 可用。
