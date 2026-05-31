@@ -3428,6 +3428,9 @@
                                                     :class="clashPool.preferredOnlyMode ? 'bg-amber-500 text-amber-950 border-amber-300 hover:bg-amber-400' : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-50'">
                                                 {{ clashPool.preferredOnlyMode ? '仅用标优中' : '只用标优' }}
                                             </button>
+                                            <button @click="clearClashPreferredNodes(activeClashGroup.name)" :disabled="clashPool.delayLoading || !getClashPreferredCount(activeClashGroup)" class="px-4 py-2.5 rounded-xl bg-white text-amber-700 text-sm font-black hover:bg-amber-50 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm border border-amber-200">
+                                                清空标优池
+                                            </button>
                                             <button @click="clearClashEvictedNodes" :disabled="clashPool.delayLoading || !getClashEvictedCount()" class="px-4 py-2.5 rounded-xl bg-white text-rose-600 text-sm font-black hover:bg-rose-50 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm border border-rose-200">
                                                 清空拉黑池
                                             </button>

@@ -899,3 +899,22 @@
 - 待驗證事項：
   - 需要在主控/子控實際集群環境中驗證大批量帳號直傳時的超時與記憶體表現。
   - 若需要重新啟用文件路徑校驗模式，需同步恢復前後端 schema，不能只改單側。
+
+## Clash 標優池清理功能記錄
+
+- 修改文件：
+  - `index.html`
+  - `static/js/app.js`
+  - `routers/service_routes.py`
+  - `utils/integrations/clash_manager.py`
+  - `tests/test_clash_manager_evicted_nodes_clear.py`
+  - `SYSTEM.md`
+- 本次修改：
+  - Clash 節點頁新增「清空標優池」按鈕，僅在當前策略組存在標優節點時可點擊。
+  - 前端新增 `clearClashPreferredNodes(groupName)`，調用後端接口並同步清空當前策略組的 `preferred_nodes` 顯示狀態。
+  - 後端新增 `/api/clash/preferred_nodes/clear`，請求體為 `{ "group_name": "..." }`。
+  - `utils.integrations.clash_manager` 新增 `clear_preferred_nodes(group_name)`，只移除指定策略組的標優池，不影響有效節點池、拉黑池或其他策略組的標優資料。
+  - 新增單元測試覆蓋標優池清理時不誤清 `evicted_nodes`、`tested_nodes` 與其他策略組。
+- 行為影響：
+  - 若已開啟「僅用標優」並清空當前策略組標優池，前端會提示需要補充標優節點或切回全部候選。
+  - 清理操作會通過 `cfg.reload_all_configs(new_config_dict=...)` 持久化到 `clash_proxy_pool.preferred_nodes`。

@@ -31,6 +31,7 @@ class ClashRuntimeReq(BaseModel): action: str
 class ClashSwitchReq(BaseModel): group_name: str; proxy_name: str; target: str = "all"
 class ClashDelayReq(BaseModel): group_name: str; target: str = "all"
 class ClashTestedNodesClearReq(BaseModel): group_name: str
+class ClashPreferredNodesClearReq(BaseModel): group_name: str
 class ClashPreferredModeReq(BaseModel): enabled: bool
 class ClashSubscriptionAddReq(BaseModel): name: str = ""; url: str; make_selected: bool = False
 class ClashSubscriptionSelectReq(BaseModel): subscription_id: str; target: str = "all"; resolved_url: str = ""
@@ -300,6 +301,11 @@ async def post_clash_delay(req: ClashDelayReq, token: str = Depends(verify_token
 @router.post("/api/clash/tested_nodes/clear")
 async def post_clash_tested_nodes_clear(req: ClashTestedNodesClearReq, token: str = Depends(verify_token)):
     success, msg = clash_manager.clear_tested_nodes(req.group_name)
+    return {"status": "success" if success else "error", "message": msg}
+
+@router.post("/api/clash/preferred_nodes/clear")
+async def post_clash_preferred_nodes_clear(req: ClashPreferredNodesClearReq, token: str = Depends(verify_token)):
+    success, msg = clash_manager.clear_preferred_nodes(req.group_name)
     return {"status": "success" if success else "error", "message": msg}
 
 @router.post("/api/clash/evicted_nodes/clear")

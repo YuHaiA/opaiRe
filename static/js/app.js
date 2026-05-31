@@ -4381,6 +4381,33 @@ async exportSub2Api() {
                 this.clashPool.delayLoading = false;
             }
         },
+        async clearClashPreferredNodes(groupName) {
+            if (!groupName) return;
+            const count = this.getClashPreferredCount(this.activeClashGroup);
+            if (!count) return;
+            const confirmed = await this.customConfirm(`确定清空策略组 [${groupName}] 的标优节点池吗？清空后仅用标优模式将没有可用标优节点。`);
+            if (!confirmed) return;
+            this.clashPool.delayLoading = true;
+            try {
+                const res = await this.authFetch('/api/clash/preferred_nodes/clear', {
+                    method: 'POST',
+                    body: JSON.stringify({ group_name: groupName })
+                });
+                const data = await res.json();
+                this.showToast(data.message || '标优节点池已清空', data.status);
+                if (data.status === 'success') {
+                    const group = this.clashPool.groups.find(item => item.name === groupName);
+                    if (group) group.preferred_nodes = [];
+                    if (this.clashPool.preferredOnlyMode) {
+                        this.showToast('当前仍开启仅用标优模式，请补充标优节点或切回全部候选。', 'warning');
+                    }
+                }
+            } catch (e) {
+                this.showToast('清空标优节点池失败', 'error');
+            } finally {
+                this.clashPool.delayLoading = false;
+            }
+        },
         async switchClashGroupNode(groupName) {
             const proxyName = this.clashPool.nodeSelections[groupName];
             if (!groupName || !proxyName) {

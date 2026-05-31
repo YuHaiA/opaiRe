@@ -65,6 +65,33 @@ class ClashManagerEvictedNodesClearTests(unittest.TestCase):
         self.assertIn("仅用标优节点模式", msg)
         self.assertTrue(saved_config["value"]["clash_proxy_pool"]["preferred_only_mode"])
 
+    def test_clear_preferred_nodes_clears_only_target_group_pool(self):
+        fake_config = {
+            "clash_proxy_pool": {
+                "evicted_nodes": ["node-a"],
+                "tested_nodes": {"节点选择": ["node-b"]},
+                "preferred_nodes": {
+                    "节点选择": ["node-c"],
+                    "备用策略": ["node-d"],
+                },
+            }
+        }
+        saved_config = {}
+
+        def fake_reload_all_configs(new_config_dict=None):
+            saved_config["value"] = new_config_dict
+
+        with patch("utils.integrations.clash_manager._read_runtime_config", return_value=fake_config), \
+                patch("utils.config.reload_all_configs", side_effect=fake_reload_all_configs):
+            ok, msg = clash_manager.clear_preferred_nodes("节点选择")
+
+        self.assertTrue(ok)
+        self.assertIn("已清空策略组 [节点选择] 的标优节点池", msg)
+        result = saved_config["value"]["clash_proxy_pool"]
+        self.assertEqual({"备用策略": ["node-d"]}, result["preferred_nodes"])
+        self.assertEqual(["node-a"], result["evicted_nodes"])
+        self.assertEqual({"节点选择": ["node-b"]}, result["tested_nodes"])
+
     def test_switch_proxy_group_rejects_non_preferred_node_when_preferred_only_enabled(self):
         fake_config = {
             "clash_proxy_pool": {

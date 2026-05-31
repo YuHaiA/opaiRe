@@ -311,6 +311,23 @@ def set_preferred_only_mode(enabled: bool) -> tuple[bool, str]:
         return False, str(e)
 
 
+def clear_preferred_nodes(group_name: str) -> tuple[bool, str]:
+    try:
+        config_data = _read_runtime_config()
+        clash_conf = config_data.get("clash_proxy_pool", {})
+        if not isinstance(clash_conf, dict):
+            clash_conf = {}
+        preferred_map = clash_conf.get("preferred_nodes", {})
+        if isinstance(preferred_map, dict):
+            preferred_map.pop(str(group_name), None)
+        clash_conf["preferred_nodes"] = preferred_map if isinstance(preferred_map, dict) else {}
+        config_data["clash_proxy_pool"] = clash_conf
+        cfg.reload_all_configs(new_config_dict=config_data)
+        return True, f"已清空策略组 [{group_name}] 的标优节点池。"
+    except Exception as e:
+        return False, str(e)
+
+
 def clear_tested_nodes(group_name: str) -> tuple[bool, str]:
     try:
         config_data = _read_runtime_config()
