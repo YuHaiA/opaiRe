@@ -4506,6 +4506,51 @@
                                 </div>
                             </div>
 
+                            <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-200/60 border-t-8 border-t-orange-500 bg-gradient-to-br from-orange-50/20 to-white lg:col-span-2">
+                                <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6">
+                                    <div>
+                                        <h3 class="text-lg md:text-xl font-black text-orange-700 flex items-center gap-2 tracking-tight">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                            注册节奏
+                                        </h3>
+                                        <p class="text-xs text-slate-500 font-medium mt-2">控制 v16 批次等待、错峰和 403 冷却。保存后新任务生效，正在跑的任务建议重启后再观察。</p>
+                                    </div>
+                                    <div class="inline-flex bg-orange-50 border border-orange-200 rounded-xl p-1 shadow-inner">
+                                        <button type="button" @click="applyRegistrationTimingProfile('fast')" class="px-4 py-2 rounded-lg text-xs font-black transition-all" :class="config.registration_timing?.profile === 'fast' ? 'bg-white text-orange-700 shadow-sm' : 'text-orange-500 hover:text-orange-700'">
+                                            快速
+                                        </button>
+                                        <button type="button" @click="applyRegistrationTimingProfile('safe')" class="px-4 py-2 rounded-lg text-xs font-black transition-all" :class="config.registration_timing?.profile === 'safe' ? 'bg-white text-orange-700 shadow-sm' : 'text-orange-500 hover:text-orange-700'">
+                                            保守
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+                                    <div>
+                                        <label class="block text-xs font-black text-slate-600 uppercase tracking-wider mb-2">启动错峰倍率</label>
+                                        <input type="number" min="0" max="2" step="0.05" v-model.number="config.registration_timing.shared_batch_stagger_scale" class="w-full appearance-none bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-lg py-2.5 px-3 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-colors shadow-sm">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-black text-slate-600 uppercase tracking-wider mb-2">发信错峰倍率</label>
+                                        <input type="number" min="0" max="2" step="0.05" v-model.number="config.registration_timing.passwordless_send_stagger_scale" class="w-full appearance-none bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-lg py-2.5 px-3 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-colors shadow-sm">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-black text-slate-600 uppercase tracking-wider mb-2">空批缓冲秒</label>
+                                        <input type="number" min="0" max="10" step="0.1" v-model.number="config.registration_timing.empty_batch_wait_seconds" class="w-full appearance-none bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-lg py-2.5 px-3 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-colors shadow-sm">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-black text-slate-600 uppercase tracking-wider mb-2">403 冷却秒</label>
+                                        <input type="number" min="0" max="60" step="1" v-model.number="config.registration_timing.retry_403_cooldown_seconds" class="w-full appearance-none bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-lg py-2.5 px-3 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-colors shadow-sm">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-black text-slate-600 uppercase tracking-wider mb-2">单线间隔秒</label>
+                                        <input type="number" min="0" max="30" step="0.5" v-model.number="config.registration_timing.single_batch_gap_seconds" class="w-full appearance-none bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-lg py-2.5 px-3 focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-colors shadow-sm">
+                                    </div>
+                                </div>
+                                <div class="mt-4 text-[11px] text-orange-700 bg-orange-50 border border-orange-100 rounded-lg px-3 py-2 font-bold">
+                                    快速默认：0.45 / 0.45 / 0.2s / 6s / 1s；保守默认：1 / 1 / 1s / 15s / 5s。
+                                </div>
+                            </div>
+
                             <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-200/60 border-t-8 border-t-teal-500 bg-gradient-to-br from-teal-50/20 to-white lg:col-span-2">
                                 <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6">
                                     <div>

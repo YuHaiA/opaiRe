@@ -1337,6 +1337,7 @@ createApp({
 
 
                 if (this.config) {
+                    this.ensureRegistrationTimingConfig();
                     if (!this.config.smsbower) {
                         this.config.smsbower = {
                             enabled: false, api_key: '', country: 0, service: 'dr',
@@ -1425,6 +1426,7 @@ createApp({
                 if (!this.config.max_log_lines) {
                     this.config.max_log_lines = 500;
                 }
+                this.ensureRegistrationTimingConfig();
                 let clusterUploadTimeout = parseInt(this.config.cluster_upload_timeout_sec, 10);
                 if (Number.isNaN(clusterUploadTimeout)) clusterUploadTimeout = 15;
                 this.config.cluster_upload_timeout_sec = Math.max(15, Math.min(3600, clusterUploadTimeout));
@@ -1857,6 +1859,7 @@ createApp({
                     this.config.local_microsoft.suffix_len_min = minLen;
                     this.config.local_microsoft.suffix_len_max = maxLen;
                 }
+                this.normalizeRegistrationTimingConfig();
                 this.config.enable_mail_domain_runtime_control = normalizeBooleanLike(this.config.enable_mail_domain_runtime_control, false);
                 this.config.enable_mail_domain_grouping = normalizeBooleanLike(this.config.enable_mail_domain_grouping, false);
                 if (this.config.mail_domain_pinpoint_burst_mode === undefined) this.config.mail_domain_pinpoint_burst_mode = false;
@@ -1915,6 +1918,62 @@ createApp({
                     this.queuePollStats();
                 } else { this.showToast("保存失败：" + data.message, "error"); }
             } catch (e) { this.showToast("保存失败网络异常", "error"); }
+        },
+        getRegistrationTimingDefaults(profile = 'fast') {
+            if (String(profile || '').toLowerCase() === 'safe') {
+                return {
+                    profile: 'safe',
+                    shared_batch_stagger_scale: 1,
+                    passwordless_send_stagger_scale: 1,
+                    empty_batch_wait_seconds: 1,
+                    retry_403_cooldown_seconds: 15,
+                    single_batch_gap_seconds: 5
+                };
+            }
+            return {
+                profile: 'fast',
+                shared_batch_stagger_scale: 0.45,
+                passwordless_send_stagger_scale: 0.45,
+                empty_batch_wait_seconds: 0.2,
+                retry_403_cooldown_seconds: 6,
+                single_batch_gap_seconds: 1
+            };
+        },
+        ensureRegistrationTimingConfig() {
+            if (!this.config) return;
+            const current = this.config.registration_timing || {};
+            const rawProfile = String(current.profile || '').toLowerCase();
+            const profile = ['fast', 'safe'].includes(rawProfile) ? rawProfile : 'fast';
+            this.config.registration_timing = {
+                ...this.getRegistrationTimingDefaults(profile),
+                ...current,
+                profile
+            };
+            this.normalizeRegistrationTimingConfig();
+        },
+        normalizeRegistrationTimingConfig() {
+            if (!this.config) return;
+            if (!this.config.registration_timing || typeof this.config.registration_timing !== 'object' || Array.isArray(this.config.registration_timing)) {
+                this.config.registration_timing = this.getRegistrationTimingDefaults('fast');
+            }
+            const timing = this.config.registration_timing;
+            const rawProfile = String(timing.profile || '').toLowerCase();
+            timing.profile = ['fast', 'safe'].includes(rawProfile) ? rawProfile : 'fast';
+            const defaults = this.getRegistrationTimingDefaults(timing.profile);
+            const toNumber = (value, fallback, min, max) => {
+                const parsed = parseFloat(value);
+                if (Number.isNaN(parsed)) return fallback;
+                return Math.max(min, Math.min(max, parsed));
+            };
+            timing.shared_batch_stagger_scale = toNumber(timing.shared_batch_stagger_scale, defaults.shared_batch_stagger_scale, 0, 2);
+            timing.passwordless_send_stagger_scale = toNumber(timing.passwordless_send_stagger_scale, defaults.passwordless_send_stagger_scale, 0, 2);
+            timing.empty_batch_wait_seconds = toNumber(timing.empty_batch_wait_seconds, defaults.empty_batch_wait_seconds, 0, 10);
+            timing.retry_403_cooldown_seconds = toNumber(timing.retry_403_cooldown_seconds, defaults.retry_403_cooldown_seconds, 0, 60);
+            timing.single_batch_gap_seconds = toNumber(timing.single_batch_gap_seconds, defaults.single_batch_gap_seconds, 0, 30);
+        },
+        applyRegistrationTimingProfile(profile) {
+            if (!this.config) return;
+            this.config.registration_timing = this.getRegistrationTimingDefaults(profile);
         },
         filterLocalAccounts(status) {
             this.accountStatusFilter = status;
