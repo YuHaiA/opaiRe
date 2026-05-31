@@ -307,6 +307,17 @@ def _background_sync_cloud_data(combined_data):
         if img2_emails:
             db_manager.update_account_push_info(img2_emails, "IMAGE2API", mode="sync")
 
+        missing_sync = db_manager.sync_cloud_missing_accounts({
+            "CPA": cpa_emails,
+            "SUB2API": sub_emails,
+            "IMAGE2API": img2_emails,
+        })
+        if missing_sync.get("marked") or missing_sync.get("cleared"):
+            print(
+                f"[{cfg.ts()}] [系统] 云端缺失状态同步完成: "
+                f"标记 {missing_sync.get('marked', 0)} 个，清理 {missing_sync.get('cleared', 0)} 个"
+            )
+
         active_emails = [x["credential"] for x in combined_data if x["status"] == "active"]
         inactive_emails = [x["credential"] for x in combined_data if x["status"] in ["disabled", "dead"]]
         def chunked_update(emails_list, status_code):

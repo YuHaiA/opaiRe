@@ -198,6 +198,13 @@ _REVIVE_META_KEYS = (
     "revive_failed_source",
 )
 
+_CLOUD_MISSING_META_KEYS = (
+    "cloud_status",
+    "cloud_missing_at",
+    "cloud_missing_platforms",
+    "cloud_missing_reason",
+)
+
 
 def _safe_token_dict(raw_token: Any) -> dict:
     if isinstance(raw_token, dict):
@@ -304,6 +311,96 @@ def clear_account_revive_failed_by_truncated_name(truncated_name: str) -> bool:
     return _clear_revive_failed_by_selector(truncated_name, exact_match=False)
 
 
+def _split_platforms(raw_platforms: Any) -> list[str]:
+    return [p.strip().upper() for p in str(raw_platforms or "").split(",") if p.strip()]
+
+
+def _cloud_key_for_email(email: str, platform: str) -> str:
+    clean_email = str(email or "").strip().lower()
+    if platform == "SUB2API":
+        return clean_email[:64]
+    return clean_email
+
+
+def _normalize_cloud_names(names: list[str], platform: str) -> set[str]:
+    normalized = set()
+    for name in names:
+        value = str(name or "").strip().lower()
+        if not value:
+            continue
+        if platform == "CPA" and value.endswith(".json"):
+            value = value[:-5]
+        if platform == "SUB2API":
+            value = value[:64]
+        normalized.add(value)
+    return normalized
+
+
+def _merge_cloud_missing_platforms(existing: Any, fetched_platforms: set[str], missing_platforms: list[str]) -> list[str]:
+    current = existing if isinstance(existing, list) else []
+    preserved = [p for p in current if str(p).upper() not in fetched_platforms]
+    merged = {str(p).upper() for p in preserved if str(p).strip()}
+    merged.update(missing_platforms)
+    return sorted(merged)
+
+
+def sync_cloud_missing_accounts(platform_accounts: dict) -> dict:
+    """Mark local pushed accounts that were not found in the freshly fetched cloud inventory."""
+    fetched = {
+        str(platform or "").upper(): _normalize_cloud_names(list(names or []), str(platform or "").upper())
+        for platform, names in (platform_accounts or {}).items()
+        if str(platform or "").strip()
+    }
+    fetched_platforms = set(fetched.keys())
+    if not fetched_platforms:
+        return {"marked": 0, "cleared": 0}
+
+    marked = 0
+    cleared = 0
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with get_db_conn(is_write=True) as conn:
+            c = get_cursor(conn)
+            execute_sql(c, "SELECT email, push_platform, token_data FROM accounts WHERE push_platform IS NOT NULL AND push_platform != ''")
+            rows = c.fetchall()
+            for email, push_platform, raw_token in rows:
+                local_platforms = [p for p in _split_platforms(push_platform) if p in fetched_platforms]
+                if not local_platforms:
+                    continue
+
+                missing_platforms = [
+                    platform for platform in local_platforms
+                    if _cloud_key_for_email(email, platform) not in fetched.get(platform, set())
+                ]
+                token_data = _safe_token_dict(raw_token)
+                merged_missing = _merge_cloud_missing_platforms(
+                    token_data.get("cloud_missing_platforms"), fetched_platforms, missing_platforms
+                )
+
+                if merged_missing:
+                    token_data["cloud_status"] = "missing"
+                    token_data["cloud_missing_at"] = now_str
+                    token_data["cloud_missing_platforms"] = merged_missing
+                    token_data["cloud_missing_reason"] = f"云端库存未找到: {', '.join(merged_missing)}"
+                    marked += 1
+                elif token_data.get("cloud_status") == "missing":
+                    for key in _CLOUD_MISSING_META_KEYS:
+                        token_data.pop(key, None)
+                    cleared += 1
+                else:
+                    continue
+
+                execute_sql(
+                    c,
+                    "UPDATE accounts SET token_data = ? WHERE email = ?",
+                    (json.dumps(token_data, ensure_ascii=False), email),
+                )
+        return {"marked": marked, "cleared": cleared}
+    except Exception as e:
+        print(f"[{cfg.ts()}] [ERROR] 同步云端缺失状态失败: {e}")
+        return {"marked": 0, "cleared": 0}
+
+
 def get_tokens_by_emails(emails: list) -> list:
     if not emails: return []
     try:
@@ -380,6 +477,9 @@ def get_accounts_page(page: int = 1, page_size: int = 50, hide_reg: str = "0", s
             elif status_filter == "revive_failed":
                 conditions.append("token_data LIKE ?")
                 params.append('%"revive_status"%failed%')
+            elif status_filter == "cloud_missing":
+                conditions.append("token_data LIKE ?")
+                params.append('%"cloud_status"%missing%')
             where_clause = ""
             if conditions:
                 where_clause = " WHERE " + " AND ".join(conditions)
@@ -414,6 +514,10 @@ def get_accounts_page(page: int = 1, page_size: int = 50, hide_reg: str = "0", s
                     "revive_failed_at": token_data.get("revive_failed_at", ""),
                     "revive_failed_reason": token_data.get("revive_failed_reason", ""),
                     "revive_failed_source": token_data.get("revive_failed_source", ""),
+                    "cloud_status": token_data.get("cloud_status", ""),
+                    "cloud_missing_at": token_data.get("cloud_missing_at", ""),
+                    "cloud_missing_platforms": token_data.get("cloud_missing_platforms", []),
+                    "cloud_missing_reason": token_data.get("cloud_missing_reason", ""),
                 })
             return {"total": total, "data": data}
 
@@ -1027,7 +1131,8 @@ def get_inventory_stats() -> dict:
                                 SUM(CASE WHEN token_data LIKE ? THEN 1 ELSE 0 END) as reg_only_count,
                                 SUM(CASE WHEN token_data LIKE ? THEN 1 ELSE 0 END) as imgsub2api_count,
                                 SUM(CASE WHEN token_data LIKE ? THEN 1 ELSE 0 END) as image2api_count,
-                                SUM(CASE WHEN token_data LIKE ? THEN 1 ELSE 0 END) as revive_failed_count
+                                SUM(CASE WHEN token_data LIKE ? THEN 1 ELSE 0 END) as revive_failed_count,
+                                SUM(CASE WHEN token_data LIKE ? THEN 1 ELSE 0 END) as cloud_missing_count
                             FROM accounts
                         """
             params = (
@@ -1038,7 +1143,8 @@ def get_inventory_stats() -> dict:
                 '%"仅注册成功"%',
                 '%"image2api"%',
                 '%"image2api"%',
-                '%"revive_status"%failed%'
+                '%"revive_status"%failed%',
+                '%"cloud_status"%missing%'
             )
 
             execute_sql(c, sql, params)
@@ -1057,7 +1163,8 @@ def get_inventory_stats() -> dict:
                     "reg_only": r[14],
                     "imgsub2api": r[15],
                     "image2api": r[16],
-                    "revive_failed": r[17] if len(r) > 17 else 0
+                    "revive_failed": r[17] if len(r) > 17 else 0,
+                    "cloud_missing": r[18] if len(r) > 18 else 0
                 },
                 "cloud": {
                     "total": r[11],
@@ -1074,7 +1181,7 @@ def get_inventory_stats() -> dict:
         print(f"[{cfg.ts()}] [ERROR] 获取统计数据失败: {e}")
         return {
             "local": {"total": 0, "active": 0, "disabled": 0, "unpushed": 0, "pushed": 0, "with_token": 0, "credential": 0, "reg_only": 0,
-                      "imgsub2api": 0, "image2api": 0, "revive_failed": 0},
+                      "imgsub2api": 0, "image2api": 0, "revive_failed": 0, "cloud_missing": 0},
             "cloud": {"total": 0, "enabled": 0, "cpa": 0, "cpa_active": 0, "cpa_disabled": 0, "sub2api": 0,
                       "sub2api_active": 0, "sub2api_disabled": 0}
         }

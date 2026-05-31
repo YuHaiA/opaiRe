@@ -1989,6 +1989,7 @@ createApp({
                 'active': '活跃',
                 'disabled': '已禁用',
                 'revive_failed': '复活失败',
+                'cloud_missing': '云端不存在',
                 'with_token': '完整凭证',
                 'reg_only': '半成品号',
                 'imgsub2api': 'ImgSub2API'
@@ -1997,6 +1998,10 @@ createApp({
         },
         toggleReviveFailedFilter() {
             const nextStatus = this.accountStatusFilter === 'revive_failed' ? 'all' : 'revive_failed';
+            this.filterLocalAccounts(nextStatus);
+        },
+        toggleCloudMissingFilter() {
+            const nextStatus = this.accountStatusFilter === 'cloud_missing' ? 'all' : 'cloud_missing';
             this.filterLocalAccounts(nextStatus);
         },
 		async fetchAccounts(isManual = false) {
@@ -2208,6 +2213,7 @@ createApp({
 
             const selectedObjs = this.accounts.filter(acc => this.selectedAccounts.includes(acc.email));
             const reviveFailedCount = selectedObjs.filter(acc => acc.revive_status === 'failed').length;
+            const cloudMissingCount = selectedObjs.filter(acc => acc.cloud_status === 'missing').length;
             const activeCount = selectedObjs.filter(acc => acc.is_active !== 0 && acc.revive_status !== 'failed').length;
             const confirmLines = [
                 `⚠️ 危险操作：`,
@@ -2215,6 +2221,7 @@ createApp({
                 `确定要彻底删除选中的 ${this.selectedAccounts.length} 个账号吗？`,
             ];
             if (reviveFailedCount > 0) confirmLines.push(`其中 ${reviveFailedCount} 个已标记为「复活失败 / 确认死亡」。`);
+            if (cloudMissingCount > 0) confirmLines.push(`其中 ${cloudMissingCount} 个已标记为「云端不存在」。`);
             if (activeCount > 0) confirmLines.push(`注意：其中 ${activeCount} 个不是复活失败状态，请确认不是误选。`);
             confirmLines.push(`删除后数据将无法恢复！`);
 

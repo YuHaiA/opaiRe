@@ -987,6 +987,8 @@
   - 本地帳號列表新增 `revive_status`、`revive_failed_reason`、`revive_failed_at`、`revive_failed_source` 返回值，並支援 `status_filter=revive_failed`。
   - 本地帳號統計新增「復活失敗」卡片；帳號列中會顯示「復活失敗 / 確認死亡」及原因，刪除確認框會提示選中帳號中有多少個復活失敗、多少個仍非復活失敗狀態。
   - 本地帳號工具列新增「篩復活失敗」快捷按鈕，與「過濾僅註冊成功」同層級；點擊後直接套用 `status_filter=revive_failed`，方便使用者全選並刪除失敗帳號。
+  - 雲端庫存拉取完成後，後端會反向比對本地 `push_platform` 與雲端實際返回清單；本地已標記推送但雲端不存在的帳號會寫入 `cloud_status=missing`、`cloud_missing_platforms`、`cloud_missing_reason`。
+  - 本地帳號庫新增「雲端不存在」快捷篩選與統計卡，帳號行內顯示缺失平台；使用者可先拉取雲端庫存，再回到本地帳號庫篩選並批量刪除。
 - 行為影響：
   - `is_active=0` 不再是唯一判斷依據；使用者可以先篩選「復活失敗」再做物理刪除，降低誤刪手動禁用或暫停帳號的風險。
   - `token_data` 中原始憑證欄位會保留，復活狀態元資料不會覆蓋 access token / refresh token。

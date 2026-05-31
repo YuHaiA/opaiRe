@@ -83,6 +83,46 @@ class AccountReviveStatusTests(unittest.TestCase):
         self.assertNotIn("revive_status", token_data)
         self.assertNotIn("revive_failed_reason", token_data)
 
+    def test_sync_cloud_missing_marks_and_clears_local_accounts(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "data.db"
+            _create_accounts_db(db_path)
+
+            with patch.object(db_manager, "DB_PATH", str(db_path)):
+                db_manager.save_account_to_db(
+                    "missing@example.com",
+                    "pw",
+                    json.dumps({"refresh_token": "rt", "access_token": "at"}),
+                )
+                db_manager.save_account_to_db(
+                    "present@example.com",
+                    "pw",
+                    json.dumps({"refresh_token": "rt2", "access_token": "at2"}),
+                )
+                db_manager.update_account_push_info(
+                    ["missing@example.com", "present@example.com"], "CPA", mode="sync"
+                )
+
+                marked = db_manager.sync_cloud_missing_accounts({
+                    "CPA": ["present@example.com"],
+                })
+                missing_page = db_manager.get_accounts_page(status_filter="cloud_missing")
+                stats = db_manager.get_inventory_stats()
+
+                cleared = db_manager.sync_cloud_missing_accounts({
+                    "CPA": ["missing@example.com", "present@example.com"],
+                })
+                cleared_page = db_manager.get_accounts_page(status_filter="cloud_missing")
+
+        self.assertEqual(1, marked["marked"])
+        self.assertEqual(1, missing_page["total"])
+        self.assertEqual("missing@example.com", missing_page["data"][0]["email"])
+        self.assertEqual("missing", missing_page["data"][0]["cloud_status"])
+        self.assertEqual(["CPA"], missing_page["data"][0]["cloud_missing_platforms"])
+        self.assertEqual(1, stats["local"]["cloud_missing"])
+        self.assertEqual(1, cleared["cleared"])
+        self.assertEqual(0, cleared_page["total"])
+
 
 if __name__ == "__main__":
     unittest.main()
