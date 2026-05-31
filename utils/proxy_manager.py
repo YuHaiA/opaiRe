@@ -8,7 +8,7 @@ import yaml
 import os
 import re
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from utils.clash_group_utils import resolve_group_name
 
 CLASH_API_URL = ""
@@ -296,6 +296,65 @@ def _is_preferred_clash_node(clash_conf: dict, current_node: str) -> bool:
     return False
 
 
+def _probe_clash_group_nodes(proxy_url, group_name: str) -> tuple[list[str], str]:
+    current_api_url = get_api_url_for_proxy(proxy_url)
+    headers = {"Authorization": f"Bearer {CLASH_SECRET}"} if CLASH_SECRET else {}
+    resp = std_requests.get(f"{current_api_url}/proxies", headers=headers, timeout=5)
+    if resp.status_code != 200:
+        return [], f"无法连接 Clash API: HTTP {resp.status_code}"
+    proxies_data = resp.json().get("proxies", {})
+    actual_group = resolve_group_name(proxies_data, group_name)
+    runtime_group = proxies_data.get(actual_group) if actual_group else None
+    if not isinstance(runtime_group, dict):
+        return [], f"未找到策略组 [{clean_for_log(group_name)}]"
+    nodes = runtime_group.get("all")
+    if not isinstance(nodes, list) or not nodes:
+        return [], f"策略组 [{clean_for_log(actual_group or group_name)}] 没有可测节点"
+    delay_url = "https://www.gstatic.com/generate_204"
+
+    def probe(node_name: str):
+        encoded = urllib.parse.quote(node_name, safe="")
+        try:
+            result = std_requests.get(
+                f"{current_api_url}/proxies/{encoded}/delay",
+                headers=headers,
+                params={"timeout": 5000, "url": delay_url},
+                timeout=8,
+            )
+            if result.status_code != 200:
+                return node_name, None
+            delay = (result.json() or {}).get("delay")
+            if isinstance(delay, (int, float)) and delay > 0:
+                return node_name, int(delay)
+        except Exception:
+            pass
+        return node_name, None
+
+    results = []
+    worker_count = max(1, min(20, len(nodes)))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = [executor.submit(probe, node) for node in nodes]
+        for future in as_completed(futures):
+            node_name, delay = future.result()
+            if delay is not None:
+                results.append((node_name, delay))
+    healthy_nodes = [node for node, _ in sorted(results, key=lambda item: item[1])]
+    return healthy_nodes, actual_group or group_name
+
+
+def _rebuild_clash_node_pools_after_floor(proxy_url, config_data: dict, clash_conf: dict) -> tuple[dict, str]:
+    group_name = PROXY_GROUP_NAME
+    healthy_nodes, resolved_group = _probe_clash_group_nodes(proxy_url, group_name)
+    clash_conf["evicted_nodes"] = []
+    clash_conf["preferred_nodes"] = {}
+    clash_conf["tested_nodes"] = {str(resolved_group or group_name): healthy_nodes}
+    config_data["clash_proxy_pool"] = clash_conf
+    return config_data, (
+        f"触发底线重建：已清空拉黑/标优/有效节点池，"
+        f"策略组 [{clean_for_log(resolved_group or group_name)}] 重新测活通过 {len(healthy_nodes)} 个节点"
+    )
+
+
 def mark_current_clash_node_preferred(proxy_url=None) -> tuple[bool, str]:
     config_data = _load_runtime_config_for_write()
     current_node = get_current_selected_node(proxy_url)
@@ -385,14 +444,11 @@ def evict_current_proxy_or_node(proxy_url=None):
     if not isinstance(clash_conf, dict):
         clash_conf = {}
 
-    is_preferred_node = _is_preferred_clash_node(clash_conf, current_node)
     remaining_candidates = _resolve_effective_candidate_count(proxy_url, clash_conf, current_node)
-    if not is_preferred_node and remaining_candidates is not None and remaining_candidates <= MIN_CLASH_CANDIDATES_BEFORE_EVICT:
-        return False, (
-            "SKIP_EVICT_GUARD: "
-            f"当前策略组有效节点仅剩 {remaining_candidates} 个，触发保底保护，跳过拉黑 "
-            f"[{clean_for_log(current_node)}]"
-        )
+    should_rebuild_after_evict = (
+        remaining_candidates is not None
+        and remaining_candidates <= MIN_CLASH_CANDIDATES_BEFORE_EVICT
+    )
 
     evicted_nodes = clash_conf.get("evicted_nodes", [])
     if not isinstance(evicted_nodes, list):
@@ -416,8 +472,17 @@ def evict_current_proxy_or_node(proxy_url=None):
         clash_conf["preferred_nodes"] = preferred_map
 
     config_data["clash_proxy_pool"] = clash_conf
+    rebuild_msg = ""
+    if should_rebuild_after_evict:
+        try:
+            config_data, rebuild_msg = _rebuild_clash_node_pools_after_floor(proxy_url, config_data, clash_conf)
+        except Exception as exc:
+            rebuild_msg = f"触发底线重建但重新测活失败: {exc}"
     runtime_cfg.reload_all_configs(new_config_dict=config_data)
-    return True, f"已从活节点池移除并拉黑 Clash 节点 [{clean_for_log(current_node)}]"
+    msg = f"已从活节点池移除并拉黑 Clash 节点 [{clean_for_log(current_node)}]"
+    if rebuild_msg:
+        msg = f"{msg}；{rebuild_msg}"
+    return True, msg
 
 
 def evict_failed_switch_candidate(proxy_url=None, candidate_name: str = "") -> tuple[bool, str]:

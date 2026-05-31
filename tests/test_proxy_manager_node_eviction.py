@@ -37,7 +37,7 @@ class ProxyManagerNodeEvictionTests(unittest.TestCase):
                     "其他组": ["node-a", "node-c"],
                 },
                 "preferred_nodes": {
-                    "节点选择": ["node-a", "node-b"],
+                    "节点选择": ["node-a", "node-b", "node-d", "node-e", "node-f", "node-g", "node-h"],
                     "其他组": ["node-a", "node-c"],
                 },
                 "preferred_only_mode": True,
@@ -77,11 +77,11 @@ class ProxyManagerNodeEvictionTests(unittest.TestCase):
         self.assertEqual(["old-node", "node-a"], result["evicted_nodes"])
         self.assertEqual(["node-b", "node-d", "node-e", "node-f", "node-g", "node-h"], result["tested_nodes"]["节点选择"])
         self.assertEqual(["node-c"], result["tested_nodes"]["其他组"])
-        self.assertEqual(["node-b"], result["preferred_nodes"]["节点选择"])
+        self.assertEqual(["node-b", "node-d", "node-e", "node-f", "node-g", "node-h"], result["preferred_nodes"]["节点选择"])
         self.assertEqual(["node-c"], result["preferred_nodes"]["其他组"])
         self.assertTrue(result["preferred_only_mode"])
 
-    def test_evict_failed_switch_candidate_skips_blacklist_when_effective_pool_is_too_small(self):
+    def test_evict_failed_switch_candidate_rebuilds_pools_when_effective_pool_hits_floor(self):
         fake_config = {
             "clash_proxy_pool": {
                 "blacklist": ["港", "HK"],
@@ -89,10 +89,11 @@ class ProxyManagerNodeEvictionTests(unittest.TestCase):
                 "tested_nodes": {
                     "节点选择": ["node-a", "node-b", "node-c", "node-d", "node-e", "node-f"],
                 },
+                "preferred_nodes": {"节点选择": ["node-a", "node-b"]},
             }
         }
         saved_config = {}
-        fake_proxies = {
+        fake_group_proxies = {
             "proxies": {
                 "节点选择": {
                     "all": ["node-a", "node-b", "node-c", "node-d", "node-e", "node-f"],
@@ -100,12 +101,30 @@ class ProxyManagerNodeEvictionTests(unittest.TestCase):
             }
         }
 
-        class _FakeResponse:
+        class _FakeGroupResponse:
             status_code = 200
 
             @staticmethod
             def json():
-                return fake_proxies
+                return fake_group_proxies
+
+        class _FakeDelayResponse:
+            status_code = 200
+
+            def __init__(self, delay):
+                self.delay = delay
+
+            def json(self):
+                return {"delay": self.delay}
+
+        def fake_get(url, *args, **kwargs):
+            if url.endswith("/proxies"):
+                return _FakeGroupResponse()
+            if "/delay" in url:
+                if "node-b" in url or "node-d" in url:
+                    return _FakeDelayResponse(88 if "node-b" in url else 120)
+                return _FakeDelayResponse(0)
+            raise AssertionError(url)
 
         def fake_reload_all_configs(new_config_dict=None):
             saved_config["value"] = new_config_dict
@@ -114,12 +133,15 @@ class ProxyManagerNodeEvictionTests(unittest.TestCase):
                 patch("utils.config.is_raw_proxy_pool_enabled", return_value=False), \
                 patch("utils.config.reload_all_configs", side_effect=fake_reload_all_configs), \
                 patch("utils.proxy_manager.get_current_selected_node", return_value="node-a"), \
-                patch("utils.proxy_manager.std_requests.get", return_value=_FakeResponse()):
+                patch("utils.proxy_manager.std_requests.get", side_effect=fake_get):
             ok, msg = pm.evict_failed_switch_candidate("http://127.0.0.1:7890", "node-a")
 
-        self.assertFalse(ok)
-        self.assertIn("触发保底保护", msg)
-        self.assertEqual({}, saved_config)
+        self.assertTrue(ok)
+        self.assertIn("触发底线重建", msg)
+        result = saved_config["value"]["clash_proxy_pool"]
+        self.assertEqual([], result["evicted_nodes"])
+        self.assertEqual({}, result["preferred_nodes"])
+        self.assertEqual({"节点选择": ["node-b", "node-d"]}, result["tested_nodes"])
 
     def test_mark_current_clash_node_preferred_updates_preferred_and_healthy_pools(self):
         fake_config = {
