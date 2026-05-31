@@ -995,3 +995,22 @@
 - 驗證：
   - `python -m unittest tests.test_account_revive_status`
   - `python -m py_compile utils\db_manager.py routers\account_routes.py utils\core_engine.py`
+
+## 遠端測活本地存在門檻記錄
+
+- 修改文件：
+  - `utils/core_engine.py`
+  - `utils/db_manager.py`
+  - `tests/test_account_revive_status.py`
+  - `tests/test_core_engine_local_presence_gate.py`
+  - `SYSTEM.md`
+- 本次修改：
+  - CPA 測活發現遠端憑證失效後，會先用完整 email 查本地帳號庫；本地不存在時直接跳過，不再嘗試 Token 復活、不寫本地復活失敗狀態，也不執行遠端死號刪除或禁用。
+  - Sub2API 測活發現遠端帳號失效後，會用遠端 `name` 匹配本地 email 前 64 位；本地不存在時同樣跳過復活、標記與遠端處置。
+  - 新增 `check_account_exists_by_truncated_name()`，專門支援 Sub2API 截斷名稱匹配，避免長 email 被誤判為本地不存在。
+- 行為影響：
+  - 未開啟 Token 復活時，遠端孤兒帳號不會再污染本地「復活失敗」狀態池；本地確實存在的遠端帳號仍按既有開關走復活或死號處置。
+  - 雲端孤兒帳號的清理應優先通過雲端庫自身操作；本地庫只處理能匹配到本地 inventory 的帳號。
+- 驗證：
+  - `python -m unittest tests.test_account_revive_status tests.test_core_engine_local_presence_gate`
+  - `python -m py_compile utils\db_manager.py utils\core_engine.py`

@@ -566,6 +566,7 @@ def process_account_worker(i: int, total: int, item: dict, args: Any) -> bool:
     email = name.replace(".json", "")
     is_disabled = item.get("disabled", False)
     is_ok, msg  = test_cliproxy_auth_file(item, cfg.CPA_API_URL, cfg.CPA_API_TOKEN)
+    local_exists = db_manager.check_account_exists(email)
 
     if is_ok:
         try:
@@ -591,6 +592,13 @@ def process_account_worker(i: int, total: int, item: dict, args: Any) -> bool:
         return True
 
     print(f"[{ts()}] [WARNING] 测活: 凭证 {mask_email(name)} 失效，原因: {msg}")
+
+    if not local_exists:
+        print(
+            f"[{ts()}] [INFO] 测活: 凭证 {mask_email(name)} 本地账号库不存在，"
+            "跳过复活、死号标记和远端处置。"
+        )
+        return False
 
     if "周限额" in msg or "usage_limit_reached" in msg:
         if cfg.REMOVE_ON_LIMIT_REACHED:
@@ -1148,6 +1156,7 @@ def process_sub2api_worker(i: int, total: int, item: dict, client: Any, args: An
     name = item.get("name", "unknown")
     account_id = item.get("id")
     result, reason = client.test_account(account_id)
+    local_exists = db_manager.check_account_exists_by_truncated_name(name)
 
     if result == "ok":
         print(f"[{ts()}] [SUCCESS] Sub2API测活: {mask_email(name)} 状态健康")
@@ -1173,6 +1182,13 @@ def process_sub2api_worker(i: int, total: int, item: dict, client: Any, args: An
         return False
 
     print(f"[{ts()}] [ERROR] Sub2API测活: {mask_email(name)} 测活失败 ({reason})")
+    if not local_exists:
+        print(
+            f"[{ts()}] [INFO] Sub2API测活: {mask_email(name)} 本地账号库不存在，"
+            "跳过复活、死号标记和远端处置。"
+        )
+        return False
+
     refresh_success = False
     revive_fail_reason = f"Sub2API 测活失败: {reason}"
     if not cfg.SUB2API_ENABLE_TOKEN_REVIVE:

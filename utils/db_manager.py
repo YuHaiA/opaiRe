@@ -1016,6 +1016,20 @@ def check_account_exists(email: str) -> bool:
         return False
 
 
+def check_account_exists_by_truncated_name(truncated_name: str) -> bool:
+    """检查 Sub2API 截断名称是否能匹配本地账号库邮箱前缀"""
+    if not truncated_name or truncated_name == "unknown":
+        return False
+    try:
+        with get_db_conn() as conn:
+            c = get_cursor(conn)
+            execute_sql(c, "SELECT 1 FROM accounts WHERE SUBSTR(LOWER(TRIM(email)), 1, 64) = LOWER(TRIM(?))", (truncated_name,))
+            return c.fetchone() is not None
+    except Exception as e:
+        print(f"[{cfg.ts()}] [DB_ERROR] 截断名称查重失败: {e}")
+        return False
+
+
 def clear_all_accounts() -> bool:
     """一键清空账号库"""
     try:

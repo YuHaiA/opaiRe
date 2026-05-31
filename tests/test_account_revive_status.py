@@ -123,6 +123,26 @@ class AccountReviveStatusTests(unittest.TestCase):
         self.assertEqual(1, cleared["cleared"])
         self.assertEqual(0, cleared_page["total"])
 
+    def test_truncated_name_exists_for_sub2api_long_email(self):
+        long_local = "very-long-local-part-for-sub2api-truncated-name-check-1234567890@example.com"
+        truncated = long_local[:64]
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "data.db"
+            _create_accounts_db(db_path)
+
+            with patch.object(db_manager, "DB_PATH", str(db_path)):
+                db_manager.save_account_to_db(
+                    long_local,
+                    "pw",
+                    json.dumps({"refresh_token": "rt", "access_token": "at"}),
+                )
+
+                exists = db_manager.check_account_exists_by_truncated_name(truncated)
+                missing = db_manager.check_account_exists_by_truncated_name("not-present")
+
+        self.assertTrue(exists)
+        self.assertFalse(missing)
+
 
 if __name__ == "__main__":
     unittest.main()
