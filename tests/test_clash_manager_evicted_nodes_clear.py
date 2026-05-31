@@ -71,7 +71,8 @@ class ClashManagerEvictedNodesClearTests(unittest.TestCase):
                 "evicted_nodes": ["node-a"],
                 "tested_nodes": {"节点选择": ["node-b"]},
                 "preferred_nodes": {
-                    "节点选择": ["node-c"],
+                    "🚀 节点选择": ["node-c"],
+                    "🇺🇸 节点-选择": ["node-e"],
                     "备用策略": ["node-d"],
                 },
             }
@@ -83,7 +84,11 @@ class ClashManagerEvictedNodesClearTests(unittest.TestCase):
 
         with patch("utils.integrations.clash_manager._read_runtime_config", return_value=fake_config), \
                 patch("utils.config.reload_all_configs", side_effect=fake_reload_all_configs), \
-                patch("utils.proxy_manager.PREFERRED_NODES_MAP", {"节点选择": ["node-c"], "备用策略": ["node-d"]}):
+                patch("utils.proxy_manager.PREFERRED_NODES_MAP", {
+                    "🚀 节点选择": ["node-c"],
+                    "🇺🇸 节点-选择": ["node-e"],
+                    "备用策略": ["node-d"],
+                }):
             ok, msg = clash_manager.clear_preferred_nodes("节点选择")
             from utils import proxy_manager
             runtime_preferred = dict(proxy_manager.PREFERRED_NODES_MAP)

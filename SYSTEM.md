@@ -969,6 +969,7 @@
   - 若已開啟「僅用標優」並清空當前策略組標優池，前端會提示需要補充標優節點或切回全部候選。
   - 清理操作會通過 `cfg.reload_all_configs(new_config_dict=...)` 持久化到 `clash_proxy_pool.preferred_nodes`。
   - 清理後會同步更新 `utils.proxy_manager.PREFERRED_NODES_MAP` 運行態，避免當前進程仍使用舊標優池；前端成功後會重新拉取 `/api/clash/status`，確保頁面立即反映後端真實狀態。
+  - 清理策略組支援模糊匹配，會用 `strip_group_decorations()` 去除 emoji、空白、橫線與大小寫差異後比對；例如前端傳 `节点选择` 時，也會清掉配置中的 `🚀 节点选择`。
 
 ## 本地帳號復活失敗狀態記錄
 

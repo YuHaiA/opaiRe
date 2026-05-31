@@ -15,7 +15,7 @@ import requests
 import yaml
 
 import utils.config as cfg
-from utils.clash_group_utils import resolve_group_name
+from utils.clash_group_utils import resolve_group_name, strip_group_decorations
 from utils.integrations.subscription_fetcher import fetch_subscription_text
 BASE_PATH = os.path.join(os.getcwd(), "data", "mihomo-pool")
 os.makedirs(BASE_PATH, exist_ok=True)
@@ -319,7 +319,20 @@ def clear_preferred_nodes(group_name: str) -> tuple[bool, str]:
             clash_conf = {}
         preferred_map = clash_conf.get("preferred_nodes", {})
         if isinstance(preferred_map, dict):
-            preferred_map.pop(str(group_name), None)
+            target = str(group_name or "")
+            normalized_target = strip_group_decorations(target)
+            keys_to_remove = []
+            for key in list(preferred_map.keys()):
+                normalized_key = strip_group_decorations(key)
+                if (
+                    key == target
+                    or (normalized_target and normalized_target == normalized_key)
+                    or (normalized_target and normalized_target in normalized_key)
+                    or (normalized_key and normalized_key in normalized_target)
+                ):
+                    keys_to_remove.append(key)
+            for key in keys_to_remove:
+                preferred_map.pop(key, None)
         clash_conf["preferred_nodes"] = preferred_map if isinstance(preferred_map, dict) else {}
         config_data["clash_proxy_pool"] = clash_conf
         cfg.reload_all_configs(new_config_dict=config_data)
