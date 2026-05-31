@@ -30,7 +30,7 @@ _CURRENT_NODE_BY_PROXY = {}
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(CURRENT_DIR)
 DEFAULT_NODE_BLACKLIST = ["港", "HK", "台", "TW", "中国", "CN"]
-MIN_CLASH_CANDIDATES_BEFORE_EVICT = 5
+MIN_CLASH_CANDIDATES_BEFORE_EVICT = 3
 
 def format_docker_url(url: str) -> str:
     """智能检测：如果在 Docker 中运行，自动把 127.0.0.1 转为宿主机魔法地址"""

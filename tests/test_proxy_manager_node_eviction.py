@@ -87,7 +87,7 @@ class ProxyManagerNodeEvictionTests(unittest.TestCase):
                 "blacklist": ["港", "HK"],
                 "evicted_nodes": ["old-node"],
                 "tested_nodes": {
-                    "节点选择": ["node-a", "node-b", "node-c", "node-d", "node-e", "node-f"],
+                    "节点选择": ["node-a", "node-b", "node-c", "node-d"],
                 },
                 "preferred_nodes": {"节点选择": ["node-a", "node-b"]},
             }
@@ -96,7 +96,7 @@ class ProxyManagerNodeEvictionTests(unittest.TestCase):
         fake_group_proxies = {
             "proxies": {
                 "节点选择": {
-                    "all": ["node-a", "node-b", "node-c", "node-d", "node-e", "node-f"],
+                    "all": ["node-a", "node-b", "node-c", "node-d"],
                 }
             }
         }
