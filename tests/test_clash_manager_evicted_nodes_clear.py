@@ -82,8 +82,11 @@ class ClashManagerEvictedNodesClearTests(unittest.TestCase):
             saved_config["value"] = new_config_dict
 
         with patch("utils.integrations.clash_manager._read_runtime_config", return_value=fake_config), \
-                patch("utils.config.reload_all_configs", side_effect=fake_reload_all_configs):
+                patch("utils.config.reload_all_configs", side_effect=fake_reload_all_configs), \
+                patch("utils.proxy_manager.PREFERRED_NODES_MAP", {"节点选择": ["node-c"], "备用策略": ["node-d"]}):
             ok, msg = clash_manager.clear_preferred_nodes("节点选择")
+            from utils import proxy_manager
+            runtime_preferred = dict(proxy_manager.PREFERRED_NODES_MAP)
 
         self.assertTrue(ok)
         self.assertIn("已清空策略组 [节点选择] 的标优节点池", msg)
@@ -91,6 +94,7 @@ class ClashManagerEvictedNodesClearTests(unittest.TestCase):
         self.assertEqual({"备用策略": ["node-d"]}, result["preferred_nodes"])
         self.assertEqual(["node-a"], result["evicted_nodes"])
         self.assertEqual({"节点选择": ["node-b"]}, result["tested_nodes"])
+        self.assertEqual({"备用策略": ["node-d"]}, runtime_preferred)
 
     def test_switch_proxy_group_rejects_non_preferred_node_when_preferred_only_enabled(self):
         fake_config = {

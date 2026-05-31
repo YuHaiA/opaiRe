@@ -4481,6 +4481,10 @@ async exportSub2Api() {
                 if (data.status === 'success') {
                     const group = this.clashPool.groups.find(item => item.name === groupName);
                     if (group) group.preferred_nodes = [];
+                    if (this.clashPool.delayResults[groupName]) {
+                        this.clashPool.delayResults[groupName].preferred_nodes = [];
+                    }
+                    await this.fetchClashPool();
                     if (this.clashPool.preferredOnlyMode) {
                         this.showToast('当前仍开启仅用标优模式，请补充标优节点或切回全部候选。', 'warning');
                     }

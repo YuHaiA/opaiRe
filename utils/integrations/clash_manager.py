@@ -323,6 +323,11 @@ def clear_preferred_nodes(group_name: str) -> tuple[bool, str]:
         clash_conf["preferred_nodes"] = preferred_map if isinstance(preferred_map, dict) else {}
         config_data["clash_proxy_pool"] = clash_conf
         cfg.reload_all_configs(new_config_dict=config_data)
+        try:
+            from utils import proxy_manager
+            proxy_manager.PREFERRED_NODES_MAP = clash_conf["preferred_nodes"]
+        except Exception:
+            pass
         return True, f"已清空策略组 [{group_name}] 的标优节点池。"
     except Exception as e:
         return False, str(e)
