@@ -986,6 +986,7 @@
   - CPA / Sub2API 測活復活流程在復活關閉、缺少 refresh token、刷新失敗、覆蓋遠端失敗、二次測活失敗或本地查無此號時會同步標記本地帳號；測活成功或復活成功會清理舊標記。
   - 本地帳號列表新增 `revive_status`、`revive_failed_reason`、`revive_failed_at`、`revive_failed_source` 返回值，並支援 `status_filter=revive_failed`。
   - 本地帳號統計新增「復活失敗」卡片；帳號列中會顯示「復活失敗 / 確認死亡」及原因，刪除確認框會提示選中帳號中有多少個復活失敗、多少個仍非復活失敗狀態。
+  - 本地帳號工具列新增「篩復活失敗」快捷按鈕，與「過濾僅註冊成功」同層級；點擊後直接套用 `status_filter=revive_failed`，方便使用者全選並刪除失敗帳號。
 - 行為影響：
   - `is_active=0` 不再是唯一判斷依據；使用者可以先篩選「復活失敗」再做物理刪除，降低誤刪手動禁用或暫停帳號的風險。
   - `token_data` 中原始憑證欄位會保留，復活狀態元資料不會覆蓋 access token / refresh token。

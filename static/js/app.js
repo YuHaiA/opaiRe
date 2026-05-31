@@ -1995,6 +1995,10 @@ createApp({
             };
             this.showToast(`已筛选: ${statusMap[status]}的本地账号`, 'info');
         },
+        toggleReviveFailedFilter() {
+            const nextStatus = this.accountStatusFilter === 'revive_failed' ? 'all' : 'revive_failed';
+            this.filterLocalAccounts(nextStatus);
+        },
 		async fetchAccounts(isManual = false) {
             if (isManual) {
                 this.currentPage = 1;

@@ -699,6 +699,15 @@
                                             </span>
                                             {{ hideRegisterOnlyAccounts ? '已过滤仅注册成功' : '过滤仅注册成功' }}
                                         </button>
+                                        <button @click="toggleReviveFailedFilter" class="text-sm px-3 py-1.5 rounded-lg active:scale-95 transition shadow-sm font-bold flex items-center gap-1 border" :class="accountStatusFilter === 'revive_failed' ? 'bg-orange-50 text-orange-700 border-orange-200 ring-2 ring-orange-100' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'">
+                                            <span v-if="accountStatusFilter === 'revive_failed'">
+                                                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                                            </span>
+                                            <span v-else>
+                                                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path></svg>
+                                            </span>
+                                            {{ accountStatusFilter === 'revive_failed' ? '已筛复活失败' : '筛复活失败' }}
+                                        </button>
 
                                         <div class="flex items-center gap-2 ml-auto xl:ml-2 border-l border-slate-200 pl-3">
                                             <button @click="exportAllAccounts" class="px-3 py-1.5 bg-slate-200/70 text-slate-600 text-sm font-bold rounded-lg hover:bg-slate-300 transition flex items-center gap-1"><svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg> 导出全部</button>
