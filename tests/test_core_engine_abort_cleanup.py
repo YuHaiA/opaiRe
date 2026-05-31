@@ -1,6 +1,7 @@
 import sys
 import types
 import unittest
+import asyncio
 from unittest.mock import patch
 
 
@@ -91,6 +92,17 @@ class CoreEngineAbortCleanupTests(unittest.TestCase):
 
         self.assertIsNone(result)
         self.assertEqual("switch_node", status)
+
+    def test_empty_batch_wait_uses_configured_fast_timeout(self):
+        async def run_check():
+            event = asyncio.Event()
+            with patch.object(core_engine.cfg, "REG_EMPTY_BATCH_WAIT_SECONDS", 0.01):
+                start = asyncio.get_running_loop().time()
+                await core_engine._wait_after_empty_shared_batch(event, 0, 0, False, "test")
+                return asyncio.get_running_loop().time() - start
+
+        elapsed = asyncio.run(run_check())
+        self.assertLess(elapsed, 0.2)
 
 
 if __name__ == "__main__":

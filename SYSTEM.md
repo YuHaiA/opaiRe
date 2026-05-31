@@ -16,6 +16,26 @@
 ## 最新修改
 
 - 修改文件：
+  - `utils/config.py`
+  - `utils/auth_pipeline/register.py`
+  - `utils/core_engine.py`
+  - `config.example.yaml`
+  - `tests/test_register_shared_batch_net_check.py`
+  - `tests/test_core_engine_abort_cleanup.py`
+  - `SYSTEM.md`
+- 变更内容：
+  - 新增 `registration_timing` 注册节奏配置，默认 `profile: fast`，可调共享批次启动错峰、无密码发信错峰、0 成功批次缓冲、403 冷却、单线程补货间隔。
+  - 将 v16 注册流程里的多个硬编码等待改为配置驱动：默认 0 成功缓冲从 1 秒降到 0.2 秒，403 冷却从 15 秒降到 6 秒，单线程批次间隔从 5 秒降到 1 秒。
+  - 保留批次熔断、节点切换、403 识别、同批取消与密码流并发闸门，只缩短保守等待，不回退到旧版无保护流程。
+  - `config.example.yaml` 增加示例配置；如需恢复 v16 初版保守节奏，可设置 `registration_timing.profile: "safe"`。
+  - 补充测试覆盖错峰缩放与快速 0 成功缓冲，避免后续误改回固定慢等待。
+- 修改原因：
+  - 用户反馈 v16 新版本任务流程体感比 16.0.0 以前慢，需要在不牺牲核心保护的前提下提升补货/注册推进速度。
+- 影响范围：
+  - 影响 CPA / Sub2API 补货循环、共享 Clash 批次注册错峰与无密码发信节奏。
+  - 不改变库存判断、账号保存、OAuth 提权、邮箱域名选择、节点剔除或云端 API 协议。
+
+- 修改文件：
   - `utils/proxy_manager.py`
   - `utils/integrations/clash_manager.py`
   - `utils/core_engine.py`

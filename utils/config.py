@@ -182,6 +182,12 @@ APP_VERSION = "v16.0.1"
 _c: dict = {}
 WEB_PASSWORD: str = "admin"
 RETAIN_REG_ONLY: bool = False
+REG_TIMING_PROFILE: str = "fast"
+REG_SHARED_BATCH_STAGGER_SCALE: float = 0.45
+REG_PASSWORDLESS_SEND_STAGGER_SCALE: float = 0.45
+REG_EMPTY_BATCH_WAIT_SECONDS: float = 0.2
+REG_RETRY_403_COOLDOWN_SECONDS: float = 6.0
+REG_SINGLE_BATCH_GAP_SECONDS: float = 1.0
 ENABLE_SUB_DOMAINS: bool = False
 SUB_DOMAIN_COUNT: int = 10
 EMAIL_API_MODE: str = ""
@@ -481,6 +487,9 @@ def reload_all_configs(new_config_dict=None):
     global LOCAL_MS_ENABLE_FISSION, LOCAL_MS_MASTER_EMAIL, LOCAL_MS_PASSWORD, LOCAL_MS_CLIENT_ID, LOCAL_MS_REFRESH_TOKEN, LOCAL_MS_POOL_FISSION
     global LOCAL_MS_SUFFIX_MODE, LOCAL_MS_SUFFIX_LEN_MIN, LOCAL_MS_SUFFIX_LEN_MAX
     global DB_TYPE, MYSQL_CFG
+    global REG_TIMING_PROFILE, REG_SHARED_BATCH_STAGGER_SCALE
+    global REG_PASSWORDLESS_SEND_STAGGER_SCALE, REG_EMPTY_BATCH_WAIT_SECONDS
+    global REG_RETRY_403_COOLDOWN_SECONDS, REG_SINGLE_BATCH_GAP_SECONDS
     global MAX_LOG_LINES
     global CPA_RETAIN_REG_ONLY, SUB2API_RETAIN_REG_ONLY, RETAIN_REG_ONLY, CPA_AUTO_RE_OAUTH, SUB2API_AUTO_RE_OAUTH
     global GMAIL_OAUTH_MASTER_EMAIL, GMAIL_OAUTH_FISSION_ENABLE, GMAIL_OAUTH_FISSION_MODE
@@ -726,6 +735,25 @@ def reload_all_configs(new_config_dict=None):
     USE_ORIGINAL_PASSWORD_FLOW = bool(_ocpa.get("use_original_password_flow", False))
 
     DEFAULT_PROXY = format_docker_url(_c.get("default_proxy", ""))
+    _timing = _c.get("registration_timing", {}) or {}
+    REG_TIMING_PROFILE = str(_timing.get("profile", "fast") or "fast").strip().lower()
+    if REG_TIMING_PROFILE == "safe":
+        _default_stagger_scale = 1.0
+        _default_send_scale = 1.0
+        _default_empty_wait = 1.0
+        _default_403_cooldown = 15.0
+        _default_single_gap = 5.0
+    else:
+        _default_stagger_scale = 0.45
+        _default_send_scale = 0.45
+        _default_empty_wait = 0.2
+        _default_403_cooldown = 6.0
+        _default_single_gap = 1.0
+    REG_SHARED_BATCH_STAGGER_SCALE = max(0.0, float(_timing.get("shared_batch_stagger_scale", _default_stagger_scale)))
+    REG_PASSWORDLESS_SEND_STAGGER_SCALE = max(0.0, float(_timing.get("passwordless_send_stagger_scale", _default_send_scale)))
+    REG_EMPTY_BATCH_WAIT_SECONDS = max(0.0, float(_timing.get("empty_batch_wait_seconds", _default_empty_wait)))
+    REG_RETRY_403_COOLDOWN_SECONDS = max(0.0, float(_timing.get("retry_403_cooldown_seconds", _default_403_cooldown)))
+    REG_SINGLE_BATCH_GAP_SECONDS = max(0.0, float(_timing.get("single_batch_gap_seconds", _default_single_gap)))
 
     ENABLE_MULTI_THREAD_REG = _c.get("enable_multi_thread_reg", False)
     REG_THREADS = _c.get("reg_threads", 3)

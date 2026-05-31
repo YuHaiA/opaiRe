@@ -33,9 +33,10 @@ def _get_shared_batch_start_delay(run_ctx: dict, worker_index: Optional[int]) ->
         return 0.0
     if worker_index is None or worker_index <= 0:
         return 0.0
+    scale = max(0.0, float(getattr(cfg, "REG_SHARED_BATCH_STAGGER_SCALE", 0.45)))
     if str(getattr(cfg, "EMAIL_API_MODE", "") or "").strip().lower() == "openai_cpa":
-        return min(1.8, worker_index * 0.045 + (worker_index % 4) * 0.015)
-    return min(1.0, worker_index * 0.035 + (worker_index % 3) * 0.01)
+        return min(1.8, worker_index * 0.045 + (worker_index % 4) * 0.015) * scale
+    return min(1.0, worker_index * 0.035 + (worker_index % 3) * 0.01) * scale
 
 
 def _get_passwordless_send_delay(run_ctx: dict, worker_index: Optional[int]) -> float:
@@ -45,7 +46,8 @@ def _get_passwordless_send_delay(run_ctx: dict, worker_index: Optional[int]) -> 
         return 0.0
     if str(getattr(cfg, "EMAIL_API_MODE", "") or "").strip().lower() != "openai_cpa":
         return 0.0
-    return min(1.0, worker_index * 0.03 + (worker_index % 5) * 0.015)
+    scale = max(0.0, float(getattr(cfg, "REG_PASSWORDLESS_SEND_STAGGER_SCALE", 0.45)))
+    return min(1.0, worker_index * 0.03 + (worker_index % 5) * 0.015) * scale
 
 
 def _should_gate_passwordless_flow(run_ctx: dict, worker_index: Optional[int]) -> bool:

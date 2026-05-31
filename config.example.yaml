@@ -149,6 +149,15 @@ enable_multi_thread_reg: false
 # 注册时的最大并发线程数 (建议根据你的代理质量调整，不要设置过高)
 reg_threads: 10
 
+# 注册节奏控制：fast 更快，safe 保持 v16 初版的保守等待
+registration_timing:
+  profile: "fast"
+  shared_batch_stagger_scale: 0.45
+  passwordless_send_stagger_scale: 0.45
+  empty_batch_wait_seconds: 0.2
+  retry_403_cooldown_seconds: 6
+  single_batch_gap_seconds: 1
+
 
 
 # Clash 节点智能轮换（本地使用clash软件）

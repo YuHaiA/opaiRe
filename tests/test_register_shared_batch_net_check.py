@@ -78,17 +78,31 @@ class RegisterSharedBatchNetCheckTests(unittest.TestCase):
     def test_shared_batch_start_delay_only_applies_to_later_workers(self):
         self.assertEqual(0.0, register_module._get_shared_batch_start_delay({}, 3))
         self.assertEqual(0.0, register_module._get_shared_batch_start_delay({"skip_proxy_net_check": True}, 0))
-        with patch.object(register_module.cfg, "EMAIL_API_MODE", "openai_cpa"):
+        with patch.object(register_module.cfg, "EMAIL_API_MODE", "openai_cpa"), \
+                patch.object(register_module.cfg, "REG_SHARED_BATCH_STAGGER_SCALE", 1.0):
             self.assertGreater(
                 register_module._get_shared_batch_start_delay({"skip_proxy_net_check": True}, 5),
                 0.1,
             )
+        with patch.object(register_module.cfg, "EMAIL_API_MODE", "openai_cpa"), \
+                patch.object(register_module.cfg, "REG_SHARED_BATCH_STAGGER_SCALE", 0.0):
+            self.assertEqual(
+                0.0,
+                register_module._get_shared_batch_start_delay({"skip_proxy_net_check": True}, 5),
+            )
 
     def test_passwordless_send_delay_only_applies_to_openai_cpa_shared_batch(self):
-        with patch.object(register_module.cfg, "EMAIL_API_MODE", "openai_cpa"):
+        with patch.object(register_module.cfg, "EMAIL_API_MODE", "openai_cpa"), \
+                patch.object(register_module.cfg, "REG_PASSWORDLESS_SEND_STAGGER_SCALE", 1.0):
             self.assertGreater(
                 register_module._get_passwordless_send_delay({"skip_proxy_net_check": True}, 6),
                 0.1,
+            )
+        with patch.object(register_module.cfg, "EMAIL_API_MODE", "openai_cpa"), \
+                patch.object(register_module.cfg, "REG_PASSWORDLESS_SEND_STAGGER_SCALE", 0.0):
+            self.assertEqual(
+                0.0,
+                register_module._get_passwordless_send_delay({"skip_proxy_net_check": True}, 6),
             )
         with patch.object(register_module.cfg, "EMAIL_API_MODE", "generator_email"):
             self.assertEqual(

@@ -200,9 +200,22 @@ def _shared_global_switch_force_requested(previous_batch_force_switch: bool) -> 
 async def _wait_after_empty_shared_batch(async_stop_event: asyncio.Event, batch_success_count: int, retry_403_count: int, batch_force_switch: bool, label: str) -> None:
     if batch_force_switch or batch_success_count > 0 or retry_403_count > 0:
         return
-    print(f"[{ts()}] [INFO] [{label}] 当前批次 0 成功，执行 1 秒缓冲，避免同批发码过密后立即切下一节点...")
+    wait_seconds = max(0.0, float(getattr(cfg, "REG_EMPTY_BATCH_WAIT_SECONDS", 0.2)))
+    if wait_seconds <= 0:
+        return
+    print(f"[{ts()}] [INFO] [{label}] 当前批次 0 成功，执行 {wait_seconds:g} 秒缓冲，避免同批发码过密后立即切下一节点...")
     try:
-        await asyncio.wait_for(async_stop_event.wait(), timeout=1)
+        await asyncio.wait_for(async_stop_event.wait(), timeout=wait_seconds)
+    except asyncio.TimeoutError:
+        pass
+
+
+async def _wait_registration_cooldown(async_stop_event: asyncio.Event, seconds: float) -> None:
+    wait_seconds = max(0.0, float(seconds or 0.0))
+    if wait_seconds <= 0:
+        return
+    try:
+        await asyncio.wait_for(async_stop_event.wait(), timeout=wait_seconds)
     except asyncio.TimeoutError:
         pass
 
@@ -1651,8 +1664,9 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
                                 ex.shutdown(wait=not batch_force_switch, cancel_futures=batch_force_switch)
                         success_in_this_cycle += batch_success_count
                         if retry_403_count and not batch_force_switch:
-                            print(f"[{ts()}] [WARNING] 遇到 {retry_403_count} 次 403 频率限制，给服务器 15 秒冷却时间...")
-                            await asyncio.sleep(15)
+                            cooldown = getattr(cfg, "REG_RETRY_403_COOLDOWN_SECONDS", 6.0)
+                            print(f"[{ts()}] [WARNING] 遇到 {retry_403_count} 次 403 频率限制，给服务器 {cooldown:g} 秒冷却时间...")
+                            await _wait_registration_cooldown(async_stop_event, cooldown)
                         await _wait_after_empty_shared_batch(
                             async_stop_event,
                             batch_success_count,
@@ -1685,11 +1699,17 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
                         if status == "success":
                             success_in_this_cycle += 1
                         elif status == "retry_403":
-                            await asyncio.sleep(10)
+                            await _wait_registration_cooldown(
+                                async_stop_event,
+                                getattr(cfg, "REG_RETRY_403_COOLDOWN_SECONDS", 6.0),
+                            )
                         elif status == "switch_node":
                             batch_force_switch = True
                         if not batch_force_switch:
-                            await asyncio.sleep(5)
+                            await _wait_registration_cooldown(
+                                async_stop_event,
+                                getattr(cfg, "REG_SINGLE_BATCH_GAP_SECONDS", 1.0),
+                            )
                     if cfg.EMAIL_API_MODE in ["local_microsoft", "gmail_fission"]:
                         global_postman_fleet.clear_fleet()
                     task_log_guard.clear_batch(str(batch_id or ""))
@@ -1938,9 +1958,9 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                                 ex.shutdown(wait=not batch_force_switch, cancel_futures=batch_force_switch)
                         success_in_this_cycle += batch_success_count
                         if retry_403_count and not batch_force_switch:
-                            print(f"[{ts()}] [WARNING] 遇到 {retry_403_count} 次 403 频率限制，给服务器 15 秒冷却时间...")
-                            try: await asyncio.wait_for(async_stop_event.wait(), timeout=15)
-                            except asyncio.TimeoutError: pass
+                            cooldown = getattr(cfg, "REG_RETRY_403_COOLDOWN_SECONDS", 6.0)
+                            print(f"[{ts()}] [WARNING] 遇到 {retry_403_count} 次 403 频率限制，给服务器 {cooldown:g} 秒冷却时间...")
+                            await _wait_registration_cooldown(async_stop_event, cooldown)
                         await _wait_after_empty_shared_batch(
                             async_stop_event,
                             batch_success_count,
@@ -1975,14 +1995,18 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
                         if status == "success":
                             success_in_this_cycle += 1
                         elif status == "retry_403":
-                            try: await asyncio.wait_for(async_stop_event.wait(), timeout=10)
-                            except asyncio.TimeoutError: pass
+                            await _wait_registration_cooldown(
+                                async_stop_event,
+                                getattr(cfg, "REG_RETRY_403_COOLDOWN_SECONDS", 6.0),
+                            )
                         elif status == "switch_node":
                             batch_force_switch = True
 
                         if not batch_force_switch:
-                            try: await asyncio.wait_for(async_stop_event.wait(), timeout=5)
-                            except asyncio.TimeoutError: pass
+                            await _wait_registration_cooldown(
+                                async_stop_event,
+                                getattr(cfg, "REG_SINGLE_BATCH_GAP_SECONDS", 1.0),
+                            )
                     if cfg.EMAIL_API_MODE in ["local_microsoft", "gmail_fission"]:
                         global_postman_fleet.clear_fleet()
                     task_log_guard.clear_batch(str(batch_id or ""))
