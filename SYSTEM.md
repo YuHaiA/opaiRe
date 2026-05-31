@@ -871,3 +871,31 @@
 - 待驗證事項：
   - 需要在有實際半成品帳號、郵箱與代理環境時驗證完整 OAuth 提權鏈路。
   - 需要在連通 Sub2API 的環境中驗證批量 usage 按鈕與自動重新 OAuth 搶救效果。
+
+## 上游 v16.0.1 吸收記錄
+
+- 修改文件：
+  - `index.html`
+  - `routers/system_routes.py`
+  - `utils/config.py`
+  - `utils/core_engine.py`
+  - `utils/db_manager.py`
+  - `wfxl_openai_regst.py`
+  - `SYSTEM.md`
+- 上游來源：
+  - 已從 `upstream/main` 吸收至上游標籤 `v16.0.1`。
+  - 本地 `APP_VERSION` 同步更新為 `v16.0.1`。
+- 本次吸收內容：
+  - 集群帳號提取流程改為子控向主控直傳 `accounts_data`，主控收到後落到 `data/cluster_sync/<node>/<task>.json`，再交由既有異步導入 worker 處理。
+  - CPA / Sub2API 自動補貨與 OAuth 提權成功推送後，會同步更新本地帳號的雲端推送標記，避免本地庫仍顯示未推送。
+  - MySQL 庫存查詢中的 `LIKE` 條件改為參數化寫法，修正部分資料庫讀取庫存的匹配問題。
+  - 前端將「放棄強行變道走無密碼 OTP」標註為目前廢棄，避免誤解該開關仍是主要流程。
+- 本地合併決策：
+  - `wfxl_openai_regst.py` 的唯一衝突已按上游新接口解析：保留本地別名與系統服務穩定性結構，請求體改為 `accounts_data` 直傳，與新的 `/api/cluster/sync_tasks` schema 對齊。
+  - 未覆蓋幾個歷史同名 tag 的本地指向；最新 `v16.0.1` tag 已抓取並用於版本同步。
+- 影響範圍：
+  - 集群同步請求體變大，不再依賴子控先生成並傳遞共享文件路徑；主控負責接收與轉存。
+  - 雲端補貨狀態更貼近實際推送結果。
+- 待驗證事項：
+  - 需要在主控/子控實際集群環境中驗證大批量帳號直傳時的超時與記憶體表現。
+  - 若需要重新啟用文件路徑校驗模式，需同步恢復前後端 schema，不能只改單側。

@@ -479,38 +479,17 @@ def _worker_push_thread():
                                         if len(local_accounts) > max_records:
                                             raise RuntimeError(f"同步记录数量超限，当前 {len(local_accounts)}，上限 {max_records}")
                                         task_id = f"{node_name}-{int(time_ref.time())}-{secrets_ref.token_hex(4)}"
-                                        file_path = os_ref.path.join(node_dir, f"{task_id}.jsonl")
-                                        with open(file_path, "w", encoding="utf-8") as handle:
-                                            for acc in local_accounts:
-                                                handle.write(
-                                                    json_ref.dumps(
-                                                        {
-                                                            "email": acc.get("email"),
-                                                            "password": acc.get("password"),
-                                                            "token_data": acc.get("token_data"),
-                                                        },
-                                                        ensure_ascii=False,
-                                                    )
-                                                    + "\n"
-                                                )
-                                        file_size = os_ref.path.getsize(file_path)
-                                        max_file_size = max(1, int(getattr(core.cfg, "CLUSTER_SYNC_MAX_FILE_SIZE_MB", 20) or 20)) * 1024 * 1024
-                                        if file_size > max_file_size:
-                                            raise RuntimeError(f"同步文件大小超限，当前 {file_size} 字节，上限 {max_file_size} 字节")
-                                        file_sha256 = calculate_file_sha256(file_path)
-                                        print(f"[{core.ts()}] [系统] 📦 账号文件已导出: {file_path}，共 {len(local_accounts)} 个账号。")
+                                        print(f"[{core.ts()}] [系统] 📦 准备直传数据，共 {len(local_accounts)} 个账号...")
                                         req_data = {
                                             "node_name": node_name,
                                             "secret": secret_value,
                                             "task_id": task_id,
-                                            "file_path": file_path,
-                                            "file_size": file_size,
                                             "total_count": len(local_accounts),
-                                            "file_sha256": file_sha256,
+                                            "accounts_data": local_accounts,
                                         }
-                                        req_body = json_ref.dumps(req_data).encode("utf-8")
+                                        req_body = json_ref.dumps(req_data, ensure_ascii=False).encode("utf-8")
                                         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-                                        upload_timeout = getattr(core.cfg, "CLUSTER_UPLOAD_TIMEOUT_SEC", 15)
+                                        upload_timeout = getattr(core.cfg, "CLUSTER_UPLOAD_TIMEOUT_SEC", 30)
                                         upload_req = urllib.request.Request(
                                             f"{master_url.rstrip('/')}/api/cluster/sync_tasks",
                                             data=req_body,
@@ -526,14 +505,7 @@ def _worker_push_thread():
                                             raise RuntimeError(resp_json.get("message") or "主控未确认同步任务")
                                         print(f"[{core.ts()}] [系统] 📤 同步任务 {task_id} 已提交主控，等待异步导入。")
                                     except Exception as e:
-                                        if file_path:
-                                            try:
-                                                if os_ref.path.exists(file_path):
-                                                    os_ref.remove(file_path)
-                                            except Exception:
-                                                pass
                                         print(f"[{core.ts()}] [ERROR] ❌ 账号同步任务提交失败: {e}")
-
                                 threading.Thread(target=_upload_task, daemon=True).start()
 
                             await asyncio_ref.sleep(push_interval if is_running else 3.0)
