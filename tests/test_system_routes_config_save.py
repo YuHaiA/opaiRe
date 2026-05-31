@@ -1,6 +1,8 @@
 import unittest
+from unittest import mock
 
 from utils.config_save_guard import merge_runtime_owned_clash_state
+import utils.config as cfg
 
 
 class SystemRoutesConfigSaveTests(unittest.TestCase):
@@ -46,6 +48,46 @@ class SystemRoutesConfigSaveTests(unittest.TestCase):
         self.assertEqual({"节点选择": ["node-b"]}, clash_conf["preferred_nodes"])
         self.assertTrue(clash_conf["preferred_only_mode"])
         self.assertEqual(["bad-node"], clash_conf["evicted_nodes"])
+
+    def test_reload_all_configs_replaces_clash_runtime_pools(self):
+        base_config = {
+            "clash_proxy_pool": {
+                "preferred_nodes": {"🚀 节点选择": ["node-a"]},
+                "tested_nodes": {"节点选择": ["node-b"]},
+                "evicted_nodes": ["node-c"],
+                "api_url": "http://127.0.0.1:9097",
+            },
+        }
+        incoming_config = {
+            "clash_proxy_pool": {
+                "preferred_nodes": {},
+                "tested_nodes": {},
+                "evicted_nodes": [],
+            },
+        }
+        written = {}
+
+        def fake_dump(data, file_obj, **kwargs):
+            written["value"] = data
+
+        class DummyLock:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        with mock.patch("utils.config.init_config", return_value=base_config), \
+                mock.patch("utils.config.CONFIG_FILE_LOCK", DummyLock()), \
+                mock.patch("builtins.open", mock.mock_open()), \
+                mock.patch("yaml.dump", side_effect=fake_dump):
+            cfg.reload_all_configs(new_config_dict=incoming_config)
+
+        clash_conf = written["value"]["clash_proxy_pool"]
+        self.assertEqual({}, clash_conf["preferred_nodes"])
+        self.assertEqual({}, clash_conf["tested_nodes"])
+        self.assertEqual([], clash_conf["evicted_nodes"])
+        self.assertEqual("http://127.0.0.1:9097", clash_conf["api_url"])
 
 
 if __name__ == "__main__":

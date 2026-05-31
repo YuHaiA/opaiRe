@@ -11,6 +11,12 @@ CLASH_RUNTIME_PRESERVED_KEYS = (
     "evicted_nodes",
 )
 
+CLASH_RUNTIME_REPLACE_KEYS = (
+    "tested_nodes",
+    "preferred_nodes",
+    "evicted_nodes",
+)
+
 
 def merge_runtime_owned_clash_state(current_config: dict, incoming_config: dict) -> dict:
     merged_config = deepcopy(incoming_config if isinstance(incoming_config, dict) else {})

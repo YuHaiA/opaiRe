@@ -50,6 +50,24 @@ class ClashManagerEvictedNodesClearTests(unittest.TestCase):
         self.assertTrue(status["preferred_only_mode"])
         self.assertEqual(["node-c"], status["groups"][0]["preferred_nodes"])
 
+    def test_get_pool_status_matches_preferred_group_with_icon(self):
+        fake_config = {
+            "default_proxy": "http://127.0.0.1:7897",
+            "clash_proxy_pool": {
+                "api_url": "http://127.0.0.1:9097",
+                "preferred_nodes": {"🚀 节点选择": ["node-c"]},
+            }
+        }
+
+        with patch("utils.integrations.clash_manager._read_runtime_config", return_value=fake_config), \
+                patch("utils.integrations.clash_manager.get_client", return_value=None), \
+                patch("utils.integrations.clash_manager._probe_local_ports", return_value=True), \
+                patch("utils.integrations.clash_manager._collect_groups_from_config", return_value=[{"name": "节点选择", "nodes": ["node-a", "node-c"], "count": 2, "type": "Selector"}]), \
+                patch("utils.integrations.clash_manager.get_subscription_state", return_value={"items": []}):
+            status = clash_manager.get_pool_status()
+
+        self.assertEqual(["node-c"], status["groups"][0]["preferred_nodes"])
+
     def test_set_preferred_only_mode_persists_runtime_flag(self):
         fake_config = {"clash_proxy_pool": {"preferred_only_mode": False}}
         saved_config = {}

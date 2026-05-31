@@ -964,12 +964,15 @@
   - 前端新增 `clearClashPreferredNodes(groupName)`，調用後端接口並同步清空當前策略組的 `preferred_nodes` 顯示狀態。
   - 後端新增 `/api/clash/preferred_nodes/clear`，請求體為 `{ "group_name": "..." }`。
   - `utils.integrations.clash_manager` 新增 `clear_preferred_nodes(group_name)`，只移除指定策略組的標優池，不影響有效節點池、拉黑池或其他策略組的標優資料。
+  - `utils.config.reload_all_configs()` 對 `clash_proxy_pool.preferred_nodes`、`tested_nodes`、`evicted_nodes` 改為整體替換，不再對池子字典做遞迴深合併，避免已清空的 key 被舊配置復活。
+  - `utils.integrations.clash_manager` 讀取標優池時也會用去圖標後的策略組名回查，兼容每個策略組帶不同 emoji / 國旗 / 符號前綴的情況。
   - 新增單元測試覆蓋標優池清理時不誤清 `evicted_nodes`、`tested_nodes` 與其他策略組。
 - 行為影響：
   - 若已開啟「僅用標優」並清空當前策略組標優池，前端會提示需要補充標優節點或切回全部候選。
   - 清理操作會通過 `cfg.reload_all_configs(new_config_dict=...)` 持久化到 `clash_proxy_pool.preferred_nodes`。
   - 清理後會同步更新 `utils.proxy_manager.PREFERRED_NODES_MAP` 運行態，避免當前進程仍使用舊標優池；前端成功後會重新拉取 `/api/clash/status`，確保頁面立即反映後端真實狀態。
   - 清理策略組支援模糊匹配，會用 `strip_group_decorations()` 去除 emoji、空白、橫線與大小寫差異後比對；例如前端傳 `节点选择` 時，也會清掉配置中的 `🚀 节点选择`。
+  - 清空保存時會真正移除匹配策略組 key；服務 3/4 這類小服務器重啟或前端刷新後不應再回顯已清掉的標優池。
 
 ## 本地帳號復活失敗狀態記錄
 

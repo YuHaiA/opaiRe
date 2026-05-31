@@ -291,6 +291,18 @@ def _get_preferred_nodes_map(config_data: Optional[dict] = None) -> dict[str, li
     return normalized
 
 
+def _lookup_group_nodes(node_map: dict[str, list[str]], group_name: str) -> list[str]:
+    direct = node_map.get(str(group_name or ""), [])
+    if direct:
+        return direct
+    target = strip_group_decorations(group_name)
+    for key, nodes in node_map.items():
+        current = strip_group_decorations(key)
+        if target and (target == current or target in current or current in target):
+            return nodes
+    return []
+
+
 def _get_preferred_only_mode(config_data: Optional[dict] = None) -> bool:
     source = config_data if isinstance(config_data, dict) else _read_runtime_config()
     clash_conf = source.get("clash_proxy_pool", {}) if isinstance(source.get("clash_proxy_pool"), dict) else {}
@@ -572,7 +584,7 @@ def _merge_runtime_groups(config_groups: list[dict], target: str = "all") -> lis
             healthy_nodes = tested_map.get(str(group.get("name", "")), [])
             if isinstance(healthy_nodes, list) and healthy_nodes:
                 item["healthy_nodes"] = healthy_nodes
-            preferred_nodes = preferred_map.get(str(group.get("name", "")), [])
+            preferred_nodes = _lookup_group_nodes(preferred_map, str(group.get("name", "")))
             if isinstance(preferred_nodes, list) and preferred_nodes:
                 item["preferred_nodes"] = preferred_nodes
             merged.append(item)
@@ -586,7 +598,7 @@ def _merge_runtime_groups(config_groups: list[dict], target: str = "all") -> lis
         healthy_nodes = tested_map.get(str(group.get("name", "")), [])
         if isinstance(healthy_nodes, list) and healthy_nodes:
             item["healthy_nodes"] = healthy_nodes
-        preferred_nodes = preferred_map.get(str(group.get("name", "")), [])
+        preferred_nodes = _lookup_group_nodes(preferred_map, str(group.get("name", "")))
         if isinstance(preferred_nodes, list) and preferred_nodes:
             item["preferred_nodes"] = preferred_nodes
         if isinstance(runtime, dict):
@@ -635,7 +647,7 @@ def switch_proxy_group(group_name: str, proxy_name: str, target: str = "all") ->
         config_data = _read_runtime_config()
         if _get_preferred_only_mode(config_data):
             preferred_map = _get_preferred_nodes_map(config_data)
-            preferred_nodes = preferred_map.get(runtime_group_name, preferred_map.get(group_name, []))
+            preferred_nodes = _lookup_group_nodes(preferred_map, runtime_group_name) or _lookup_group_nodes(preferred_map, group_name)
             if proxy_name not in preferred_nodes:
                 return False, f"当前已开启仅用标优节点，节点 [{proxy_name}] 不在标优池内。"
         encoded_name = urllib.parse.quote(runtime_group_name, safe="")

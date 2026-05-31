@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 from utils.proxy_manager import reload_proxy_config
 from utils.integrations.sub2api_proxy import get_valid_sub2api_proxy_urls
+from utils.config_save_guard import CLASH_RUNTIME_REPLACE_KEYS
 
 CONFIG_FILE_LOCK = threading.Lock()
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -536,11 +537,22 @@ def reload_all_configs(new_config_dict=None):
         # 合并策略：以 base_yaml_config（当前完整配置）为基础，
         # 仅将 new_config_dict 中显式提供的 key 覆盖进去
         # 对于嵌套 dict，递归合并确保不丢失未提供的子 key
-        def _deep_merge(base, overlay):
+        def _deep_merge(base, overlay, path=()):
             """递归合并 overlay 到 base，仅覆盖 overlay 中出现的 key"""
             for key, value in overlay.items():
-                if key in base and isinstance(base[key], dict) and isinstance(value, dict):
-                    _deep_merge(base[key], value)
+                current_path = path + (key,)
+                should_replace_clash_runtime = (
+                    len(current_path) == 2
+                    and current_path[0] == "clash_proxy_pool"
+                    and current_path[1] in CLASH_RUNTIME_REPLACE_KEYS
+                )
+                if (
+                    not should_replace_clash_runtime
+                    and key in base
+                    and isinstance(base[key], dict)
+                    and isinstance(value, dict)
+                ):
+                    _deep_merge(base[key], value, current_path)
                 else:
                     base[key] = value
 
