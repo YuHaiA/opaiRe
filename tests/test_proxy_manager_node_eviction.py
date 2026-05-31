@@ -36,6 +36,11 @@ class ProxyManagerNodeEvictionTests(unittest.TestCase):
                     "节点选择": ["node-a", "node-b", "node-d", "node-e", "node-f", "node-g", "node-h"],
                     "其他组": ["node-a", "node-c"],
                 },
+                "preferred_nodes": {
+                    "节点选择": ["node-a", "node-b"],
+                    "其他组": ["node-a", "node-c"],
+                },
+                "preferred_only_mode": True,
             }
         }
         saved_config = {}
@@ -72,6 +77,9 @@ class ProxyManagerNodeEvictionTests(unittest.TestCase):
         self.assertEqual(["old-node", "node-a"], result["evicted_nodes"])
         self.assertEqual(["node-b", "node-d", "node-e", "node-f", "node-g", "node-h"], result["tested_nodes"]["节点选择"])
         self.assertEqual(["node-c"], result["tested_nodes"]["其他组"])
+        self.assertEqual(["node-b"], result["preferred_nodes"]["节点选择"])
+        self.assertEqual(["node-c"], result["preferred_nodes"]["其他组"])
+        self.assertTrue(result["preferred_only_mode"])
 
     def test_evict_failed_switch_candidate_skips_blacklist_when_effective_pool_is_too_small(self):
         fake_config = {

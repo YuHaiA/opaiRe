@@ -286,6 +286,16 @@ def _resolve_effective_candidate_count(proxy_url, clash_conf: dict, current_node
     return None
 
 
+def _is_preferred_clash_node(clash_conf: dict, current_node: str) -> bool:
+    preferred_map = clash_conf.get("preferred_nodes", PREFERRED_NODES_MAP)
+    if not isinstance(preferred_map, dict):
+        return False
+    for nodes in preferred_map.values():
+        if isinstance(nodes, list) and current_node in nodes:
+            return True
+    return False
+
+
 def mark_current_clash_node_preferred(proxy_url=None) -> tuple[bool, str]:
     config_data = _load_runtime_config_for_write()
     current_node = get_current_selected_node(proxy_url)
@@ -375,8 +385,9 @@ def evict_current_proxy_or_node(proxy_url=None):
     if not isinstance(clash_conf, dict):
         clash_conf = {}
 
+    is_preferred_node = _is_preferred_clash_node(clash_conf, current_node)
     remaining_candidates = _resolve_effective_candidate_count(proxy_url, clash_conf, current_node)
-    if remaining_candidates is not None and remaining_candidates <= MIN_CLASH_CANDIDATES_BEFORE_EVICT:
+    if not is_preferred_node and remaining_candidates is not None and remaining_candidates <= MIN_CLASH_CANDIDATES_BEFORE_EVICT:
         return False, (
             "SKIP_EVICT_GUARD: "
             f"当前策略组有效节点仅剩 {remaining_candidates} 个，触发保底保护，跳过拉黑 "
@@ -396,6 +407,13 @@ def evict_current_proxy_or_node(proxy_url=None):
             if isinstance(nodes, list):
                 tested_map[group_name] = [node for node in nodes if node != current_node]
         clash_conf["tested_nodes"] = tested_map
+
+    preferred_map = clash_conf.get("preferred_nodes", {})
+    if isinstance(preferred_map, dict):
+        for group_name, nodes in list(preferred_map.items()):
+            if isinstance(nodes, list):
+                preferred_map[group_name] = [node for node in nodes if node != current_node]
+        clash_conf["preferred_nodes"] = preferred_map
 
     config_data["clash_proxy_pool"] = clash_conf
     runtime_cfg.reload_all_configs(new_config_dict=config_data)
