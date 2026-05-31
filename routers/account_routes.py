@@ -740,7 +740,7 @@ def bulk_refresh_api(req: BulkRefreshReq, token: str = Depends(verify_token)):
         if is_image2api:
             old_token = token_data.get("access_token")
             if not old_token:
-                db_manager.update_account_status([email], 0)
+                db_manager.mark_account_revive_failed(email, "Image2API 缺少 access_token", "bulk_refresh")
                 print(f"[{cfg.ts()}] [错误] ❌ Image2API 账号 {mask_email(email)} 缺少 access_token，标为死号。")
                 return False
 
@@ -762,20 +762,29 @@ def bulk_refresh_api(req: BulkRefreshReq, token: str = Depends(verify_token)):
                         token_data["status"] = "image2api" if remote_status == "正常" else "image2api_禁用"
 
                         db_manager.update_account_token_only(email, json.dumps(token_data))
-                        db_manager.update_account_status([email], 1 if remote_status == "正常" else 0)
+                        if remote_status == "正常":
+                            db_manager.update_account_status([email], 1)
+                            db_manager.clear_account_revive_failed(email)
+                        else:
+                            db_manager.mark_account_revive_failed(
+                                email, f"Image2API 远端状态: {remote_status}", "bulk_refresh"
+                            )
+                            print(f"[{cfg.ts()}] [错误] ❌ 账号 {mask_email(email)} Image2API 远端状态异常: {remote_status}")
+                            return False
 
                         print(f"[{cfg.ts()}] [成功] ✅ 账号 {mask_email(email)} 经由 Image2API 远端刷新存活！")
                         return True
-                db_manager.update_account_status([email], 0)
+                db_manager.mark_account_revive_failed(email, "Image2API 远端刷新失败或已失效", "bulk_refresh")
                 db_manager.remove_account_push_platform(email, "IMAGE2API", exact_match=True)
                 print(f"[{cfg.ts()}] [错误] ❌ 账号 {mask_email(email)} Image2API 远端刷新失败或已失效，标记死亡并解绑平台。")
                 return False
             except Exception as e:
+                db_manager.mark_account_revive_failed(email, f"Image2API 刷新异常: {e}", "bulk_refresh")
                 print(f"[{cfg.ts()}] [系统] 账号 {mask_email(email)} Image2API 刷新异常: {e}")
                 return False
 
         if not rt:
-            db_manager.update_account_status([email], 0)
+            db_manager.mark_account_revive_failed(email, "缺少 refresh_token", "bulk_refresh")
             print(f"[{cfg.ts()}] [错误] ❌ 账号 {mask_email(email)} 缺少 refresh_token，标为死号。")
             return False
 
@@ -785,7 +794,7 @@ def bulk_refresh_api(req: BulkRefreshReq, token: str = Depends(verify_token)):
 
         if not ok:
             err = new_tokens.get("error", "未知错误") if isinstance(new_tokens, dict) else str(new_tokens)
-            db_manager.update_account_status([email], 0)
+            db_manager.mark_account_revive_failed(email, err, "bulk_refresh")
             db_manager.remove_account_push_platform(email, "CPA", exact_match=True)
             db_manager.remove_account_push_platform(email, "SUB2API", exact_match=False)
             print(f"[{cfg.ts()}] [错误] ❌ 账号 {mask_email(email)} 刷新失败 ({err})，已标记死亡并解绑平台。")
@@ -794,6 +803,7 @@ def bulk_refresh_api(req: BulkRefreshReq, token: str = Depends(verify_token)):
         token_data.update(new_tokens)
         db_manager.update_account_token_only(email, json.dumps(token_data))
         db_manager.update_account_status([email], 1)
+        db_manager.clear_account_revive_failed(email)
 
         current_platforms = [p.strip().upper() for p in (full_info.get('push_platform') or "").split(',') if p.strip()]
         sync_tags = []

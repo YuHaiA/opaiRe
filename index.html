@@ -736,7 +736,7 @@
                                     </div>
                                 </div>
                             <div class="inventory-toolbar inventory-stats p-5 md:px-8 border-b border-slate-100">
-                                <div class="grid grid-cols-2 xl:grid-cols-7 gap-2.5 w-full">
+                                <div class="grid grid-cols-2 xl:grid-cols-8 gap-2.5 w-full">
 
                                     <div @click="filterLocalAccounts('all')" class="inventory-mini-card inventory-mini-card--slate cursor-pointer active:scale-95 bg-white shadow-sm border relative overflow-hidden transition-all hover:shadow-md hover:-translate-y-0.5 flex justify-between items-center group" :class="accountStatusFilter === 'all' ? 'border-sky-300 ring-2 ring-sky-200 shadow-sky-100' : 'border-slate-200'">
                                         <div class="z-10">
@@ -792,6 +792,14 @@
                                         </div>
                                         <div class="w-8 h-8 rounded-full bg-rose-50 flex items-center justify-center shadow-inner border border-rose-100 z-10"><svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></div>
                                     </div>
+
+                                    <div @click="filterLocalAccounts('revive_failed')" class="inventory-mini-card inventory-mini-card--rose cursor-pointer active:scale-95 bg-white shadow-sm border relative overflow-hidden transition-all hover:shadow-md hover:-translate-y-0.5 flex justify-between items-center group" :class="accountStatusFilter === 'revive_failed' ? 'border-orange-300 ring-2 ring-orange-200 shadow-orange-100' : 'border-slate-200'">
+                                        <div class="z-10">
+                                            <div class="text-[10px] font-black text-orange-500 mb-1 uppercase tracking-widest">复活失败</div>
+                                            <div class="text-[1.05rem] font-black text-orange-600 leading-none">{{ inventoryStats?.local?.revive_failed || 0 }}</div>
+                                        </div>
+                                        <div class="w-8 h-8 rounded-full bg-orange-50 flex items-center justify-center shadow-inner border border-orange-100 z-10"><svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path></svg></div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -841,8 +849,13 @@
                                                         <span><svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093v1.5M12 18h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></span> 未知
                                                     </span>
 
-                                                    <div v-if="acc.is_active === 0" class="px-2 py-1 text-[10px] font-black text-rose-600 bg-rose-50 rounded border border-rose-200 shadow-sm flex items-center gap-1">
-                                                        <span class="w-1.5 h-1.5 bg-rose-500 rounded-full shadow-[0_0_5px_#f43f5e]"></span> 已禁用
+                                                    <div v-if="acc.revive_status === 'failed'" class="max-w-[210px] px-2 py-1 text-[10px] font-black text-orange-700 bg-orange-50 rounded border border-orange-200 shadow-sm flex flex-col gap-0.5" :title="acc.revive_failed_reason || '复活失败'">
+                                                        <span class="flex items-center gap-1"><span class="w-1.5 h-1.5 bg-orange-500 rounded-full shadow-[0_0_5px_#f97316]"></span> 复活失败</span>
+                                                        <span v-if="acc.revive_failed_reason" class="font-bold text-orange-600/80 truncate">{{ acc.revive_failed_reason }}</span>
+                                                    </div>
+
+                                                    <div v-if="acc.is_active === 0" class="px-2 py-1 text-[10px] font-black rounded border shadow-sm flex items-center gap-1" :class="acc.revive_status === 'failed' ? 'text-orange-700 bg-orange-50 border-orange-200' : 'text-rose-600 bg-rose-50 border-rose-200'">
+                                                        <span class="w-1.5 h-1.5 rounded-full" :class="acc.revive_status === 'failed' ? 'bg-orange-500 shadow-[0_0_5px_#f97316]' : 'bg-rose-500 shadow-[0_0_5px_#f43f5e]'"></span> {{ acc.revive_status === 'failed' ? '确认死亡' : '已禁用' }}
                                                     </div>
 
                                                     <template v-else>

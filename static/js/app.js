@@ -1988,6 +1988,7 @@ createApp({
                 'image2api': 'Img凭证',
                 'active': '活跃',
                 'disabled': '已禁用',
+                'revive_failed': '复活失败',
                 'with_token': '完整凭证',
                 'reg_only': '半成品号',
                 'imgsub2api': 'ImgSub2API'
@@ -2201,7 +2202,19 @@ createApp({
 		async deleteSelectedAccounts() {
             if (this.selectedAccounts.length === 0) return;
 
-            const confirmed = await this.customConfirm(`⚠️ 危险操作：\n\n确定要彻底删除选中的 ${this.selectedAccounts.length} 个账号吗？\n删除后数据将无法恢复！`);
+            const selectedObjs = this.accounts.filter(acc => this.selectedAccounts.includes(acc.email));
+            const reviveFailedCount = selectedObjs.filter(acc => acc.revive_status === 'failed').length;
+            const activeCount = selectedObjs.filter(acc => acc.is_active !== 0 && acc.revive_status !== 'failed').length;
+            const confirmLines = [
+                `⚠️ 危险操作：`,
+                ``,
+                `确定要彻底删除选中的 ${this.selectedAccounts.length} 个账号吗？`,
+            ];
+            if (reviveFailedCount > 0) confirmLines.push(`其中 ${reviveFailedCount} 个已标记为「复活失败 / 确认死亡」。`);
+            if (activeCount > 0) confirmLines.push(`注意：其中 ${activeCount} 个不是复活失败状态，请确认不是误选。`);
+            confirmLines.push(`删除后数据将无法恢复！`);
+
+            const confirmed = await this.customConfirm(confirmLines.join('\n'));
             if (!confirmed) return;
 			this.isDeletingAccounts = true;
             try {

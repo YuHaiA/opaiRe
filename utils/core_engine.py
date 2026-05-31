@@ -570,6 +570,7 @@ def process_account_worker(i: int, total: int, item: dict, args: Any) -> bool:
     if is_ok:
         try:
             db_manager.update_account_status([email], 1)
+            db_manager.clear_account_revive_failed(email)
         except Exception:
             pass
         if is_disabled:
@@ -621,7 +622,7 @@ def process_account_worker(i: int, total: int, item: dict, args: Any) -> bool:
 
     if not cfg.ENABLE_TOKEN_REVIVE:
         try:
-            db_manager.update_account_status([email], 0)
+            db_manager.mark_account_revive_failed(email, f"复活关闭；测活失败: {msg}", "cpa_check")
         except Exception:
             pass
         print(f"[{ts()}] [INFO] 检测到 Token 已失效，但【复活】已关闭，仅记录状态。")
@@ -633,6 +634,7 @@ def process_account_worker(i: int, total: int, item: dict, args: Any) -> bool:
 
     if item.get("runtime_only") or item.get("source") == "memory":
         print(f"[{ts()}] [WARNING] {mask_email(name)} 属于纯内存凭据，跳过抢救。")
+        revive_fail_reason = "纯内存凭据，无法从远端下载完整 token"
         full_item_data: dict = {}
     else:
         try:
@@ -644,13 +646,17 @@ def process_account_worker(i: int, total: int, item: dict, args: Any) -> bool:
             )
             full_item_data = content_resp.json() if content_resp.status_code == 200 else {}
             if content_resp.status_code != 200:
+                revive_fail_reason = f"下载 CPA 完整凭证失败 HTTP {content_resp.status_code}"
                 print(f"[{ts()}] [ERROR] 获取 {mask_email(name)} 完整内容失败 "
                       f"(HTTP {content_resp.status_code})")
         except Exception as e:
+            revive_fail_reason = f"下载 CPA 完整凭证异常: {e}"
             print(f"[{ts()}] [ERROR] 获取 {mask_email(name)} 完整内容异常: {e}")
             full_item_data = {}
 
     refresh_token_val = full_item_data.get("refresh_token")
+    if refresh_token_val:
+        revive_fail_reason = "复活后二次测活失败"
     if refresh_token_val:
         proxies = {"http": args.proxy, "https": args.proxy} if args.proxy else None
         ok, new_tokens = refresh_oauth_token(refresh_token_val, proxies=proxies)
@@ -670,16 +676,21 @@ def process_account_worker(i: int, total: int, item: dict, args: Any) -> bool:
                     print(f"[{ts()}] [SUCCESS] 测活: {mask_email(name)} 刷新后复活成功！")
                     try:
                         db_manager.update_account_status([email], 1)
+                        db_manager.clear_account_revive_failed(email)
                     except Exception:
                         pass
                 else:
+                    revive_fail_reason = f"刷新后二次测活失败: {msg2}"
                     print(f"[{ts()}] [WARNING] {mask_email(name)} 刷新后二次测活依然失败({msg2})")
             else:
+                revive_fail_reason = f"刷新后覆盖 CPA 失败: {up_msg}"
                 print(f"[{ts()}] [ERROR] 刷新后覆盖CPA失败: {up_msg}")
         else:
+            revive_fail_reason = new_tokens.get('error', '未知错误') if isinstance(new_tokens, dict) else str(new_tokens)
             print(f"[{ts()}] [WARNING] {mask_email(name)} Token 复活请求被拒绝: "
                   f"{new_tokens.get('error','未知错误')}")
     else:
+        revive_fail_reason = "未找到 refresh_token，无法抢救"
         print(f"[{ts()}] [WARNING] {mask_email(name)} 未找到有效数据，无法抢救")
 
     if not refresh_success:
@@ -699,11 +710,16 @@ def process_account_worker(i: int, total: int, item: dict, args: Any) -> bool:
                 res = run_oauth_only_and_sync(email, password, args.proxy, args, access_token=acc_token,
                                               device_id=device_id, user_agent=user_agent)
                 if res == "success":
+                    try:
+                        db_manager.clear_account_revive_failed(email)
+                    except Exception:
+                        pass
                     return True
             else:
+                revive_fail_reason = "本地库查无此号，无法 OAuth 抢救"
                 print(f"[{ts()}] [WARNING] 测活: {mask_email(name)} 本地库彻底查无此号，放弃抢救")
         try:
-            db_manager.update_account_status([email], 0)
+            db_manager.mark_account_revive_failed(email, revive_fail_reason, "cpa_check")
         except Exception:
             pass
         _handle_dead_account(name, is_disabled)
@@ -1138,6 +1154,7 @@ def process_sub2api_worker(i: int, total: int, item: dict, client: Any, args: An
         client.set_account_status(account_id, disabled=False)
         try:
             db_manager.update_account_status_by_truncated_name(name, 1)
+            db_manager.clear_account_revive_failed_by_truncated_name(name)
         except Exception:
             pass
         return True
@@ -1157,12 +1174,15 @@ def process_sub2api_worker(i: int, total: int, item: dict, client: Any, args: An
 
     print(f"[{ts()}] [ERROR] Sub2API测活: {mask_email(name)} 测活失败 ({reason})")
     refresh_success = False
+    revive_fail_reason = f"Sub2API 测活失败: {reason}"
     if not cfg.SUB2API_ENABLE_TOKEN_REVIVE:
         print(f"[{ts()}] [ERROR] Token 普通复活已关闭。")
+        revive_fail_reason = f"复活关闭；Sub2API 测活失败: {reason}"
     else:
         refresh_token_val = item.get("credentials", {}).get("refresh_token")
         if not refresh_token_val:
             print(f"[{ts()}] [ERROR] {mask_email(name)} 无 refresh_token，跳过普通刷新")
+            revive_fail_reason = "Sub2API 账号缺少 refresh_token"
         else:
             print(f"[{ts()}] [INFO] {mask_email(name)} 尝试刷新 Token...")
             proxies = {"http": args.proxy, "https": args.proxy} if args.proxy else None
@@ -1170,6 +1190,7 @@ def process_sub2api_worker(i: int, total: int, item: dict, client: Any, args: An
 
             if not ok:
                 err_info = new_tokens.get('error', '未知') if isinstance(new_tokens, dict) else str(new_tokens)
+                revive_fail_reason = err_info
                 print(f"[{ts()}] [ERROR] {mask_email(name)} Token 刷新失败: {err_info}")
             else:
                 print(f"[{ts()}] [INFO] {mask_email(name)} Token 刷新成功，同步至 Sub2API...")
@@ -1177,6 +1198,7 @@ def process_sub2api_worker(i: int, total: int, item: dict, client: Any, args: An
                 up_ok, up_msg = client.update_account(account_id, item)
 
                 if not up_ok:
+                    revive_fail_reason = f"更新回 Sub2API 失败: {up_msg}"
                     print(f"[{ts()}] [ERROR] {mask_email(name)} 更新回 Sub2API 失败: {up_msg}")
                 else:
                     print(f"[{ts()}] [INFO] {mask_email(name)} Token 已更新，二次验证中...")
@@ -1186,10 +1208,12 @@ def process_sub2api_worker(i: int, total: int, item: dict, client: Any, args: An
                         print(f"[{ts()}] [SUCCESS] {mask_email(name)} 刷新复活成功，二次验证通过！")
                         try:
                             db_manager.update_account_status_by_truncated_name(name, 1)
+                            db_manager.clear_account_revive_failed_by_truncated_name(name)
                         except Exception:
                             pass
                         refresh_success = True
                     else:
+                        revive_fail_reason = f"刷新后二次验证失败: {reason2}"
                         print(f"[{ts()}] [ERROR] {mask_email(name)} 二次验证失败 ({reason2})，账号确认已死")
 
     if not refresh_success:
@@ -1211,11 +1235,16 @@ def process_sub2api_worker(i: int, total: int, item: dict, client: Any, args: An
                 res = run_oauth_only_and_sync(name, password, args.proxy, args, access_token=acc_token,
                                               device_id=device_id, user_agent=user_agent)
                 if res == "success":
+                    try:
+                        db_manager.clear_account_revive_failed_by_truncated_name(name)
+                    except Exception:
+                        pass
                     return True
             else:
+                revive_fail_reason = "本地库查无此号，无法 OAuth 抢救"
                 print(f"[{ts()}] [WARNING] Sub2API测活: {mask_email(name)} 本地库彻底查无此号，放弃抢救")
         try:
-            db_manager.update_account_status_by_truncated_name(name, 0)
+            db_manager.mark_account_revive_failed_by_truncated_name(name, revive_fail_reason, "sub2api_check")
         except Exception:
             pass
         _handle_sub2api_dead_account(item, client, is_disabled=False)

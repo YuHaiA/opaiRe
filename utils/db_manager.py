@@ -191,6 +191,119 @@ def get_token_by_email(email: str) -> dict:
         return None
 
 
+_REVIVE_META_KEYS = (
+    "revive_status",
+    "revive_failed_at",
+    "revive_failed_reason",
+    "revive_failed_source",
+)
+
+
+def _safe_token_dict(raw_token: Any) -> dict:
+    if isinstance(raw_token, dict):
+        return dict(raw_token)
+    if not raw_token:
+        return {}
+    try:
+        parsed = json.loads(raw_token)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _account_credential_status(token_data: dict, raw_token: str) -> str:
+    token_status = str(token_data.get("status", "")).lower()
+    if "image2api" in token_status or '"image2api"' in raw_token:
+        return "image2api"
+    if token_data.get("refresh_token") or '"refresh_token"' in raw_token:
+        return "有凭证"
+    if "仅注册成功" in str(token_data.get("status", "")) or '"仅注册成功"' in raw_token:
+        return "仅注册成功"
+    return "未知"
+
+
+def _trim_revive_reason(reason: Any) -> str:
+    value = str(reason or "未知原因").strip()
+    if not value:
+        value = "未知原因"
+    return value[:180]
+
+
+def _mark_revive_failed_by_selector(identifier: str, reason: str, source: str, exact_match: bool) -> bool:
+    if not identifier:
+        return False
+    try:
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with get_db_conn(is_write=True) as conn:
+            c = get_cursor(conn)
+            if exact_match:
+                execute_sql(c, "SELECT email, token_data FROM accounts WHERE email = ?", (identifier,))
+            else:
+                execute_sql(c, "SELECT email, token_data FROM accounts WHERE SUBSTR(email, 1, 64) = ?", (identifier,))
+            rows = c.fetchall()
+            for db_email, raw_token in rows:
+                token_data = _safe_token_dict(raw_token)
+                token_data["revive_status"] = "failed"
+                token_data["revive_failed_at"] = now_str
+                token_data["revive_failed_reason"] = _trim_revive_reason(reason)
+                token_data["revive_failed_source"] = str(source or "unknown")[:40]
+                execute_sql(
+                    c,
+                    "UPDATE accounts SET token_data = ?, is_active = 0 WHERE email = ?",
+                    (json.dumps(token_data, ensure_ascii=False), db_email),
+                )
+            return bool(rows)
+    except Exception as e:
+        print(f"[{cfg.ts()}] [ERROR] 标记复活失败失败: {e}")
+        return False
+
+
+def mark_account_revive_failed(email: str, reason: str, source: str = "unknown") -> bool:
+    return _mark_revive_failed_by_selector(email, reason, source, exact_match=True)
+
+
+def mark_account_revive_failed_by_truncated_name(truncated_name: str, reason: str, source: str = "unknown") -> bool:
+    return _mark_revive_failed_by_selector(truncated_name, reason, source, exact_match=False)
+
+
+def _clear_revive_failed_by_selector(identifier: str, exact_match: bool) -> bool:
+    if not identifier:
+        return False
+    try:
+        with get_db_conn(is_write=True) as conn:
+            c = get_cursor(conn)
+            if exact_match:
+                execute_sql(c, "SELECT email, token_data FROM accounts WHERE email = ?", (identifier,))
+            else:
+                execute_sql(c, "SELECT email, token_data FROM accounts WHERE SUBSTR(email, 1, 64) = ?", (identifier,))
+            rows = c.fetchall()
+            for db_email, raw_token in rows:
+                token_data = _safe_token_dict(raw_token)
+                changed = False
+                for key in _REVIVE_META_KEYS:
+                    if key in token_data:
+                        token_data.pop(key, None)
+                        changed = True
+                if changed:
+                    execute_sql(
+                        c,
+                        "UPDATE accounts SET token_data = ? WHERE email = ?",
+                        (json.dumps(token_data, ensure_ascii=False), db_email),
+                    )
+            return bool(rows)
+    except Exception as e:
+        print(f"[{cfg.ts()}] [ERROR] 清理复活失败标记失败: {e}")
+        return False
+
+
+def clear_account_revive_failed(email: str) -> bool:
+    return _clear_revive_failed_by_selector(email, exact_match=True)
+
+
+def clear_account_revive_failed_by_truncated_name(truncated_name: str) -> bool:
+    return _clear_revive_failed_by_selector(truncated_name, exact_match=False)
+
+
 def get_tokens_by_emails(emails: list) -> list:
     if not emails: return []
     try:
@@ -264,6 +377,9 @@ def get_accounts_page(page: int = 1, page_size: int = 50, hide_reg: str = "0", s
             elif status_filter == "imgsub2api":
                 conditions.append("token_data LIKE ?")
                 params.append('%"image2api"%')
+            elif status_filter == "revive_failed":
+                conditions.append("token_data LIKE ?")
+                params.append('%"revive_status"%failed%')
             where_clause = ""
             if conditions:
                 where_clause = " WHERE " + " AND ".join(conditions)
@@ -282,20 +398,23 @@ def get_accounts_page(page: int = 1, page_size: int = 50, hide_reg: str = "0", s
             execute_sql(c, data_sql, data_params)
             rows = c.fetchall()
 
-            data = [
-                {
+            data = []
+            for r in rows:
+                raw_token = str(r[3] or "")
+                token_data = _safe_token_dict(raw_token)
+                data.append({
                     "email": r[0],
                     "password": r[1],
                     "created_at": r[2],
-                    "status": "image2api" if '"image2api"' in str(r[3] or "") else (
-                        "有凭证" if '"refresh_token"' in str(r[3] or "") else (
-                            "仅注册成功" if '"仅注册成功"' in str(r[3] or "") else "未知")),
+                    "status": _account_credential_status(token_data, raw_token),
                     "is_active": r[4] if r[4] is not None else 1,
                     "push_platform": r[5],
-                    "push_time": r[6]
-                }
-                for r in rows
-            ]
+                    "push_time": r[6],
+                    "revive_status": token_data.get("revive_status", ""),
+                    "revive_failed_at": token_data.get("revive_failed_at", ""),
+                    "revive_failed_reason": token_data.get("revive_failed_reason", ""),
+                    "revive_failed_source": token_data.get("revive_failed_source", ""),
+                })
             return {"total": total, "data": data}
 
     except Exception as e:
@@ -907,7 +1026,8 @@ def get_inventory_stats() -> dict:
                                 SUM(CASE WHEN token_data LIKE ? AND token_data NOT LIKE ? THEN 1 ELSE 0 END) as credential_count,
                                 SUM(CASE WHEN token_data LIKE ? THEN 1 ELSE 0 END) as reg_only_count,
                                 SUM(CASE WHEN token_data LIKE ? THEN 1 ELSE 0 END) as imgsub2api_count,
-                                SUM(CASE WHEN token_data LIKE ? THEN 1 ELSE 0 END) as image2api_count
+                                SUM(CASE WHEN token_data LIKE ? THEN 1 ELSE 0 END) as image2api_count,
+                                SUM(CASE WHEN token_data LIKE ? THEN 1 ELSE 0 END) as revive_failed_count
                             FROM accounts
                         """
             params = (
@@ -917,7 +1037,8 @@ def get_inventory_stats() -> dict:
                 '%"access_token"%', '%"image2api"%',
                 '%"仅注册成功"%',
                 '%"image2api"%',
-                '%"image2api"%'
+                '%"image2api"%',
+                '%"revive_status"%failed%'
             )
 
             execute_sql(c, sql, params)
@@ -935,7 +1056,8 @@ def get_inventory_stats() -> dict:
                     "credential": r[13],
                     "reg_only": r[14],
                     "imgsub2api": r[15],
-                    "image2api": r[16]
+                    "image2api": r[16],
+                    "revive_failed": r[17] if len(r) > 17 else 0
                 },
                 "cloud": {
                     "total": r[11],
@@ -952,7 +1074,7 @@ def get_inventory_stats() -> dict:
         print(f"[{cfg.ts()}] [ERROR] 获取统计数据失败: {e}")
         return {
             "local": {"total": 0, "active": 0, "disabled": 0, "unpushed": 0, "pushed": 0, "with_token": 0, "credential": 0, "reg_only": 0,
-                      "imgsub2api": 0, "image2api": 0},
+                      "imgsub2api": 0, "image2api": 0, "revive_failed": 0},
             "cloud": {"total": 0, "enabled": 0, "cpa": 0, "cpa_active": 0, "cpa_disabled": 0, "sub2api": 0,
                       "sub2api_active": 0, "sub2api_disabled": 0}
         }

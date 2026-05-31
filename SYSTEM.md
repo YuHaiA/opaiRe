@@ -968,3 +968,27 @@
 - 行為影響：
   - 若已開啟「僅用標優」並清空當前策略組標優池，前端會提示需要補充標優節點或切回全部候選。
   - 清理操作會通過 `cfg.reload_all_configs(new_config_dict=...)` 持久化到 `clash_proxy_pool.preferred_nodes`。
+
+## 本地帳號復活失敗狀態記錄
+
+- 修改文件：
+  - `utils/db_manager.py`
+  - `routers/account_routes.py`
+  - `utils/core_engine.py`
+  - `index.html`
+  - `static/js/app.js`
+  - `tests/test_account_revive_status.py`
+  - `SYSTEM.md`
+- 本次修改：
+  - 本地帳號不新增資料表欄位，改在既有 `token_data` 內寫入安全元資料：`revive_status`、`revive_failed_at`、`revive_failed_reason`、`revive_failed_source`。
+  - 新增 `mark_account_revive_failed()` / `clear_account_revive_failed()` 及截斷名稱版本，集中處理復活失敗標記，避免各流程自行拼 JSON。
+  - `/api/accounts/bulk_refresh` 在缺少 refresh token、Image2API 遠端刷新失敗、OAuth refresh 失敗時會標記「復活失敗」，成功刷新後會清理舊標記。
+  - CPA / Sub2API 測活復活流程在復活關閉、缺少 refresh token、刷新失敗、覆蓋遠端失敗、二次測活失敗或本地查無此號時會同步標記本地帳號；測活成功或復活成功會清理舊標記。
+  - 本地帳號列表新增 `revive_status`、`revive_failed_reason`、`revive_failed_at`、`revive_failed_source` 返回值，並支援 `status_filter=revive_failed`。
+  - 本地帳號統計新增「復活失敗」卡片；帳號列中會顯示「復活失敗 / 確認死亡」及原因，刪除確認框會提示選中帳號中有多少個復活失敗、多少個仍非復活失敗狀態。
+- 行為影響：
+  - `is_active=0` 不再是唯一判斷依據；使用者可以先篩選「復活失敗」再做物理刪除，降低誤刪手動禁用或暫停帳號的風險。
+  - `token_data` 中原始憑證欄位會保留，復活狀態元資料不會覆蓋 access token / refresh token。
+- 驗證：
+  - `python -m unittest tests.test_account_revive_status`
+  - `python -m py_compile utils\db_manager.py routers\account_routes.py utils\core_engine.py`
