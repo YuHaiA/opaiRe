@@ -15,6 +15,11 @@ class TaskLogGuardTests(unittest.TestCase):
         task_log_guard.observe_log_message("（gm***@***.***）无密码通道OAuth 阶段验证失败: 401")
         self.assertEqual(task_log_guard.get_bucket_count("bucket-a"), 0)
 
+    def test_submit_email_409_does_not_increment_counter(self):
+        task_log_guard.start_task("bucket-a")
+        task_log_guard.observe_log_message("（gm***@***.***）提交邮箱环节异常, 返回: 409")
+        self.assertEqual(task_log_guard.get_bucket_count("bucket-a"), 0)
+
     def test_timeout_reaches_abort_threshold_on_fifth_hit(self):
         task_log_guard.start_task("bucket-a")
         task_log_guard.bind_task_batch("batch-a")
@@ -45,7 +50,7 @@ class TaskLogGuardTests(unittest.TestCase):
 
         self.assertEqual("batch-a", ctx.exception.batch_id)
 
-    def test_success_marker_resets_bucket(self):
+    def test_passwordless_send_409_still_resets_after_success(self):
         task_log_guard.start_task("bucket-b")
         task_log_guard.observe_log_message("（ts***@***.***）无密码通道邮件发送异常, 返回: 409")
         self.assertEqual(task_log_guard.get_bucket_count("bucket-b"), 1)

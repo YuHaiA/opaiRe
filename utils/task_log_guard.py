@@ -9,12 +9,13 @@ COUNTABLE_ERROR_LIMIT = 5
 
 _COUNTABLE_RULES = (
     ("curl_timeout", re.compile(r"Failed to perform,\s*curl:\s*\(28\).*Connection timed out", re.IGNORECASE)),
-    ("submit_email_409", re.compile(r"提交邮箱环节异常[,，]?\s*返回[:：]\s*409")),
     ("passwordless_send_409", re.compile(r"无密码通道.*邮件发送异常[,，]?\s*返回[:：]\s*409")),
 )
 _IGNORED_RULES = (
     ("passwordless_oauth_401", re.compile(r"无密码通道OAuth\s*阶段验证失败[:：]\s*401")),
+    ("submit_email_409", re.compile(r"提交邮箱环节异常[,，]?\s*返回[:：]\s*409")),
 )
+_IGNORED_KINDS = {kind for kind, _ in _IGNORED_RULES}
 
 _thread_local = threading.local()
 _tracker_lock = threading.Lock()
@@ -149,7 +150,7 @@ def observe_log_message(message: str) -> None:
         return
 
     kind = classify_log_message(message)
-    if kind is None or kind == "passwordless_oauth_401":
+    if kind is None or kind in _IGNORED_KINDS:
         return
 
     with _tracker_lock:
