@@ -171,6 +171,23 @@ def _find_conflicting_listener_pid(host: str, port: int) -> Optional[int]:
 def _get_process_command_line(pid_value: int) -> str:
     if pid_value <= 0:
         return ""
+    if os.name != "nt":
+        try:
+            with open(f"/proc/{pid_value}/cmdline", "rb") as handle:
+                raw_cmdline = handle.read().replace(b"\x00", b" ").strip()
+            if raw_cmdline:
+                return raw_cmdline.decode("utf-8", errors="ignore")
+        except Exception:
+            pass
+        try:
+            return subprocess.check_output(
+                ["ps", "-p", str(pid_value), "-o", "args="],
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+            ).strip()
+        except Exception:
+            return ""
     try:
         return subprocess.check_output(
             [

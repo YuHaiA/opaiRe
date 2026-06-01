@@ -16,6 +16,33 @@
 ## 最新修改
 
 - 修改文件：
+  - `utils/auth_pipeline/auth_fingerprint.py`
+  - `utils/auth_pipeline/http_utils.py`
+  - `utils/auth_pipeline/oauth.py`
+  - `utils/auth_pipeline/common.py`
+  - `utils/auth_pipeline/register.py`
+  - `utils/config.py`
+  - `routers/system_routes.py`
+  - `config.example.yaml`
+  - `static/js/app.js`
+  - `index.html`
+  - `wfxl_openai_regst.py`
+  - `SYSTEM.md`
+- 变更内容：
+  - 新增认证指纹档位模块，集中管理注册、登录、OTP、Sentinel 算力与 OAuth token 请求使用的浏览器指纹。
+  - 新增 `auth_fingerprint.mode` 配置：`compat` 使用 v16.0.2 前稳定 Chrome110 档；`upstream` 使用上游 Chrome145 新指纹档。
+  - 前端“并发与系统”页新增“认证指纹”切换入口，保存配置后新启动注册任务生效。
+  - 保存配置时会校正非法指纹模式，旧配置默认补齐为 `compat`。
+  - 修复 Linux 服务启动时读取进程命令行仍走 Windows PowerShell 的问题，固定端口重启时可识别上一轮控制台进程。
+- 修改原因：
+  - 上游 `bebca79` 将主注册、登录、OTP 与 Sentinel 全链路从 Chrome110 切到 Chrome145 新指纹；服务 1 现场仍频繁触发 `403` 节流和鉴权抖动。
+  - 之前只回退 OAuth token 表单交换会造成注册阶段新指纹、token 阶段旧指纹的画像跳变，容易继续不稳。
+  - 服务 1 日志显示 systemd 重启期间多次因固定端口冲突退出，根因是 Linux 下无法正确读取占用 PID 命令行。
+- 影响范围：
+  - 默认认证链路回到兼容档，服务 1 优先稳定；上游新指纹仍可通过页面或配置切换测试。
+  - 不改变节点测活、候选池、域名失败统计或账号入库逻辑。
+
+- 修改文件：
   - `utils/auth_pipeline/register.py`
   - `utils/core_engine.py`
   - `tests/test_core_engine_local_presence_gate.py`

@@ -1004,6 +1004,12 @@ async def save_config(new_config: dict, token: str = Depends(verify_token)):
             new_config["disabled_mail_domains"] = []
         if not isinstance(new_config.get("mail_domain_failure_types"), list):
             new_config["mail_domain_failure_types"] = ["discarded_email"]
+        if not isinstance(new_config.get("auth_fingerprint"), dict):
+            new_config["auth_fingerprint"] = {}
+        auth_fingerprint_mode = str(new_config["auth_fingerprint"].get("mode", "compat") or "compat").strip().lower()
+        if auth_fingerprint_mode not in {"compat", "upstream"}:
+            auth_fingerprint_mode = "compat"
+        new_config["auth_fingerprint"]["mode"] = auth_fingerprint_mode
         new_config["mail_domain_failure_types"] = list(dict.fromkeys(
             str(item or "").strip().lower()
             for item in new_config.get("mail_domain_failure_types", [])

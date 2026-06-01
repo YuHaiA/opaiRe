@@ -158,6 +158,10 @@ registration_timing:
   retry_403_cooldown_seconds: 6
   single_batch_gap_seconds: 1
 
+auth_fingerprint:
+  # compat=使用 v16.0.2 前稳定 Chrome110 指纹；upstream=使用上游 Chrome145 新指纹
+  mode: "compat"
+
 
 
 # Clash 节点智能轮换（本地使用clash软件）

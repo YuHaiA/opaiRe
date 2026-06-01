@@ -11,6 +11,7 @@ from utils import config as cfg
 from utils.email_providers.mail_service import get_oai_code, mask_email
 from utils.auth_core import generate_payload
 
+from . import auth_fingerprint
 from .http_utils import _post_with_retry, _oai_headers
 from .user_utils import generate_random_user_info
 
@@ -142,7 +143,7 @@ def _otp_verify_loop(
     if first_send_url:
         try:
             sentinel_send = generate_payload(did=did, flow=flow, proxy=proxy, user_agent=current_ua,
-                                             impersonate="chrome", ctx=ctx)
+                                             impersonate=auth_fingerprint.sentinel_impersonate(), ctx=ctx)
             send_headers = _oai_headers(did, {
                 "Referer": first_send_referer or referer,
                 "content-type": "application/json",
@@ -166,7 +167,7 @@ def _otp_verify_loop(
         if resend_attempt > 0:
             try:
                 sentinel_resend = generate_payload(did=did, flow=flow, proxy=proxy,
-                                                   user_agent=current_ua, impersonate="chrome", ctx=ctx)
+                                                   user_agent=current_ua, impersonate=auth_fingerprint.sentinel_impersonate(), ctx=ctx)
                 resend_headers = _oai_headers(did, {
                     "Referer": referer,
                     "content-type": "application/json"
@@ -189,7 +190,7 @@ def _otp_verify_loop(
             continue
 
         sentinel_otp = generate_payload(did=did, flow=flow, proxy=proxy, user_agent=current_ua,
-                                        impersonate="chrome", ctx=ctx)
+                                        impersonate=auth_fingerprint.sentinel_impersonate(), ctx=ctx)
         val_headers = _oai_headers(did, {
             "Referer": referer,
             "content-type": "application/json",
@@ -227,7 +228,7 @@ def _create_account_about_you(
           f"(昵称: {user_info['name']}, 生日: {user_info['birthdate']})...")
 
     sentinel_create = generate_payload(did=did, flow="create_account", proxy=proxy,
-                                       user_agent=current_ua, impersonate="chrome", ctx=ctx)
+                                       user_agent=current_ua, impersonate=auth_fingerprint.sentinel_impersonate(), ctx=ctx)
     create_headers = _oai_headers(did, {
         "Referer": "https://auth.openai.com/about-you",
         "content-type": "application/json",

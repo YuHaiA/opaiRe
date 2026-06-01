@@ -9,6 +9,7 @@ from curl_cffi import requests
 from .constants import AUTH_URL, TOKEN_URL, CLIENT_ID, DEFAULT_REDIRECT_URI, DEFAULT_SCOPE
 from .common import _random_state, _pkce_verifier, _sha256_b64url_no_pad, _parse_callback_url, _jwt_claims_no_verify
 from .http_utils import _post_form, _to_int, _ssl_verify
+from . import auth_fingerprint
 
 
 @dataclass(frozen=True)
@@ -125,7 +126,7 @@ def refresh_oauth_token(refresh_token: str, proxies: Any = None) -> Tuple[bool, 
             proxies=proxies,
             verify=_ssl_verify(),
             timeout=30,
-            impersonate="chrome110",
+            impersonate=auth_fingerprint.token_impersonate(),
         )
         if resp.status_code == 200:
             data = resp.json()

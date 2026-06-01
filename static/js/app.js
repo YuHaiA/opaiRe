@@ -1338,6 +1338,7 @@ createApp({
 
                 if (this.config) {
                     this.ensureRegistrationTimingConfig();
+                    this.ensureAuthFingerprintConfig();
                     if (!this.config.smsbower) {
                         this.config.smsbower = {
                             enabled: false, api_key: '', country: 0, service: 'dr',
@@ -1860,6 +1861,7 @@ createApp({
                     this.config.local_microsoft.suffix_len_max = maxLen;
                 }
                 this.normalizeRegistrationTimingConfig();
+                this.normalizeAuthFingerprintConfig();
                 this.config.enable_mail_domain_runtime_control = normalizeBooleanLike(this.config.enable_mail_domain_runtime_control, false);
                 this.config.enable_mail_domain_grouping = normalizeBooleanLike(this.config.enable_mail_domain_grouping, false);
                 if (this.config.mail_domain_pinpoint_burst_mode === undefined) this.config.mail_domain_pinpoint_burst_mode = false;
@@ -1974,6 +1976,26 @@ createApp({
         applyRegistrationTimingProfile(profile) {
             if (!this.config) return;
             this.config.registration_timing = this.getRegistrationTimingDefaults(profile);
+        },
+        ensureAuthFingerprintConfig() {
+            if (!this.config) return;
+            if (!this.config.auth_fingerprint || typeof this.config.auth_fingerprint !== 'object' || Array.isArray(this.config.auth_fingerprint)) {
+                this.config.auth_fingerprint = { mode: 'compat' };
+            }
+            this.normalizeAuthFingerprintConfig();
+        },
+        normalizeAuthFingerprintConfig() {
+            if (!this.config) return;
+            if (!this.config.auth_fingerprint || typeof this.config.auth_fingerprint !== 'object' || Array.isArray(this.config.auth_fingerprint)) {
+                this.config.auth_fingerprint = { mode: 'compat' };
+            }
+            const mode = String(this.config.auth_fingerprint.mode || 'compat').toLowerCase();
+            this.config.auth_fingerprint.mode = ['compat', 'upstream'].includes(mode) ? mode : 'compat';
+        },
+        setAuthFingerprintMode(mode) {
+            if (!this.config) return;
+            this.ensureAuthFingerprintConfig();
+            this.config.auth_fingerprint.mode = mode === 'upstream' ? 'upstream' : 'compat';
         },
         filterLocalAccounts(status) {
             this.accountStatusFilter = status;

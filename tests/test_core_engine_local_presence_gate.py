@@ -12,16 +12,18 @@ if "yaml" not in sys.modules:
         dump=lambda *a, **kw: "",
     )
 
+register_stub = types.SimpleNamespace(run=lambda *args, **kwargs: None)
+previous_curl_cffi_module = sys.modules.get("curl_cffi")
+previous_register_module = sys.modules.get("utils.auth_pipeline.register")
+previous_mail_service_module = sys.modules.get("utils.email_providers.mail_service")
+previous_oauth_module = sys.modules.get("utils.auth_pipeline.oauth")
+previous_postman_center_module = sys.modules.get("utils.email_providers.postman_center")
 if "curl_cffi" not in sys.modules:
     sys.modules["curl_cffi"] = types.SimpleNamespace(
         requests=types.SimpleNamespace(Session=object),
         CurlMime=object,
     )
-
-if "utils.auth_pipeline.register" not in sys.modules:
-    sys.modules["utils.auth_pipeline.register"] = types.SimpleNamespace(
-        run=lambda *args, **kwargs: None,
-    )
+sys.modules["utils.auth_pipeline.register"] = register_stub
 
 if "utils.email_providers.mail_service" not in sys.modules:
     sys.modules["utils.email_providers.mail_service"] = types.SimpleNamespace(
@@ -55,6 +57,26 @@ if "utils.email_providers.postman_center" not in sys.modules:
 
 
 from utils import core_engine
+if previous_curl_cffi_module is not None:
+    sys.modules["curl_cffi"] = previous_curl_cffi_module
+else:
+    sys.modules.pop("curl_cffi", None)
+if previous_register_module is not None:
+    sys.modules["utils.auth_pipeline.register"] = previous_register_module
+else:
+    sys.modules.pop("utils.auth_pipeline.register", None)
+if previous_mail_service_module is not None:
+    sys.modules["utils.email_providers.mail_service"] = previous_mail_service_module
+else:
+    sys.modules.pop("utils.email_providers.mail_service", None)
+if previous_oauth_module is not None:
+    sys.modules["utils.auth_pipeline.oauth"] = previous_oauth_module
+else:
+    sys.modules.pop("utils.auth_pipeline.oauth", None)
+if previous_postman_center_module is not None:
+    sys.modules["utils.email_providers.postman_center"] = previous_postman_center_module
+else:
+    sys.modules.pop("utils.email_providers.postman_center", None)
 
 
 class CoreEngineLocalPresenceGateTests(unittest.TestCase):

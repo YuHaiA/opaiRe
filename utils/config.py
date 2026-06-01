@@ -189,6 +189,7 @@ REG_PASSWORDLESS_SEND_STAGGER_SCALE: float = 0.45
 REG_EMPTY_BATCH_WAIT_SECONDS: float = 0.2
 REG_RETRY_403_COOLDOWN_SECONDS: float = 6.0
 REG_SINGLE_BATCH_GAP_SECONDS: float = 1.0
+AUTH_FINGERPRINT_MODE: str = "compat"
 ENABLE_SUB_DOMAINS: bool = False
 SUB_DOMAIN_COUNT: int = 10
 EMAIL_API_MODE: str = ""
@@ -491,6 +492,7 @@ def reload_all_configs(new_config_dict=None):
     global REG_TIMING_PROFILE, REG_SHARED_BATCH_STAGGER_SCALE
     global REG_PASSWORDLESS_SEND_STAGGER_SCALE, REG_EMPTY_BATCH_WAIT_SECONDS
     global REG_RETRY_403_COOLDOWN_SECONDS, REG_SINGLE_BATCH_GAP_SECONDS
+    global AUTH_FINGERPRINT_MODE
     global MAX_LOG_LINES
     global CPA_RETAIN_REG_ONLY, SUB2API_RETAIN_REG_ONLY, RETAIN_REG_ONLY, CPA_AUTO_RE_OAUTH, SUB2API_AUTO_RE_OAUTH
     global GMAIL_OAUTH_MASTER_EMAIL, GMAIL_OAUTH_FISSION_ENABLE, GMAIL_OAUTH_FISSION_MODE
@@ -766,6 +768,10 @@ def reload_all_configs(new_config_dict=None):
     REG_EMPTY_BATCH_WAIT_SECONDS = max(0.0, float(_timing.get("empty_batch_wait_seconds", _default_empty_wait)))
     REG_RETRY_403_COOLDOWN_SECONDS = max(0.0, float(_timing.get("retry_403_cooldown_seconds", _default_403_cooldown)))
     REG_SINGLE_BATCH_GAP_SECONDS = max(0.0, float(_timing.get("single_batch_gap_seconds", _default_single_gap)))
+    _auth_fingerprint = _c.get("auth_fingerprint", {}) or {}
+    AUTH_FINGERPRINT_MODE = str(_auth_fingerprint.get("mode", "compat") or "compat").strip().lower()
+    if AUTH_FINGERPRINT_MODE not in {"compat", "upstream"}:
+        AUTH_FINGERPRINT_MODE = "compat"
 
     ENABLE_MULTI_THREAD_REG = _c.get("enable_multi_thread_reg", False)
     REG_THREADS = _c.get("reg_threads", 3)

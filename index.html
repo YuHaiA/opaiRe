@@ -4594,6 +4594,39 @@
                                 </div>
                             </div>
 
+                            <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-200/60 border-t-8 border-t-indigo-500 bg-gradient-to-br from-indigo-50/20 to-white lg:col-span-2">
+                                <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6">
+                                    <div>
+                                        <h3 class="text-lg md:text-xl font-black text-indigo-700 flex items-center gap-2 tracking-tight">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c.943 0 1.812.33 2.495.88m-4.99 0A3.989 3.989 0 0112 11zm0 0V7m0 4v4m7-2a7 7 0 10-14 0 7 7 0 0014 0z"></path></svg>
+                                            认证指纹
+                                        </h3>
+                                        <p class="text-xs text-slate-500 font-medium mt-2">控制注册、登录、验证码、Sentinel 算力与 Token 交换使用同一套浏览器指纹。</p>
+                                    </div>
+                                    <div class="inline-flex bg-indigo-50 border border-indigo-200 rounded-xl p-1 shadow-inner">
+                                        <button type="button" @click="setAuthFingerprintMode('compat')" class="px-4 py-2 rounded-lg text-xs font-black transition-all" :class="config.auth_fingerprint?.mode !== 'upstream' ? 'bg-white text-indigo-700 shadow-sm' : 'text-indigo-500 hover:text-indigo-700'">
+                                            兼容
+                                        </button>
+                                        <button type="button" @click="setAuthFingerprintMode('upstream')" class="px-4 py-2 rounded-lg text-xs font-black transition-all" :class="config.auth_fingerprint?.mode === 'upstream' ? 'bg-white text-indigo-700 shadow-sm' : 'text-indigo-500 hover:text-indigo-700'">
+                                            上游
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                                    <div class="rounded-xl border border-indigo-100 bg-indigo-50/70 p-4">
+                                        <div class="text-xs font-black text-indigo-700 uppercase tracking-wider mb-2">兼容档</div>
+                                        <div class="font-bold text-slate-700">Chrome110 指纹，优先降低服务 1 的 403 与鉴权抖动。</div>
+                                    </div>
+                                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                        <div class="text-xs font-black text-slate-600 uppercase tracking-wider mb-2">上游档</div>
+                                        <div class="font-bold text-slate-700">Chrome145 / 上游新指纹，适合服务 3/4 或单独测试。</div>
+                                    </div>
+                                </div>
+                                <div class="mt-4 text-[11px] text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2 font-bold">
+                                    修改后保存配置，新启动的注册任务生效；正在运行中的任务建议停止后重新启动观察。
+                                </div>
+                            </div>
+
                             <div class="bg-white p-6 md:p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border border-slate-200/60 border-t-8 border-t-teal-500 bg-gradient-to-br from-teal-50/20 to-white lg:col-span-2">
                                 <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6">
                                     <div>
