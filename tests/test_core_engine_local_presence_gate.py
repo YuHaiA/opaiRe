@@ -28,6 +28,9 @@ if "utils.email_providers.mail_service" not in sys.modules:
         mask_email=lambda value: value,
         get_last_email=lambda: "",
         get_oai_code=lambda *args, **kwargs: "",
+        pop_last_domain_failure_event=lambda: None,
+        record_domain_failure=lambda *args, **kwargs: None,
+        clear_sticky_domain=lambda: None,
     )
 
 if "utils.auth_pipeline.oauth" not in sys.modules:
@@ -55,6 +58,23 @@ from utils import core_engine
 
 
 class CoreEngineLocalPresenceGateTests(unittest.TestCase):
+    def test_submit_email_409_is_retry_without_domain_failure(self):
+        core_engine.run_stats["retries"] = 0
+        core_engine.run_stats["failed"] = 0
+
+        with patch.object(core_engine.mail_service, "get_last_email", return_value="user@example.com"), \
+                patch.object(core_engine.mail_service, "pop_last_domain_failure_event", return_value=None), \
+                patch.object(core_engine.mail_service, "record_domain_failure") as record_failure, \
+                patch.object(core_engine.mail_service, "clear_sticky_domain") as clear_sticky, \
+                patch.object(core_engine.cfg, "ENABLE_SUB_DOMAINS", True, create=True):
+            status = core_engine.handle_registration_result(("retry_submit_email_409", None))
+
+        self.assertEqual(status, "retry_submit_email_409")
+        self.assertEqual(core_engine.run_stats["retries"], 1)
+        self.assertEqual(core_engine.run_stats["failed"], 0)
+        record_failure.assert_not_called()
+        clear_sticky.assert_not_called()
+
     def test_cpa_dead_remote_without_local_account_is_skipped(self):
         item = {"name": "orphan@example.com.json", "disabled": False}
         args = SimpleNamespace(proxy=None)

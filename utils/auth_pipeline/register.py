@@ -201,6 +201,9 @@ def run(
                 if signup_resp.status_code == 403:
                     print(f"[{cfg.ts()}] [WARNING] （{mask_email(email)}）注册请求触发 403 拦截，稍作等待后重试...")
                     return "retry_403", None
+                if signup_resp.status_code == 409:
+                    print(f"[{cfg.ts()}] [ERROR] （{mask_email(email)}）提交邮箱环节异常, 返回: 409")
+                    return "retry_submit_email_409", None
                 if signup_resp.status_code != 200:
                     print(f"[{cfg.ts()}] [ERROR] （{mask_email(email)}）提交邮箱环节异常, 返回: {signup_resp.status_code}")
                     return None, None

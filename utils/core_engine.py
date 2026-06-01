@@ -144,7 +144,7 @@ def _collect_sync_batch_results(futures, batch_id=None) -> tuple[int, bool, int]
         if worker_status == "success":
             success_count += 1
             continue
-        if worker_status == "retry_403":
+        if worker_status in {"retry_403", "retry_submit_email_409"}:
             retry_403_count += 1
             continue
         if worker_status == "switch_node":
@@ -172,7 +172,7 @@ async def _collect_async_batch_results(futures, batch_id=None) -> tuple[int, boo
         if worker_status == "success":
             success_count += 1
             continue
-        if worker_status == "retry_403":
+        if worker_status in {"retry_403", "retry_submit_email_409"}:
             retry_403_count += 1
             continue
         if worker_status == "switch_node":
@@ -809,7 +809,12 @@ def handle_registration_result(result: Any, cpa_upload: bool = False, run_ctx: d
     domain_failure_reason = str(run_ctx.get('mail_domain_failure_reason', '') or '').strip().lower() if run_ctx else ''
     domain_failure_event = mail_service.pop_last_domain_failure_event()
 
-    if not token_json_str or token_json_str == "retry_403":
+    if token_json_str == "retry_submit_email_409":
+        with _stats_lock:
+            run_stats["retries"] += 1
+        print(f"[{ts()}] [WARNING] 提交邮箱返回 409，按节流冲突处理，本次不计入域名失败。")
+        ret_status = "retry_submit_email_409"
+    elif not token_json_str or token_json_str == "retry_403":
         if token_json_str == "retry_403":
             with _stats_lock: run_stats["retries"] += 1
             print(f"[{ts()}] [WARNING] 检测到 403 频率限制，挂起重试...")
@@ -1743,7 +1748,7 @@ async def cpa_main_loop(args, async_stop_event: asyncio.Event, executor=None):
                             )
                         if status == "success":
                             success_in_this_cycle += 1
-                        elif status == "retry_403":
+                        elif status in {"retry_403", "retry_submit_email_409"}:
                             await _wait_registration_cooldown(
                                 async_stop_event,
                                 getattr(cfg, "REG_RETRY_403_COOLDOWN_SECONDS", 6.0),
@@ -2039,7 +2044,7 @@ async def sub2api_main_loop(args, async_stop_event: asyncio.Event, executor=None
 
                         if status == "success":
                             success_in_this_cycle += 1
-                        elif status == "retry_403":
+                        elif status in {"retry_403", "retry_submit_email_409"}:
                             await _wait_registration_cooldown(
                                 async_stop_event,
                                 getattr(cfg, "REG_RETRY_403_COOLDOWN_SECONDS", 6.0),
