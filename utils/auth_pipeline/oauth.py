@@ -125,7 +125,7 @@ def refresh_oauth_token(refresh_token: str, proxies: Any = None) -> Tuple[bool, 
             proxies=proxies,
             verify=_ssl_verify(),
             timeout=30,
-            impersonate="chrome",
+            impersonate="chrome110",
         )
         if resp.status_code == 200:
             data = resp.json()

@@ -45,7 +45,7 @@ def _post_form(
             resp = requests.post(
                 url, data=data, headers=headers,
                 proxies=proxies, verify=_ssl_verify(),
-                timeout=timeout, impersonate="chrome",
+                timeout=timeout, impersonate="chrome110",
             )
             if resp.status_code != 200:
                 raise RuntimeError(

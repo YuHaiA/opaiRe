@@ -16,6 +16,20 @@
 ## 最新修改
 
 - 修改文件：
+  - `utils/auth_pipeline/http_utils.py`
+  - `utils/auth_pipeline/oauth.py`
+  - `SYSTEM.md`
+- 变更内容：
+  - 将 OAuth token exchange 与 refresh token 请求的 `curl_cffi` 指纹从 `chrome` 调回 `chrome110`。
+  - 注册主链路、OpenAI Auth 页面跳转、Sentinel 与 OTP 请求仍保留上游 v16.0.2 的新指纹 `chrome` 与 Chrome 145 请求头。
+- 修改原因：
+  - 服务 1 在 Ubuntu/OpenSSL 3.0 环境下使用全量新指纹时，启动后 token/OAuth 兼容路径偶发鉴权失败或不稳定；对照上游发现 token 表单交换路径本身仍保留 `chrome110` 兼容策略。
+  - 该调整让当前版本回到“主注册链路新指纹，token 交换/刷新兼容旧指纹”的上游混合策略，降低服务 1 底层 TLS/指纹环境差异造成的抖动。
+- 影响范围：
+  - 仅影响 OAuth token 换取与刷新请求的 `curl_cffi` impersonate 值。
+  - 不改变注册页面访问、Sentinel、OTP、节点切换、库存、邮箱、Clash 或前端行为。
+
+- 修改文件：
   - `utils/proxy_manager.py`
   - `tests/test_proxy_manager_node_eviction.py`
   - `SYSTEM.md`
