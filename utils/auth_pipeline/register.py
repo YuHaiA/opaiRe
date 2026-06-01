@@ -96,7 +96,7 @@ def run(
     sys_handle_b = ""
     sys_handle_c = ""
     try:
-        s_reg = requests.Session(proxies=proxies, impersonate="chrome110")
+        s_reg = requests.Session(proxies=proxies, impersonate="chrome")
         s_reg.headers.update({"Connection": "close"})
         s_reg.timeout = 30
         is_takeover = False
@@ -153,7 +153,7 @@ def run(
                 except:
                     pass
                 del s_reg
-            s_reg = requests.Session(proxies=proxies, impersonate="chrome110")
+            s_reg = requests.Session(proxies=proxies, impersonate="chrome")
             s_reg.headers.update({"Connection": "close"})
             s_reg.cookies.clear()
             s_reg.timeout = 30
@@ -180,7 +180,7 @@ def run(
 
                 print(f"[{cfg.ts()}] [INFO] 正在计算（{mask_email(email)}）风控算力挑战...")
                 sentinel_signup = generate_payload(did=did, flow="authorize_continue", proxy=proxy, user_agent=current_ua,
-                                                   impersonate="chrome110", ctx=reg_ctx)
+                                                   impersonate="chrome", ctx=reg_ctx)
                 if sentinel_signup:
                     print(f"[{cfg.ts()}] [SUCCESS] （{mask_email(email)}）算力挑战成功。")
                 signup_headers = _oai_headers(did, {
@@ -218,7 +218,7 @@ def run(
                             is_takeover = True
                             login_ctx = reg_ctx.copy() if reg_ctx else {}
                             sentinel_login = generate_payload(did=did, flow="authorize_continue", proxy=proxy, user_agent=current_ua,
-                                                              impersonate="chrome110", ctx=login_ctx)
+                                                              impersonate="chrome", ctx=login_ctx)
                             login_send_headers = _oai_headers(did, {
                                 "Referer": "https://auth.openai.com/log-in/password",
                                 "content-type": "application/json",
@@ -239,12 +239,14 @@ def run(
                                 except Exception as e:
                                     print(f"[{cfg.ts()}] [WARNING] LuckMail 可用性检测异常(忽略并继续): {e}")
 
+
                             with _passwordless_flow_slot(run_ctx, worker_index):
                                 passwordless_send_delay = _get_passwordless_send_delay(run_ctx, worker_index)
                                 if passwordless_send_delay > 0:
                                     task_log_guard.sleep_with_batch_abort(passwordless_send_delay)
                                 print(f"[{cfg.ts()}] [INFO] （{mask_email(email)}）无密码通道注册发信...")
                                 sentinel_login_resp = _post_with_retry(
+
                                     s_reg,
                                     "https://auth.openai.com/api/accounts/passwordless/send-otp",
                                     headers=login_send_headers, proxies=proxies, timeout=30,
@@ -263,7 +265,7 @@ def run(
                                         print(f"\n[{cfg.ts()}] [INFO] 无密码通道正在请求重新发送登录验证码 {resend_attempt}/{cfg.MAX_OTP_RETRIES}...")
                                         try:
                                             sentinel_resend = generate_payload(did=did, flow="authorize_continue", proxy=proxy,
-                                                                               user_agent=current_ua, impersonate="chrome110",
+                                                                               user_agent=current_ua, impersonate="chrome",
                                                                                ctx=login_ctx)
                                             resend_headers = _oai_headers(did, {
                                                 "Referer": "https://auth.openai.com/email-verification",
@@ -290,7 +292,7 @@ def run(
 
                                     login_sentinel_otp = generate_payload(did=did, flow="authorize_continue", proxy=proxy,
                                                                           user_agent=current_ua,
-                                                                          impersonate="chrome110", ctx=login_ctx)
+                                                                          impersonate="chrome", ctx=login_ctx)
                                     val_headers = _oai_headers(did, {
                                         "Referer": "https://auth.openai.com/email-verification",
                                         "content-type": "application/json",
@@ -343,7 +345,7 @@ def run(
 
                 if not is_takeover:
                     sentinel_pwd = generate_payload(did=did, flow="username_password_create", proxy=proxy, user_agent=current_ua,
-                                                    impersonate="chrome110", ctx=reg_ctx)
+                                                    impersonate="chrome", ctx=reg_ctx)
                     pwd_headers = _oai_headers(did, {
                         "Referer": "https://auth.openai.com/create-account/password",
                         "content-type": "application/json",
@@ -404,7 +406,7 @@ def run(
 
                         try:
                             sentinel_send = generate_payload(did=did, flow="authorize_continue", proxy=proxy, user_agent=current_ua,
-                                                             impersonate="chrome110", ctx=reg_ctx)
+                                                             impersonate="chrome", ctx=reg_ctx)
                             send_headers = _oai_headers(did, {
                                 "Referer": "https://auth.openai.com/create-account/password",
                                 "content-type": "application/json",
@@ -435,7 +437,7 @@ def run(
                                 print(f"\n[{cfg.ts()}] [INFO] 正在重试 {resend_attempt}/{cfg.MAX_OTP_RETRIES}...")
                                 try:
                                     sentinel_resend = generate_payload(did=did, flow="authorize_continue", proxy=proxy,
-                                                                       user_agent=current_ua, impersonate="chrome110", ctx=reg_ctx)
+                                                                       user_agent=current_ua, impersonate="chrome", ctx=reg_ctx)
                                     resend_headers = _oai_headers(did, {
                                         "Referer": "https://auth.openai.com/email-verification",
                                         "content-type": "application/json"
@@ -465,7 +467,7 @@ def run(
                                 continue
 
                             sentinel_otp = generate_payload(did=did, flow="authorize_continue", proxy=proxy, user_agent=current_ua,
-                                                            impersonate="chrome110", ctx=reg_ctx)
+                                                            impersonate="chrome", ctx=reg_ctx)
                             val_headers = _oai_headers(did, {
                                 "Referer": "https://auth.openai.com/email-verification",
                                 "content-type": "application/json",
@@ -719,8 +721,10 @@ def run(
                 OAUTH_MAX_RETRIES = 2
 
                 for oauth_attempt in range(OAUTH_MAX_RETRIES):
+
                     task_log_guard.raise_if_current_batch_aborted()
-                    s_log = requests.Session(proxies=proxies, impersonate="chrome110")
+                    s_log = requests.Session(proxies=proxies, impersonate="chrome")
+
                     s_log.headers.update({"Connection": "close"})
                     s_log.cookies.clear()
                     s_log.timeout = 30
@@ -744,7 +748,7 @@ def run(
                     log_ctx["time_origin"] = float(now_ms - random.randint(20000, 300000))
 
                     sentinel_log = generate_payload(did=log_did, flow="authorize_continue", proxy=proxy, user_agent=current_ua,
-                                                    impersonate="chrome110", ctx=log_ctx)
+                                                    impersonate="chrome", ctx=log_ctx)
                     log_start_headers = _oai_headers(log_did, {
                         "Referer": current_url,
                         "content-type": "application/json",
@@ -766,7 +770,7 @@ def run(
 
                     if is_takeover:
                         # log_send_headers = generate_payload(did=log_did, flow="authorize_continue", proxy=proxy, user_agent=current_ua,
-                        #                                   impersonate="chrome110", ctx=log_ctx)
+                        #                                   impersonate="chrome", ctx=log_ctx)
                         # login_send_headers = _oai_headers(log_did, {
                         #     "Referer": "https://auth.openai.com/email-verification",
                         #     "content-type": "application/json",
@@ -807,7 +811,7 @@ def run(
                                 try:
                                     login_code_resend = generate_payload(did=log_did, flow="authorize_continue",
                                                                          proxy=proxy, user_agent=current_ua,
-                                                                         impersonate="chrome110", ctx=log_ctx)
+                                                                         impersonate="chrome", ctx=log_ctx)
                                     resend_headers = _oai_headers(log_did, {
                                         "Referer": "https://auth.openai.com/email-verification",
                                         "content-type": "application/json"
@@ -832,7 +836,7 @@ def run(
 
                             login_sentinel_otp = generate_payload(did=log_did, flow="authorize_continue", proxy=proxy,
                                                                   user_agent=current_ua,
-                                                                  impersonate="chrome110", ctx=log_ctx)
+                                                                  impersonate="chrome", ctx=log_ctx)
                             val_headers = _oai_headers(log_did, {
                                 "Referer": "https://auth.openai.com/email-verification",
                                 "content-type": "application/json",
@@ -889,7 +893,7 @@ def run(
                         resp, current_url = _follow_redirect_chain_local(s_log, pwd_page_url, proxies)
 
                         sentinel_pwd_log = generate_payload(did=log_did, flow="password_verify", proxy=proxy, user_agent=current_ua,
-                                                            impersonate="chrome110", ctx=log_ctx)
+                                                            impersonate="chrome", ctx=log_ctx)
                         login_pwd_headers = _oai_headers(log_did, {
                             "Referer": current_url,
                             "content-type": "application/json",
@@ -939,7 +943,7 @@ def run(
                                         f"\n[{cfg.ts()}] [INFO] （{mask_email(email)}）二次安全验证未收到验证码或校验失败，正在重试 {resend_attempt}/{cfg.MAX_OTP_RETRIES}...")
                                     try:
                                         sentinel_log_resend = generate_payload(did=log_did, flow="authorize_continue", proxy=proxy,
-                                                                               user_agent=current_ua, impersonate="chrome110", ctx=log_ctx)
+                                                                               user_agent=current_ua, impersonate="chrome", ctx=log_ctx)
                                         log_resend_headers = _oai_headers(log_did, {
                                             "Referer": "https://auth.openai.com/email-verification",
                                             "content-type": "application/json"
@@ -963,7 +967,7 @@ def run(
                                     continue
 
                                 sentinel_otp2 = generate_payload(did=log_did, flow="authorize_continue", proxy=proxy,
-                                                                 user_agent=current_ua, impersonate="chrome110", ctx=log_ctx)
+                                                                 user_agent=current_ua, impersonate="chrome", ctx=log_ctx)
                                 val2_headers = _oai_headers(log_did, {
                                     "Referer": "https://auth.openai.com/email-verification",
                                     "content-type": "application/json",
@@ -1146,7 +1150,7 @@ def run_oauth_only(email: str, password: str, proxy: Optional[str], run_ctx: dic
     email_jwt = ""
 
     try:
-        s_init = requests.Session(proxies=proxies, impersonate="chrome110")
+        s_init = requests.Session(proxies=proxies, impersonate="chrome")
         if device_id and user_agent:
             did = device_id
             current_ua = user_agent
@@ -1181,7 +1185,7 @@ def run_oauth_only(email: str, password: str, proxy: Optional[str], run_ctx: dic
         OAUTH_MAX_RETRIES = 2
 
         for oauth_attempt in range(OAUTH_MAX_RETRIES):
-            s_log = requests.Session(proxies=proxies, impersonate="chrome110")
+            s_log = requests.Session(proxies=proxies, impersonate="chrome")
             s_log.headers.update({"Connection": "close"})
             s_log.cookies.clear()
             s_log.timeout = 30
@@ -1205,7 +1209,7 @@ def run_oauth_only(email: str, password: str, proxy: Optional[str], run_ctx: dic
             log_ctx["time_origin"] = float(now_ms - random.randint(20000, 300000))
 
             sentinel_log = generate_payload(did=log_did, flow="authorize_continue", proxy=proxy, user_agent=current_ua,
-                                            impersonate="chrome110", ctx=log_ctx)
+                                            impersonate="chrome", ctx=log_ctx)
             log_start_headers = _oai_headers(log_did, {
                 "Referer": current_url,
                 "content-type": "application/json",
@@ -1251,7 +1255,7 @@ def run_oauth_only(email: str, password: str, proxy: Optional[str], run_ctx: dic
                         try:
                             login_code_resend = generate_payload(did=log_did, flow="authorize_continue",
                                                                  proxy=proxy, user_agent=current_ua,
-                                                                 impersonate="chrome110", ctx=log_ctx)
+                                                                 impersonate="chrome", ctx=log_ctx)
                             resend_headers = _oai_headers(log_did, {
                                 "Referer": "https://auth.openai.com/email-verification",
                                 "content-type": "application/json"
@@ -1276,7 +1280,7 @@ def run_oauth_only(email: str, password: str, proxy: Optional[str], run_ctx: dic
 
                     login_sentinel_otp = generate_payload(did=log_did, flow="authorize_continue", proxy=proxy,
                                                           user_agent=current_ua,
-                                                          impersonate="chrome110", ctx=log_ctx)
+                                                          impersonate="chrome", ctx=log_ctx)
                     val_headers = _oai_headers(log_did, {
                         "Referer": "https://auth.openai.com/email-verification",
                         "content-type": "application/json",
@@ -1332,7 +1336,7 @@ def run_oauth_only(email: str, password: str, proxy: Optional[str], run_ctx: dic
 
                 sentinel_pwd_log = generate_payload(did=log_did, flow="password_verify", proxy=proxy,
                                                     user_agent=current_ua,
-                                                    impersonate="chrome110", ctx=log_ctx)
+                                                    impersonate="chrome", ctx=log_ctx)
                 login_pwd_headers = _oai_headers(log_did, {
                     "Referer": current_url,
                     "content-type": "application/json",
@@ -1381,7 +1385,7 @@ def run_oauth_only(email: str, password: str, proxy: Optional[str], run_ctx: dic
                             try:
                                 sentinel_log_resend = generate_payload(did=log_did, flow="authorize_continue",
                                                                        proxy=proxy,
-                                                                       user_agent=current_ua, impersonate="chrome110",
+                                                                       user_agent=current_ua, impersonate="chrome",
                                                                        ctx=log_ctx)
                                 log_resend_headers = _oai_headers(log_did, {
                                     "Referer": "https://auth.openai.com/email-verification",
@@ -1406,7 +1410,7 @@ def run_oauth_only(email: str, password: str, proxy: Optional[str], run_ctx: dic
                             continue
 
                         sentinel_otp2 = generate_payload(did=log_did, flow="authorize_continue", proxy=proxy,
-                                                         user_agent=current_ua, impersonate="chrome110", ctx=log_ctx)
+                                                         user_agent=current_ua, impersonate="chrome", ctx=log_ctx)
                         val2_headers = _oai_headers(log_did, {
                             "Referer": "https://auth.openai.com/email-verification",
                             "content-type": "application/json",
@@ -1426,7 +1430,7 @@ def run_oauth_only(email: str, password: str, proxy: Optional[str], run_ctx: dic
                             break
                         else:
                             print(
-                                f"[{cfg.ts()}] [WARNING] （{mask_email(email)}）二次安全验证 OTP 校验失败: {code2_resp.json()}")
+                                f"[{cfg.ts()}] [WARNING] （{mask_email(email)}）二次安全验证 OTP 校验失败: {code2_resp.status_code}")
                             print(f"[{cfg.ts()}] [INFO] （{mask_email(email)}）准备请求新的二次安全验证码并重试...")
                             code2 = ""
                             continue
