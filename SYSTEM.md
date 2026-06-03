@@ -16,6 +16,31 @@
 ## 最新修改
 
 - 修改文件：
+  - `utils/auth_core.cpython-311-aarch64-linux-gnu.so`
+  - `utils/auth_core.cpython-311-darwin.so`
+  - `utils/auth_core.cpython-311-x86_64-linux-gnu.so`
+  - `utils/auth_core.pyd`
+  - `utils/auth_pipeline/auth_fingerprint.py`
+  - `utils/auth_pipeline/http_utils.py`
+  - `utils/core_engine.py`
+  - `utils/config.py`
+  - `utils/integrations/fivesim_sms.py`
+  - `utils/integrations/smsbower_sms.py`
+  - `SYSTEM.md`
+- 变更内容：
+  - 吸收上游 `v16.0.3` / `e798210` 更新，`APP_VERSION` 同步提升到 `v16.0.3`。
+  - 同步上游新版 `auth_core` 二进制与 5SIM / SmsBower 接码优化，包括新版指纹、短等待后触发重发、SmsBower `providerIds` 参数与更长取号超时。
+  - 保留本项目 `auth_fingerprint.mode` 前端/后端可配置入口，但调整 `token_impersonate()` 固定返回 `chrome110`。
+  - 因此 `compat` 档为注册、Sentinel、OAuth token 全部使用 Chrome110；`upstream` 档为注册与 Sentinel 使用上游新版 Chrome 指纹，OAuth token exchange / refresh 仍使用 Chrome110。
+  - 合并 `core_engine.py` 冲突时保留上游 OAuth 复活并发信号量与随机抖动，同时保留本地复活失败状态记录、复活成功清理失败状态、本地账号库不存在时写清晰失败原因的逻辑。
+- 修改原因：
+  - 上游 `v16.0.3` 提交说明为“修复新版指纹导致的异常问题”，核心修复不是全链路新指纹，而是 token 换取/刷新路径回到 `chrome110`，同时注册/Sentinel 继续使用新版 `chrome`。
+  - 服务 1 之前在全链路新指纹或频繁切换时出现鉴权抖动；将 token 环节固定兼容档可以减少 OAuth 阶段的 TLS/HTTP 指纹不一致风险。
+- 影响范围：
+  - 影响认证指纹策略、OAuth token 换取/刷新、接码服务提交号码与重发流程、自动 OAuth 复活节奏。
+  - 不覆盖本地 Clash 节点拉黑/标优、候选池底线、注册节奏配置、前端指纹切换入口或复活失败筛选逻辑。
+
+- 修改文件：
   - `utils/auth_pipeline/auth_fingerprint.py`
   - `utils/auth_pipeline/http_utils.py`
   - `utils/auth_pipeline/oauth.py`

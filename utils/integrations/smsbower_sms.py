@@ -457,10 +457,10 @@ def _smsbower_get_number(proxies: Any, *, service_code: str, country_id: int) ->
     params = {"service": service_code, "country": country_id}
     operator_id = str(getattr(cfg, 'SMSBOWER_OPERATOR', '')).strip()
     if operator_id:
-        params["operator"] = operator_id
+        params["providerIds"] = operator_id
     if _smsbower_order_max_price() > 0: params["maxPrice"] = _smsbower_order_max_price()
     if _smsbower_order_min_price() > 0: params["minPrice"] = _smsbower_order_min_price()
-    ok, text, data = _smsbower_request("getNumberV2", proxies=proxies, params=params, timeout=30)
+    ok, text, data = _smsbower_request("getNumberV2", proxies=proxies, params=params, timeout=50)
 
     if ok and isinstance(data, dict):
         aid = str(data.get("activationId", ""))
@@ -480,8 +480,9 @@ def _smsbower_get_number(proxies: Any, *, service_code: str, country_id: int) ->
     return "", "", text or str(data) or "NO_NUMBERS", ""
 
 
-def _smsbower_poll_code(activation_id: str, proxies: Any) -> str:
-    timeout_sec, started_at = _smsbower_poll_timeout_sec(), time.time()
+def _smsbower_poll_code(activation_id: str, proxies: Any, timeout_override: int = 0) -> str:
+    timeout_sec = timeout_override if timeout_override > 0 else _smsbower_poll_timeout_sec()
+    started_at = time.time()
     _info(f"⏳ 开始等待 SmsBower 短信验证码 (最大等待 {timeout_sec} 秒)...")
     last_print_time = time.time()
 
@@ -536,7 +537,7 @@ def try_verify_phone_via_smsbower(session: requests.Session, *, proxies: Any, hi
                 flow="authorize_continue",
                 proxy=proxy,
                 user_agent=user_agent,
-                impersonate="chrome110",
+                impersonate="chrome",
                 ctx=run_ctx
             )
 
@@ -553,7 +554,29 @@ def try_verify_phone_via_smsbower(session: requests.Session, *, proxies: Any, hi
                 return False, "", fail_reason
 
             _info(f"[{source}] ✅ OpenAI 接受了号码，开始轮询验证码...")
-            sms_code = _smsbower_poll_code(activation_id, proxies)
+            sms_code = _smsbower_poll_code(activation_id, proxies, timeout_override=30)
+            if not sms_code:
+                _warn(f"[{source}] ⚠ 未收到验证码，直接触发重发机制...")
+                _sleep_interruptible(1.0)
+
+                send_sentinel_2 = generate_payload(
+                    did=device_id, flow="authorize_continue", proxy=proxy,
+                    user_agent=user_agent, impersonate="chrome", ctx=run_ctx
+                )
+                if send_sentinel_2: send_hdrs["openai-sentinel-token"] = send_sentinel_2
+
+                _info(f"[{source}] (重发) 正在向 OpenAI 再次提交号码 {phone_number}...")
+                send_resp_2 = _post_with_retry(session, "https://auth.openai.com/api/accounts/add-phone/send",
+                                               headers=send_hdrs, json_body={"phone_number": phone_number},
+                                               proxies=proxies)
+                if send_resp_2.status_code != 200:
+                    fail_reason = f"重发失败 HTTP {send_resp_2.status_code}"
+                    _warn(f"[{source}] ❌ 重发提交被 OpenAI 拦截: {fail_reason}")
+                    return False, "", fail_reason
+
+                _info(f"[{source}] ✅ 已重新请求发送，开始轮询验证码 (等待最大超时)...")
+                sms_code = _smsbower_poll_code(activation_id, proxies, timeout_override=0)
+
             if not sms_code:
                 return False, "", "接码超时"
 
@@ -565,7 +588,7 @@ def try_verify_phone_via_smsbower(session: requests.Session, *, proxies: Any, hi
                 flow="authorize_continue",
                 proxy=proxy,
                 user_agent=user_agent,
-                impersonate="chrome110",
+                impersonate="chrome",
                 ctx=run_ctx
             )
 

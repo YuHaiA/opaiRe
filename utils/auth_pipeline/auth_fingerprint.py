@@ -61,7 +61,7 @@ def sentinel_impersonate() -> str:
 
 
 def token_impersonate() -> str:
-    return current_profile().impersonate
+    return _COMPAT_PROFILE.impersonate
 
 
 def _make_trace_headers() -> dict[str, str]:
