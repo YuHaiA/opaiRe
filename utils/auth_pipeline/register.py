@@ -598,7 +598,8 @@ def run(
                     except Exception as e:
                         pass
                 data = image2api_data(s_reg, target_continue_url, proxies)
-
+                if isinstance(data, dict):
+                    data = data.get("access_token") or data.get("token") or str(data)
 
 
                 if mode_label == "常规模式":

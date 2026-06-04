@@ -66,12 +66,14 @@ class Image2APIClient:
                 **self.request_kwargs
             )
             status = response.status_code
-            response.close()
             if status in (200, 201, 204):
+                response.close()
                 logger.info(f"Image2API 推送成功: {len(tokens)} 个账号 (HTTP {status})")
                 return True, f"成功推送 {len(tokens)} 个账号"
             else:
-                logger.warning(f"Image2API 推送失败，返回状态码: HTTP {status}")
+                body = response.text[:300] if response.text else ""
+                response.close()
+                logger.warning(f"Image2API 推送失败，返回状态码: HTTP {status}, 响应: {body}")
                 return False, f"推送失败，远端返回状态码: {status}"
         except Exception as exc:
             logger.error("向 Image2API 推送网络请求失败: %s", exc)
