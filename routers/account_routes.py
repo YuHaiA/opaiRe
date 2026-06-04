@@ -222,6 +222,11 @@ def account_action(data: dict, token: str = Depends(verify_token)):
                         print(f"[{cfg.ts()}] [成功] ✅ 账号 {mask_email(email)} 成功推送至 Sub2API！")
                 elif action == "push_image2api":
                     access_token = token_data.get("access_token")
+                    if not access_token:
+                        fail_count += 1
+                        last_error = f"账号 {email} 缺少 access_token"
+                        print(f"[{cfg.ts()}] [警告] ❌ 账号 {mask_email(email)} 缺少 access_token，跳过。")
+                        continue
                     success, resp = img_client.add_accounts([access_token])
                     if not success:
                         last_error = resp

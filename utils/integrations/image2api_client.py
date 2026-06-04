@@ -52,9 +52,14 @@ class Image2APIClient:
         if not tokens:
             return False, "没有需要上传的 Token"
 
+        # 过滤掉 None 或空字符串，防止推送 [null] 导致远端报错
+        valid_tokens = [t for t in tokens if t and isinstance(t, str) and t.strip()]
+        if not valid_tokens:
+            return False, "过滤后没有有效的 Token 需要上传"
+
         url = f"{self.api_url}/api/accounts"
         payload = {
-            "tokens": tokens
+            "tokens": valid_tokens
         }
 
         try:
