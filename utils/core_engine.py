@@ -855,7 +855,19 @@ def handle_registration_result(result: Any, cpa_upload: bool = False, run_ctx: d
             token_data['user_agent'] = run_ctx['user_agent']
             token_json_str = json.dumps(token_data, ensure_ascii=False)
 
-
+        if not cpa_upload and not cfg.ENABLE_SUB2API_MODE and getattr(cfg, "ENABLE_IMAGE2API_MODE", False):
+            try:
+                access_token = token_data.get("access_token", "")
+                if access_token:
+                    from utils.integrations.image2api_client import Image2APIClient
+                    client = Image2APIClient()
+                    ok, msg = client.add_accounts([access_token])
+                    if ok:
+                        print(f"[{ts()}] [SUCCESS] [IMAGE2API] 账号 {mask_email(account_email)} 同步成功")
+                    else:
+                        print(f"[{ts()}] [ERROR] [IMAGE2API] 账号 {mask_email(account_email)} 同步失败: {msg}")
+            except Exception as e:
+                print(f"[{ts()}] [ERROR] [IMAGE2API] 推送异常: {e}")
 
         domain_result = mail_service.record_domain_success(account_email if account_email and "@" in account_email else cur_dom)
         if domain_result:
