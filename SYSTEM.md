@@ -16,6 +16,19 @@
 ## 最新修改
 
 - 修改文件：
+  - `utils/auth_pipeline/register.py`
+  - `SYSTEM.md`
+- 变更内容：
+  - 将注册成功后的 `image2api_data` 提取流程回退为原始路径，恢复为直接复用当前注册会话 `s_reg` 调用 `image2api_data(s_reg, target_continue_url, proxies)`。
+  - 移除了本地未提交的 `s_img = requests.Session(... impersonate="chrome")` 二次提取补丁，以及对应的“返回空数据，跳过推送”额外告警。
+- 修改原因：
+  - 对照上游与服务器 1 现场后，确认 Linux 侧 `auth_core` 编译文件并未偏离上游，主要分叉来自本地对 `img` 提取环节新增的补丁。
+  - 用户要求先回到原始 `img` 提取流程，排除这段二开补丁对注册后 img 凭证提取的影响。
+- 影响范围：
+  - 仅影响注册成功后 `image2api_data` 的调用方式。
+  - 不改变当前批次调度、`auth_fingerprint` 指纹抽象、OAuth 提权流程、409/403 重试策略或节点切换逻辑。
+
+- 修改文件：
   - `config.example.yaml`
   - `index.html`
   - `static/js/app.js`

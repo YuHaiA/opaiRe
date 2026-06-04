@@ -605,7 +605,6 @@ def run(
                 elif not isinstance(data, str):
                     data = None
 
-
                 if mode_label == "常规模式":
                     if getattr(cfg, "ENABLE_IMAGE2API_MODE", False):
                         print(f"[{cfg.ts()}] [INFO] [IMAGE2API] （{mask_email(email)}）根据配置将同步至IMAGE2API平台。")
