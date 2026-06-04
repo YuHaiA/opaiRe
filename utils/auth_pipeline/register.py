@@ -75,6 +75,25 @@ def _passwordless_flow_slot(run_ctx: dict, worker_index: Optional[int]):
         _SHARED_PASSWORDLESS_GATE.release()
 
 
+def _normalize_image2api_token(raw_data) -> Optional[str]:
+    if isinstance(raw_data, str):
+        token = raw_data.strip()
+        return token or None
+
+    if isinstance(raw_data, dict):
+        return _normalize_image2api_token(
+            raw_data.get("access_token") or raw_data.get("token")
+        )
+
+    if isinstance(raw_data, (list, tuple)):
+        for item in raw_data:
+            token = _normalize_image2api_token(item)
+            if token:
+                return token
+
+    return None
+
+
 def run(
     proxy: Optional[str],
     run_ctx: dict = None,
@@ -597,13 +616,13 @@ def run(
                         print(f"[{cfg.ts()}] [INFO] [{mode_label}] （{mask_email(email)}）账号已注册成功，根据配置提前作为半成品写入本地库。")
                     except Exception as e:
                         pass
-                data = image2api_data(s_reg, target_continue_url, proxies)
-                if isinstance(data, (list, tuple)):
-                    data = data[0] if data and data[0] else None
-                elif isinstance(data, dict):
-                    data = data.get("access_token") or data.get("token") or None
-                elif not isinstance(data, str):
-                    data = None
+                raw_image2api_data = image2api_data(s_reg, target_continue_url, proxies)
+                data = _normalize_image2api_token(raw_image2api_data)
+                if raw_image2api_data and not data:
+                    print(
+                        f"[{cfg.ts()}] [WARNING] [IMAGE2API] （{mask_email(email)}）"
+                        f"提取结果类型异常，已跳过无效推送数据: {type(raw_image2api_data).__name__}"
+                    )
 
                 if mode_label == "常规模式":
                     if getattr(cfg, "ENABLE_IMAGE2API_MODE", False):

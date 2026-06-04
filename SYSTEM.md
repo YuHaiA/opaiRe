@@ -19,6 +19,40 @@
   - `utils/auth_pipeline/register.py`
   - `SYSTEM.md`
 - 变更内容：
+  - 新增 `_normalize_image2api_token()`，将注册成功后 `image2api_data()` 的返回统一兼容为单一 `access_token` 字符串。
+  - 保持上游原始自动推送节奏不变，仍在 `image2api_data(s_reg, target_continue_url, proxies)` 后立刻执行 Image2API 自动同步。
+  - 当 `auth_core` 返回 `dict`、`tuple`、`list` 或其他非字符串结构且无法提取有效 token 时，增加一条本地告警并跳过无效推送，避免把异常结构直接送到 `/api/accounts` 触发 `HTTP 422`。
+- 修改原因：
+  - 对照上游 `utils/auth_pipeline/register.py` 与 `utils/integrations/image2api_client.py` 后确认，注册主流程并未被本地大幅改写，真正差异集中在 Image2API 推送前是否对 `image2api_data()` 的返回做兼容清洗。
+  - 服务器 3 已验证当前 `Image2API` 鉴权可通，剩余主要异常为 `HTTP 422`，更符合上游编译版 `auth_core` 偶发返回非纯 token 结构而被原样推送的场景。
+- 影响范围：
+  - 仅影响注册成功后自动推送到 Image2API 前的数据整理逻辑。
+  - 不改变上游注册、OAuth、接码、节点调度与数据库写入主流程。
+
+- 修改文件：
+  - `SYSTEM.md`
+- 远端变更：
+  - 按 Server 3 轻量源代码覆盖流程，将上游标签 `v16.1.0`（提交 `4c3ec71`，时间 `2026-06-04 16:13:38 +0800`）直接部署到 `/home/opc/opaiRe`。
+  - 由于 Server 3 现场目录不是 Git 工作树（`git rev-parse` 返回 `no_git`），本次未走远端 `git pull`，改为本地 `git archive v16.1.0` 导出源码包，再上传并在远端用 `rsync -a --delete` 覆盖源码。
+  - 覆盖时显式排除并保留了远端运行态目录与文件：`data/`、`.venv/`、`.codex/`、`data/mihomo-pool/`、测试目录和缓存目录。
+- 修改原因：
+  - 用户要求直接把上游最新版本推送到 Server 3，而不是先在本地完整合并后再挑选部署。
+  - Server 3 为轻量 Oracle E2 源码部署机，需优先保护授权、数据库、配置与 Mihomo 运行态，不适合重建环境或覆盖 `data/`。
+- 验证结果：
+  - 远端 `/home/opc/opaiRe/utils/config.py` 已显示 `APP_VERSION = "v16.1.0"`。
+  - `systemctl is-active opaire-lite.service` 返回 `active`。
+  - `systemctl is-active nginx` 返回 `active`。
+  - `curl http://127.0.0.1:8000/` 返回 `200`。
+  - `curl http://127.0.0.1/` 返回 `301`，符合 Nginx 反向代理 / 重定向行为。
+  - `journalctl -u opaire-lite.service -n 40` 显示新进程已启动，并打印控制台地址 `http://127.0.0.1:8000`。
+- 影响范围：
+  - 本次是 Server 3 直接切到上游 `v16.1.0` 代码，不包含本地 `main` 分支中后续的 Image2API 定制修补。
+  - 不改变远端 `data/config.yaml`、`data/data.db`、`data/mihomo-pool`、`.venv` 或 `.codex` 的既有状态。
+
+- 修改文件：
+  - `utils/auth_pipeline/register.py`
+  - `SYSTEM.md`
+- 变更内容：
   - 将注册成功后的 `image2api_data` 提取流程回退为原始路径，恢复为直接复用当前注册会话 `s_reg` 调用 `image2api_data(s_reg, target_continue_url, proxies)`。
   - 移除了本地未提交的 `s_img = requests.Session(... impersonate="chrome")` 二次提取补丁，以及对应的“返回空数据，跳过推送”额外告警。
 - 修改原因：
