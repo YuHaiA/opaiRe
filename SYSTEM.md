@@ -16,6 +16,29 @@
 ## 最新修改
 
 - 修改文件：
+  - `config.example.yaml`
+  - `index.html`
+  - `static/js/app.js`
+  - `utils/auth_pipeline/register.py`
+  - `utils/config.py`
+  - `utils/integrations/fivesim_sms.py`
+  - `utils/integrations/smsbower_sms.py`
+  - `SYSTEM.md`
+- 变更内容：
+  - 吸收上游 `v16.0.4` / `44b0623` 更新，`APP_VERSION` 同步提升到 `v16.0.4`。
+  - SmsBower 新增 `web_cookie` 配置与前端输入框，用于拉取 Web 端国家/线路成功率统计；配置读取到 `SMSBOWER_WEB_COOKIE`。
+  - SmsBower 国家价格列表在存在 Web Cookie 时会并发拉取各国家 provider 成功率，并按成功率、价格、库存排序。
+  - 5SIM 国家/线路选择新增成功率维度排序，解除单全局接码锁，允许并发验证；失败原因和重发日志同步上游文案。
+  - OAuth 流程吸收上游“复用同一个 OAuth URL 并遇到 add-phone 先随机等待后重试一次”的逻辑。
+  - 保留本项目 `auth_fingerprint.mode` 可配置指纹模块与前端入口，未回退为上游硬编码 `chrome`。
+- 修改原因：
+  - 上游 `v16.0.4` 主要增强接码国家/线路选择质量，并尝试降低 OAuth add-phone / N 验触发后的直接手机号验证概率。
+  - 本项目仍需要保留服务 1 稳定优先的兼容指纹档，因此只吸收上游业务逻辑，不覆盖本地指纹抽象。
+- 影响范围：
+  - 影响 SmsBower / 5SIM 国家线路排序、接码并发、OAuth add-phone 重试节奏、前端接码配置展示。
+  - 不改变 Clash 节点池、标优/拉黑逻辑、账号复活失败状态、注册节奏配置或 OAuth token `chrome110` 兼容策略。
+
+- 修改文件：
   - `utils/auth_core.cpython-311-aarch64-linux-gnu.so`
   - `utils/auth_core.cpython-311-darwin.so`
   - `utils/auth_core.cpython-311-x86_64-linux-gnu.so`
