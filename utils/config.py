@@ -10,7 +10,6 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 from utils.proxy_manager import reload_proxy_config
 from utils.integrations.sub2api_proxy import get_valid_sub2api_proxy_urls
-from utils.config_save_guard import CLASH_RUNTIME_REPLACE_KEYS
 
 CONFIG_FILE_LOCK = threading.Lock()
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -179,17 +178,10 @@ def init_config():
                 print(f"[{ts()}] [WARNING] 自动补全配置文件写入失败: {e}")
 
     return user_config
-APP_VERSION = "v16.0.4"
+APP_VERSION = "v16.1.1"
 _c: dict = {}
 WEB_PASSWORD: str = "admin"
 RETAIN_REG_ONLY: bool = False
-REG_TIMING_PROFILE: str = "fast"
-REG_SHARED_BATCH_STAGGER_SCALE: float = 0.45
-REG_PASSWORDLESS_SEND_STAGGER_SCALE: float = 0.45
-REG_EMPTY_BATCH_WAIT_SECONDS: float = 0.2
-REG_RETRY_403_COOLDOWN_SECONDS: float = 6.0
-REG_SINGLE_BATCH_GAP_SECONDS: float = 1.0
-AUTH_FINGERPRINT_MODE: str = "compat"
 ENABLE_SUB_DOMAINS: bool = False
 SUB_DOMAIN_COUNT: int = 10
 EMAIL_API_MODE: str = ""
@@ -385,7 +377,7 @@ CLUSTER_SYNC_REQUIRE_CUSTOM_SECRET: bool = True
 TEMPORAM_COOKIE: str = ""
 FVIA_TOKEN: str = ""
 TMAILOR_CURRENT_TOKEN: str = ""
-REG_MODE: str = "protocol"
+REG_MODE: str = "email"
 DB_TYPE: str = "sqlite"
 MYSQL_CFG: dict = {}
 _sub2api_proxy_rotation_lock = threading.Lock()
@@ -490,10 +482,6 @@ def reload_all_configs(new_config_dict=None):
     global LOCAL_MS_ENABLE_FISSION, LOCAL_MS_MASTER_EMAIL, LOCAL_MS_PASSWORD, LOCAL_MS_CLIENT_ID, LOCAL_MS_REFRESH_TOKEN, LOCAL_MS_POOL_FISSION
     global LOCAL_MS_SUFFIX_MODE, LOCAL_MS_SUFFIX_LEN_MIN, LOCAL_MS_SUFFIX_LEN_MAX
     global DB_TYPE, MYSQL_CFG
-    global REG_TIMING_PROFILE, REG_SHARED_BATCH_STAGGER_SCALE
-    global REG_PASSWORDLESS_SEND_STAGGER_SCALE, REG_EMPTY_BATCH_WAIT_SECONDS
-    global REG_RETRY_403_COOLDOWN_SECONDS, REG_SINGLE_BATCH_GAP_SECONDS
-    global AUTH_FINGERPRINT_MODE
     global MAX_LOG_LINES
     global CPA_RETAIN_REG_ONLY, SUB2API_RETAIN_REG_ONLY, RETAIN_REG_ONLY, CPA_AUTO_RE_OAUTH, SUB2API_AUTO_RE_OAUTH
     global GMAIL_OAUTH_MASTER_EMAIL, GMAIL_OAUTH_FISSION_ENABLE, GMAIL_OAUTH_FISSION_MODE
@@ -537,41 +525,17 @@ def reload_all_configs(new_config_dict=None):
             print(f"[{ts()}] [WARNING] 无法连接到云端数据库，退回本地 YAML 模式: {e}")
 
     if new_config_dict is not None:
-        # 合并策略：以 base_yaml_config（当前完整配置）为基础，
-        # 仅将 new_config_dict 中显式提供的 key 覆盖进去
-        # 对于嵌套 dict，递归合并确保不丢失未提供的子 key
-        def _deep_merge(base, overlay, path=()):
-            """递归合并 overlay 到 base，仅覆盖 overlay 中出现的 key"""
-            for key, value in overlay.items():
-                current_path = path + (key,)
-                should_replace_clash_runtime = (
-                    len(current_path) == 2
-                    and current_path[0] == "clash_proxy_pool"
-                    and current_path[1] in CLASH_RUNTIME_REPLACE_KEYS
-                )
-                if (
-                    not should_replace_clash_runtime
-                    and key in base
-                    and isinstance(base[key], dict)
-                    and isinstance(value, dict)
-                ):
-                    _deep_merge(base[key], value, current_path)
-                else:
-                    base[key] = value
-
-        merged = dict(base_yaml_config)  # 当前完整配置
-        _deep_merge(merged, new_config_dict)  # 仅覆盖 new_config_dict 有的 key
-        _c = merged
+        _c = new_config_dict
         try:
             with CONFIG_FILE_LOCK:
                 with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-                    yaml.dump(merged, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
+                    yaml.dump(new_config_dict, f, allow_unicode=True, sort_keys=False, default_flow_style=False)
         except Exception:
             pass
 
         if is_cloud_db and db_ready:
             try:
-                set_sys_kv("global_app_config", merged)
+                set_sys_kv("global_app_config", new_config_dict)
             except Exception:
                 pass
     else:
@@ -579,12 +543,7 @@ def reload_all_configs(new_config_dict=None):
             db_config = get_sys_kv("global_app_config")
             if db_config:
                 deep_update_config(base_yaml_config, db_config)
-                _c = base_yaml_config
-                # 云端配置可能残缺（之前被写坏过），修复后写回完整配置
-                try:
-                    set_sys_kv("global_app_config", _c)
-                except Exception:
-                    pass
+                _c = db_config
             else:
                 _c = base_yaml_config
                 set_sys_kv("global_app_config", _c)
@@ -750,29 +709,6 @@ def reload_all_configs(new_config_dict=None):
     USE_ORIGINAL_PASSWORD_FLOW = bool(_ocpa.get("use_original_password_flow", False))
 
     DEFAULT_PROXY = format_docker_url(_c.get("default_proxy", ""))
-    _timing = _c.get("registration_timing", {}) or {}
-    REG_TIMING_PROFILE = str(_timing.get("profile", "fast") or "fast").strip().lower()
-    if REG_TIMING_PROFILE == "safe":
-        _default_stagger_scale = 1.0
-        _default_send_scale = 1.0
-        _default_empty_wait = 1.0
-        _default_403_cooldown = 15.0
-        _default_single_gap = 5.0
-    else:
-        _default_stagger_scale = 0.45
-        _default_send_scale = 0.45
-        _default_empty_wait = 0.2
-        _default_403_cooldown = 6.0
-        _default_single_gap = 1.0
-    REG_SHARED_BATCH_STAGGER_SCALE = max(0.0, float(_timing.get("shared_batch_stagger_scale", _default_stagger_scale)))
-    REG_PASSWORDLESS_SEND_STAGGER_SCALE = max(0.0, float(_timing.get("passwordless_send_stagger_scale", _default_send_scale)))
-    REG_EMPTY_BATCH_WAIT_SECONDS = max(0.0, float(_timing.get("empty_batch_wait_seconds", _default_empty_wait)))
-    REG_RETRY_403_COOLDOWN_SECONDS = max(0.0, float(_timing.get("retry_403_cooldown_seconds", _default_403_cooldown)))
-    REG_SINGLE_BATCH_GAP_SECONDS = max(0.0, float(_timing.get("single_batch_gap_seconds", _default_single_gap)))
-    _auth_fingerprint = _c.get("auth_fingerprint", {}) or {}
-    AUTH_FINGERPRINT_MODE = str(_auth_fingerprint.get("mode", "compat") or "compat").strip().lower()
-    if AUTH_FINGERPRINT_MODE not in {"compat", "upstream"}:
-        AUTH_FINGERPRINT_MODE = "compat"
 
     ENABLE_MULTI_THREAD_REG = _c.get("enable_multi_thread_reg", False)
     REG_THREADS = _c.get("reg_threads", 3)
@@ -1003,7 +939,7 @@ def reload_all_configs(new_config_dict=None):
     CLUSTER_SYNC_MAX_RECORDS = safe_int(_c.get("cluster_sync_max_records", 100000), 100000, minimum=1)
     CLUSTER_SYNC_REQUIRE_CUSTOM_SECRET = safe_bool(_c.get("cluster_sync_require_custom_secret", True), default=True)
 
-    REG_MODE = str(_c.get("reg_mode", "protocol")).strip().lower()
+    REG_MODE = str(_c.get("reg_mode", "email")).strip().lower()
 
     _temporam = _c.get("temporam", {})
     TEMPORAM_COOKIE = str(_temporam.get("cookie") or "").strip()

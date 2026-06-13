@@ -180,19 +180,22 @@ def add_subscription(name: str, url: str, make_selected: bool = False) -> tuple[
     config_data = _read_runtime_config()
     clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
     subscriptions = _normalize_subscriptions(clash_conf.get("sub_urls", []), clash_conf.get("sub_url", ""))
+    current_url = str(clash_conf.get("sub_url") or "").strip()
+    current_id = str(clash_conf.get("selected_subscription_id") or "").strip()
     for item in subscriptions:
         if item["url"] == url:
             item["name"] = name
             clash_conf["sub_urls"] = subscriptions
-            if make_selected:
+            should_sync = make_selected or item["url"] == current_url or item["id"] == current_id
+            if should_sync:
                 success, message = patch_and_update(url, "all", item["id"])
                 if not success:
-                    return False, f"订阅已存在，但切换失败：{message}"
+                    return False, f"订阅已存在，但同步失败：{message}"
                 clash_conf["sub_url"] = url
                 clash_conf["selected_subscription_id"] = item["id"]
                 config_data["clash_proxy_pool"] = clash_conf
                 cfg.reload_all_configs(new_config_dict=config_data)
-                return True, "订阅已存在，已更新名称并切换为当前订阅。"
+                return True, "订阅已存在，已更新名称并同步到当前 Mihomo。"
             config_data["clash_proxy_pool"] = clash_conf
             cfg.reload_all_configs(new_config_dict=config_data)
             return True, "订阅已存在，已更新名称。"

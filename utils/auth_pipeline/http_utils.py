@@ -1,12 +1,12 @@
 import os
+import uuid
+import random
 import time
 import urllib.parse
 from typing import Any, Dict, Optional, Tuple
 
 from curl_cffi import requests
 from utils import config as cfg
-from utils import task_log_guard
-from . import auth_fingerprint
 
 
 def _ssl_verify() -> bool:
@@ -39,12 +39,11 @@ def _post_form(
     }
     last_error: Optional[Exception] = None
     for attempt in range(retries + 1):
-        task_log_guard.raise_if_current_batch_aborted()
         try:
             resp = requests.post(
                 url, data=data, headers=headers,
                 proxies=proxies, verify=_ssl_verify(),
-                timeout=timeout, impersonate=auth_fingerprint.token_impersonate(),
+                timeout=timeout, impersonate="chrome110",
             )
             if resp.status_code != 200:
                 raise RuntimeError(
@@ -56,7 +55,7 @@ def _post_form(
             if attempt < retries:
                 print(f"\n[{cfg.ts()}] [WARNING] 换取 Token 时遇到网络异常: {exc}。"
                       f"准备第 {attempt + 1}/{retries} 次重试...")
-                task_log_guard.sleep_with_batch_abort(2 * (attempt + 1))
+                time.sleep(2 * (attempt + 1))
     raise RuntimeError(
         f"token exchange failed after {retries} retries: {last_error}"
     ) from last_error
@@ -77,7 +76,6 @@ def _post_with_retry(
     last_error: Optional[Exception] = None
     for attempt in range(retries + 1):
         if getattr(cfg, 'GLOBAL_STOP', False): raise RuntimeError("系统已停止，强制中断网络请求")
-        task_log_guard.raise_if_current_batch_aborted()
         try:
             if json_body is not None:
                 return session.post(
@@ -94,14 +92,50 @@ def _post_with_retry(
             last_error = e
             if attempt >= retries:
                 break
-            task_log_guard.sleep_with_batch_abort(2 * (attempt + 1))
+            time.sleep(2 * (attempt + 1))
     if last_error:
         raise last_error
     raise RuntimeError("Request failed without exception")
 
 
+def _make_trace_headers() -> dict[str, str]:
+    trace_id = str(random.getrandbits(64))
+    parent_id = str(random.getrandbits(64))
+    return {
+        "traceparent": f"00-{uuid.uuid4().hex}-{format(int(parent_id), '016x')}-01",
+        "tracestate": "dd=s:1;o:rum",
+        "x-datadog-origin": "rum",
+        "x-datadog-parent-id": parent_id,
+        "x-datadog-sampling-priority": "1",
+        "x-datadog-trace-id": trace_id,
+    }
+
+
 def _oai_headers(did: str, extra: dict = None, is_navigate: bool = False) -> dict:
-    return auth_fingerprint.oai_headers(did, extra=extra, is_navigate=is_navigate)
+    h = {
+        "accept-language": "en-US,en;q=0.9",
+    }
+    if did:
+        h["oai-device-id"] = did
+    h.update(_make_trace_headers())
+    if is_navigate:
+        h.update({
+            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "sec-fetch-dest": "document",
+            "sec-fetch-mode": "navigate",
+            "sec-fetch-site": "same-origin",
+            "upgrade-insecure-requests": "1",
+        })
+    else:
+        h.update({
+            "accept": "application/json",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+        })
+    if extra:
+        h.update(extra)
+    return h
 
 
 def _follow_redirect_chain_local(
@@ -113,7 +147,6 @@ def _follow_redirect_chain_local(
     current_url = start_url
     response = None
     for _ in range(max_redirects):
-        task_log_guard.raise_if_current_batch_aborted()
         try:
             response = session.get(
                 current_url,

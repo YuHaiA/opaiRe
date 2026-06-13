@@ -14,6 +14,106 @@
 - 运行数据与配置位于 `data/`
 
 ## 最新修改
+- 修改文件：
+  - `docs/new-computer-handoff.md`
+  - `SYSTEM.md`
+  - Git 索引中的 `data/mihomo-pool/imported-subscriptions/krBDPZx.yaml`
+- 本次修改：
+  - 新增新電腦交接文檔，整理專案代碼範圍、不可上傳的 runtime/data 類內容、本地啟動步驟、近期代碼狀態與 Git 衛生規則。
+  - 明確說明 `data/`、`config.yaml`、資料庫、日誌、授權檔、API Key、token、cookie、密碼、raw proxy/subscription 等不應進入 GitHub。
+  - 將已被 Git 追蹤的 `data/mihomo-pool/imported-subscriptions/krBDPZx.yaml` 從版本控制移除但保留本機檔案，避免本次 GitHub 上傳涉及 runtime 資料。
+- 修改原因：
+  - 使用者要求將不涉及資料的代碼與描述上傳 GitHub，讓新電腦能理解目前做過什麼並可接續開發。
+- 影響範圍：
+  - 只影響文檔與 Git 追蹤範圍，不改變程式 runtime 行為。
+- 待驗證事項：
+  - 提交前需確認 Git 狀態不再包含 `data/` 追蹤內容，並完成基本語法驗證後再推送 `origin/main`。
+
+- 修改文件：
+  - `SYSTEM.md`
+- 远端变更：
+  - 按用户最新口径调整 Server 3 与 Server 4 的 `Clash` 订阅规则：`Clash / V2Ray` 仅作为普通代理节点使用，不再在 `clash.yaml` 内额外为 Telegram 保留 `telegram.org` / `t.me` 分流规则。
+  - Telegram 继续走外部专用入口，不删除现有四个 TG 入口：
+    - Server 3 `SOCKS5`: `dazhou.bond:18443`
+    - Server 4 `SOCKS5`: `xh-ai.cyou:18444`
+    - Server 3 `MTProto`: `dazhou.bond:18453`
+    - Server 4 `MTProto`: `xh-ai.cyou:18454`
+- 修改原因：
+  - 用户明确要求 `Clash / V2Ray` 只保留正常节点用途，不再在订阅规则里单独处理 TG，因为 Telegram 已有专用代理入口。
+- 验证结果：
+  - 服务器本机读取 `https://127.0.0.1/clash?ts=20260609a`，以及本机外部读取 `https://dazhou.bond/clash?ts=20260609a`、`https://xh-ai.cyou/clash?ts=20260609a`，都已确认 `telegram.org` / `t.me` 规则被移除。
+- 影响范围：
+  - 只影响 `Clash` 订阅规则，不影响 `V2Ray` 节点链接内容，不影响 Reality 主代理本身，也不影响外部 TG 专用入口。
+
+- 修改文件：
+  - `SYSTEM.md`
+- 远端变更：
+  - 直接优化 Server 3（`132.226.99.236`）与 Server 4（`137.131.12.149`）的 Clash 主节点传输方案，将原先经由 `Nginx 443 -> VLESS WS` 的订阅节点切换为独立端口直连的 `VLESS REALITY`。
+  - Server 3 新增 `VLESS REALITY` 入站：`dazhou.bond:24443`，保留现有 Telegram `SOCKS` 入站 `18443` 不动。
+  - Server 4 新增 `VLESS REALITY` 入站：`xh-ai.cyou:24444`，保留现有 Telegram `SOCKS` 入站 `18444` 不动。
+  - 两台机器都新增 `/etc/sysctl.d/99-codex-bbr.conf`，将拥塞控制切到 `bbr`，队列调度切到 `fq`，并开启 `tcp_mtu_probing=1` 与 `tcp_fastopen=3`。
+  - 两台机器的 `/var/www/proxy-subs/clash.yaml` 与 `/var/www/proxy-subs/v2ray.txt` 已同步改写为仅发布新的 `Reality` 节点，不再继续发布原 `WS` 节点。
+  - OCI 共享 NSG `ig-quick-action-NSG` 已新增入站 `24443/tcp` 与 `24444/tcp`，两台主机本地 firewalld 也已同步放行对应端口。
+- 修改原因：
+  - 现场排查确认瓶颈主要在 `VLESS + WS + TLS + Nginx` 这套链路本身，而不是项目面板、Python 进程或机器 CPU。
+  - 需要在不影响项目 `80/443` 面板入口的前提下，把 Clash 主节点切到更轻的直连协议。
+- 验证结果：
+  - 两台机器 `xray` 重启后均为 `active`。
+  - Server 3 本地监听 `*:24443` 与 `*:18443`；Server 4 本地监听 `*:24444` 与 `*:18444`。
+  - 两台机器的 `sysctl` 已显示 `net.ipv4.tcp_congestion_control = bbr`、`net.core.default_qdisc = fq`、`net.ipv4.tcp_mtu_probing = 1`。
+  - 本机外部连通性验证通过：`dazhou.bond:24443` 与 `xh-ai.cyou:24444` 的 TCP 连接均成功。
+  - `https://dazhou.bond/clash` 与 `https://xh-ai.cyou/clash` 现在都返回新的 `Reality` 订阅内容。
+- 影响范围：
+  - 项目面板 `80/443`、`nginx` 反代 `127.0.0.1:8000`、现有 `Telegram SOCKS` 入口保持不动。
+  - Clash / V2Ray 客户端若仍在使用旧的 `WS` 配置缓存，需重新更新订阅或重新导入配置后才会切到新的 `Reality` 节点。
+
+- 修改文件：
+  - `SYSTEM.md`
+- 远端变更：
+  - 为 Server 3 与 Server 4 额外部署独立的 Telegram `MTProto` 代理，不复用 `xray` 入站，而是安装 `mtg v2.2.8` 作为专用 TG 代理服务。
+  - Server 3 新增 `mtg.service`，监听 `0.0.0.0:18453`，域名前置 secret 基于 `dazhou.bond` 生成。
+  - Server 4 新增 `mtg.service`，监听 `0.0.0.0:18454`，域名前置 secret 基于 `xh-ai.cyou` 生成。
+  - 两台机器本地 firewalld 与 OCI 共享 NSG 都已新增放行 `18453/tcp` 与 `18454/tcp`。
+  - 保留原先 `xray` 提供的 TG `SOCKS5` 入口（Server 3 的 `18443`、Server 4 的 `18444`），用于和新的 `MTProto` 体感对比或兼容旧客户端。
+- 修改原因：
+  - 现场验证发现当前 `xray` 构建不支持 `mtproto` inbound，无法直接在现有 `xray` 服务里叠加 Telegram 原生代理入口。
+  - 用户要求继续在当前基础上优化 TG，因此改为更适合 Telegram 的专用 `MTProto` 服务，而不影响已经提速的 `Reality` 主代理。
+- 验证结果：
+  - 两台机器 `mtg.service` 均已 `active` 并设置为开机自启。
+  - Server 3 外网 `dazhou.bond:18453` TCP 连通成功；Server 4 外网 `xh-ai.cyou:18454` TCP 连通成功。
+  - `journalctl -u mtg` 显示服务已成功启动。
+- 影响范围：
+  - 不改动项目面板 `80/443`、Nginx 反代、Reality 主代理或现有 TG SOCKS 端口。
+  - Telegram 客户端如需体验优化后的专用链路，需要使用新的 `MTProto` 链接而不是原来的 SOCKS 链接。
+
+- 修改文件：
+  - `utils/auth_pipeline/register.py`
+  - `utils/integrations/image2api_client.py`
+  - `utils/config.py`
+  - `SYSTEM.md`
+- 变更内容：
+  - 去掉本轮为 Image2API / callback 排查加入的临时探针与实验性推进逻辑，恢复为上游 `image2api_data(s_reg, target_continue_url, proxies)` 的直接提取路径。
+  - 去掉 `image2api_client.py` 中为 422 / token 结构排查加入的 payload 形状与响应体诊断日志，恢复到接近上游的推送实现。
+  - 恢复 `IMAGE2API_IMG_ONLY_MODE` 分支的上游空值处理，不再输出现场诊断专用日志。
+  - 将本地 `APP_VERSION` 从 `v16.1.0` 对齐到上游 `v16.1.1`。
+- 修改原因：
+  - 用户要求本地 Git 吸收上游并清掉 img 探针代码，结束这轮现场诊断代码残留。
+- 影响范围：
+  - 仅回退 Image2API 现场诊断代码，保留现有项目其余本地改动不动。
+
+- 修改文件：
+  - `utils/auth_pipeline/register.py`
+  - `SYSTEM.md`
+- 变更内容：
+  - 将本地 `register.py` 恢复到「上游注册主流程整合版」基线，保留 `phone` / `email` 首发模式、HeroSMS / 5SIM / SmsBower 首发取号与绑定邮箱链路，以及上游 `v16.1.0` 的主流程结构。
+  - 仅重新叠加本地 `_normalize_image2api_token()`，继续把 `image2api_data()` 返回的 `str` / `dict` / `tuple` / `list` 兼容归一为单一 token 字符串。
+  - 当 `image2api_data()` 返回非空但无法提取有效 token 时，继续打印本地告警并跳过无效推送，避免把异常结构直接送到 Image2API。
+- 修改原因：
+  - 用户要求优先把上游注册模块吸收到本地，再补齐本地必须保留的代码，而不是继续围绕服务 1 现场热修补。
+  - 前面排查中对服务 1 做过多次临时探针验证，但这些探针不适合作为长期本地代码保留；当前需要回到可维护的上游基线，再只保留本地必要差异。
+- 影响范围：
+  - 影响本地注册主流程文件 `utils/auth_pipeline/register.py` 的 Image2API 提取后整理逻辑。
+  - 不重新引入前面那批仅用于服务 1 现场诊断的探针日志与 URL 回填实验代码。
 
 - 修改文件：
   - `utils/auth_pipeline/register.py`
@@ -1054,6 +1154,96 @@
   - 若 Server 4 仍周期性卡死，优先考虑减少系统监控守护进程常驻内存，例如 PCP/openmetrics 相关服务，而不是继续改 opaiRe 配置。
   - Server 4 仍应只承担 Web 面板、Mihomo 单核心和个人轻量使用，不建议叠加系统包安装、Docker、多实例 Clash 或高并发任务。
 
+## Server 4 opaire-lite 自启排障记录
+
+- 修改文件：
+  - `SYSTEM.md`
+- 远端变更：
+  - 已核对 Server 4 `opaire-lite.service` 为 `enabled`，Nginx 也为 `enabled`。
+  - 日志显示服务曾在开机后启动成功，但主程序约运行两小时后以 `0/SUCCESS` 正常退出；原 unit 使用 `Restart=on-failure`，因此 systemd 未自动重拉起。
+  - 已将 Server 4 `/etc/systemd/system/opaire-lite.service` 的重启策略改为 `Restart=always`，并保留原启动方式 `/bin/bash -lc 'exec /home/opc/opaiRe/.venv/bin/python /home/opc/opaiRe/wfxl_openai_regst.py'`。
+  - 已修正 unit 文件权限为 `root:root 644`。
+  - 已通过项目内置 `sync_single_core_runtime_from_saved_config()` 重新启动 Linux 单核心 Mihomo，未覆盖 `data/`。
+- 验证结果：
+  - `systemctl show opaire-lite.service` 显示 `Restart=always`、`ActiveState=active`、`SubState=running`。
+  - `ss -ltnp` 显示 opaiRe 监听 `127.0.0.1:8000`，Mihomo 监听 `127.0.0.1:7897` 与 `127.0.0.1:9097`。
+  - 通过 `http://127.0.0.1:7897` 代理访问外部 IP 查询接口成功返回结果。
+- 注意事项：
+  - Server 4 不是没有开机自启，而是程序正常退出后没有按原策略重启；后续若再次出现面板和 Mihomo 一起消失，优先检查 `journalctl -u opaire-lite.service` 是否仍为正常退出。
+  - Server 4 不使用独立 `mihomo-lite.service`；Mihomo 继续由 opaiRe 的 Linux 单核心管理入口接管，避免配置状态分叉。
+
+## Server 3 Mihomo 本机监听修正记录
+
+- 修改文件：
+  - `utils/integrations/clash_manager.py`
+  - `utils/integrations/subscription_fetcher.py`
+  - `SYSTEM.md`
+- 远端变更：
+  - 核对发现 Server 3 远端 `utils/integrations/clash_manager.py` 仍是旧版逻辑，Linux 单核心写回 `manual-config.yaml` 时会固定写入 `allow-lan: true`，因此 `7897` 会继续对外监听。
+  - 已将本地新版 `clash_manager.py` 与其依赖的 `utils/integrations/subscription_fetcher.py` 同步到 Server 3：`/home/opc/opaiRe/utils/integrations/`。
+  - 已在 Server 3 执行 `sync_single_core_runtime_from_saved_config()` 重新生成并重启本机 Mihomo 运行配置。
+- 验证结果：
+  - Server 3 `manual-config.yaml` 现为 `allow-lan: false`，并新增 `bind-address: 127.0.0.1`。
+  - `ss -ltnp` 显示 Server 3 `7897` 与 `9097` 均已收回 `127.0.0.1`。
+  - `sync_single_core_runtime_from_saved_config()` 返回成功，Mihomo 控制接口可响应。
+- 注意事项：
+  - 这次问题不是面板配置值不同，而是 Server 3 远端源码中的单核心 Mihomo 写回逻辑偏旧。
+  - 后续若 Server 3 再次出现 `*:7897`，优先检查远端 `utils/integrations/clash_manager.py` 是否被旧版代码覆盖。
+
+## Server 3 kdump 预留内存回收记录
+
+- 修改文件：
+  - `SYSTEM.md`
+- 排查结论：
+  - 通过 OCI API 核对后，Server 3 与 Server 4 在控制面上都属于 `VM.Standard.E2.1.Micro`，账面规格均为 `1 OCPU / 1GB RAM`，不是 OCI shape 配错。
+  - Server 3 系统内实际只有约 `498MiB` 可用内存，根因是 `kdump` 已启用，且 `/sys/kernel/kexec_crash_size` 显示预留了 `469762048` 字节（约 `448MiB`）给 crashkernel。
+  - Server 4 同样保留了 `kdump` 相关配置，但 `kexec_crash_size` 为 `0`，因此仍可看到接近 `1GB` 的完整内存。
+- 远端变更：
+  - 已在 Server 3 备份 `grubby` 当前配置与 `/etc/default/grub`。
+  - 已使用 `grubby --update-kernel=ALL --remove-args='crashkernel=1G-64G:448M,64G-:512M'` 移除所有 kernel entry 的 `crashkernel` 参数。
+  - 已执行 `systemctl disable --now kdump` 停用 kdump，并重启 Server 3 生效。
+  - 重启后已再次通过项目内置 `sync_single_core_runtime_from_saved_config()` 拉起本机 Mihomo。
+- 验证结果：
+  - Server 3 重启后 `MemTotal` 已恢复到 `968220 kB`，与 Server 4 的约 `945MiB` 等级对齐。
+  - `/sys/kernel/kexec_crash_size` 现为 `0`。
+  - 当前 `opaire-lite.service` 与 `nginx` 均为 `active`。
+  - 当前 `127.0.0.1:8000`、`127.0.0.1:7897`、`127.0.0.1:9097` 均已监听。
+- 注意事项：
+  - 这次释放出来的内存主要来自关闭 crash dump 预留，对这种 1GB 轻量机收益很高。
+  - 若后续确实需要排查 kernel panic，再考虑临时恢复 `kdump / crashkernel`，平时不建议在小规格机上保留。
+
+## Server 3 / Server 4 轻量 CDN 兼容节点记录
+
+- 修改文件：
+  - `SYSTEM.md`
+- 远端变更：
+  - 两台服务器均已安装官方 `Xray v26.3.27`，使用独立 `xray.service` 常驻，不复用 opaiRe 或 Mihomo 进程。
+  - Server 3：
+    - Xray 本机监听 `127.0.0.1:18003`
+    - VLESS UUID：已生成并下发到远端配置
+    - WebSocket 路径：`/cdn-22c91d28`
+    - Nginx HTTPS server block 已新增该路径的本机反向代理
+  - Server 4：
+    - Xray 本机监听 `127.0.0.1:18004`
+    - VLESS UUID：已生成并下发到远端配置
+    - WebSocket 路径：`/cdn-e8530552`
+    - Nginx HTTPS server block 已新增该路径的本机反向代理
+- 关键决策：
+  - 采用 `VLESS + WS + TLS`，由现有 Nginx 终止 TLS，Xray 仅监听本机高位端口，尽量减小对现有项目的影响。
+  - 节点出站固定为 Xray `freedom` 直连，不读取 opaiRe 的 `default_proxy`，也不走 Mihomo；项目代理链与节点代理链彼此独立。
+  - 该方案为“CDN 兼容”形态：后续若将对应域名记录切到 Cloudflare 橘云，可继续使用；若关闭 CDN，只要域名仍指向源站，也可继续使用。
+- 验证结果：
+  - 两台 Xray 配置均通过 `xray run -test -config /usr/local/etc/xray/config.json`。
+  - 外网访问：
+    - `https://dazhou.bond/cdn-22c91d28`
+    - `https://xh-ai.cyou/cdn-e8530552`
+    使用带 WebSocket Upgrade 的请求时，均已返回来自 Xray 的 WebSocket 级错误响应，说明公网 TLS -> Nginx -> 本机 Xray 路径已打通。
+  - Server 3 当前 `xray.service` 为 `active`，并监听 `127.0.0.1:18003`。
+  - Server 4 当前 `xray.service` 为 `active`，并监听 `127.0.0.1:18004`。
+- 注意事项：
+  - 当前是轻量单入站方案，适合个人使用；不建议在这两台机器上继续叠加多协议、多入站或多人共享。
+  - 安装脚本生成的 `xray.service` 使用 `User=nobody`，systemd 会给出 “Special user nobody configured, this is not safe!” 警告；目前不影响运行，如后续需要更规范可再改成专用 `xray` 用户。
+
 ## 上游 v16.0.0 吸收記錄
 
 - 修改文件：
@@ -1187,3 +1377,321 @@
 - 驗證：
   - `python -m unittest tests.test_account_revive_status tests.test_core_engine_local_presence_gate`
   - `python -m py_compile utils\db_manager.py utils\core_engine.py`
+
+## Image2API callback 目標回補記錄
+
+- 修改文件：
+  - `utils/auth_pipeline/register.py`
+  - `SYSTEM.md`
+- 本次修改：
+  - Image2API 同步前新增 `_image2api_callback_url_from_cookie()`，在 `continue_url` 缺失或仍停在 `/about-you` 類中間頁時，從 session 內的 `__Secure-next-auth.callback-url` cookie 回補目標。
+  - 回補只接受 `chatgpt.com/api/auth/callback/openai` 精確路徑；普通 ChatGPT 首頁、其他 host 或其他 path 不會被當作 Image2API callback 使用。
+  - 新增 `IMAGE2API_TARGET_COOKIE_FALLBACK` 與 `IMAGE2API_TARGET_RESOLVED` 日誌，只輸出 host/path/是否有值，不輸出 cookie、token 或完整 URL 內容。
+- 行為影響：
+  - 服務 1 在已拿到 next-auth callback cookie 但 `image2api_data()` 傳入目標為空的情況下，會像服務 3 的成功樣本一樣使用自然產生的 ChatGPT callback URL。
+  - 不修改 `data/`、不改 OAuth 流程、不放寬 Image2API 推送資料格式；若 cookie 中沒有合法 callback，仍維持原流程。
+- 待驗證事項：
+  - 部署到服務 1 後需要觀察 `IMAGE2API_TARGET_RESOLVED host=chatgpt.com path=/api/auth/callback/openai` 是否出現，以及後續 Image2API 是否停止 422。
+
+## 2026-06-05 服務 1/3 宿主環境對齊排查
+
+- 背景：
+  - 服務 1 與服務 3 已先對齊到同一套上游 `v16.1.1` 代碼，且保留各自 `data/`。
+  - 對齊後，服務 3 仍可成功拿到 Image2API callback，而服務 1 仍長期卡在 `workspace=0` / callback 空值。
+- 已確認差異：
+  - 服務 1：Ubuntu 24.04.4、Python 3.11.15、OpenSSL 3.0.13、curl 8.5.0。
+  - 服務 3：Oracle Linux 9.7、Python 3.11.13、OpenSSL 3.5.1、curl 7.76.1。
+  - 兩邊 `curl_cffi==0.15.0`、`requirements.txt` 已一致，但宿主系統與 TLS/HTTP 棧仍不同。
+- 本次操作：
+  - 服務 1 先備份原 venv `pip freeze`。
+  - 將服務 1 venv 套件版本對齊到服務 3：
+    - `requests==2.34.2`
+    - `urllib3==2.7.0`
+    - `cryptography==48.0.0`
+    - `certifi==2026.5.20` 本就一致
+  - 套件對齊後已重啟服務 1，HTTP 200 正常。
+- 目前判讀：
+  - 若服務 1 在套件對齊後仍失敗，而服務 3 同版代碼仍成功，則問題更偏向宿主環境層，而不是專案 Python 依賴版本。
+
+## 2026-06-13 服務 3 NAT 重建準備記錄
+
+- 新增文件：
+  - `docs/server3-rebuild-notes.md`
+- 本次記錄：
+  - 記錄服務 3 在刪除/重建 OCI 實例前的非敏感運維配置，用於之後在 `opaire-s3-nat-vcn2` 的 private subnet 重新搭建。
+  - 覆蓋內容包含域名、目前 IP、目標 NAT VCN/subnet、systemd 服務、Nginx/TLS 路徑、firewalld、SELinux、Python/venv、Mihomo、Xray/MTG 端口與 opaiRe runtime 路徑。
+  - 敏感內容未寫入文檔：不包含 `data/config.yaml` 原文、API Key、token、密碼、訂閱連結、資料庫內容或代理協議密鑰。
+- 行為影響：
+  - 本次只做只讀盤點與文檔記錄，未停止服務 3、未備份實例、未修改現有 VCN/subnet、未遷移實例。
+  - 目前服務 3 仍在 `vcn-20260527-2027` / `10.0.0.0/24`；目標重建網路是 `opaire-s3-nat-vcn2-private-subnet` / `10.31.1.0/24`。
+- 待驗證事項：
+  - 真正重建後，需按 `docs/server3-rebuild-notes.md` 逐項恢復並驗證 Nginx、TLS、opaire-lite、Mihomo、Xray/MTG 與 DNS。
+
+## 2026-06-13 服務 3 新機域名與 Nginx 基礎恢復
+
+- 修改文件：
+  - `docs/server3-rebuild-notes.md`
+  - `SYSTEM.md`
+- 遠端變更：
+  - 新服務 3 實例 `instance-20260613-1403` 已確認位於 `opaire-s3-nat-vcn2` 的 `opaire-s3-nat-vcn2-public-subnet`，私網 IP 為 `10.31.0.239`，公網 IP 為 `129.146.91.250`。
+  - 這次實例實際放在 public subnet，出站路由為 `0.0.0.0/0 -> Internet Gateway`，不是原計劃的 private subnet NAT 出站形態。
+  - DNS 已觀察到 `dazhou.bond` 與 `www.dazhou.bond` 均解析到 `129.146.91.250`。
+  - 新機移除 `crashkernel` 並停用 `kdump` 後，內存從約 `498MiB` 恢復到約 `945MiB`。
+  - 新機 swap 擴到約 `4.9GiB`，以避免 Oracle E2 Micro 安裝系統包時被 OOM。
+  - 已安裝並啟動 `nginx`，放行本機 firewalld 的 `http/https/ssh` 以及代理預留端口 `18443/tcp`、`18443/udp`、`18453/tcp`、`24443/tcp`。
+  - OCI security list 已補充放行 `18443/tcp`、`18443/udp`、`18453/tcp`、`24443/tcp`。
+  - Nginx 目前提供最小靜態測試頁；`80` 與 `443` 均可外部訪問，其中 `443` 暫用自簽證書。
+- 驗證結果：
+  - `http://dazhou.bond/` 返回 `dazhou.bond server3 new host ok`。
+  - `https://dazhou.bond/` 在跳過證書校驗時返回同樣測試頁。
+  - 新機本地出站查詢外部 IP 返回 `129.146.91.250`。
+  - 代理端口 `18443/18453/24443` 目前未通，原因是 Xray/MTG 服務本體尚未恢復；網路與防火牆端口已預先放行。
+- 未完成：
+  - 未恢復 opaiRe 專案服務。
+  - 未恢復 Let’s Encrypt 正式證書。
+  - 未恢復 Mihomo、Xray、MTG 代理服務本體。
+
+## 2026-06-13 服務 3 NLB 入站 + NAT 出站切換
+
+- 修改文件：
+  - `docs/server3-rebuild-notes.md`
+  - `SYSTEM.md`
+- 遠端變更：
+  - 已建立 OCI Network Load Balancer `server3-public-nlb`。
+  - NLB 公網 IP：`132.226.146.175`。
+  - NLB 私網 IP：`10.31.0.3`。
+  - NLB 已配置 `22/80/443/18443/18453/24443` listener/backend，後端指向新服務 3 私網 IP `10.31.0.239`。
+  - Backend set 使用 `is_preserve_source=false`，避免 VNIC 改 NAT route 後回包不對稱。
+  - 新服務 3 primary VNIC 已切換到 `opaire-s3-nat-vcn2-private-rt`，即 `0.0.0.0/0 -> NAT Gateway`。
+- 驗證結果：
+  - 通過 NLB `132.226.146.175` 驗證 `22/80/443` 均可連通。
+  - `http://132.226.146.175/` 與跳過證書驗證的 `https://132.226.146.175/` 均返回測試頁。
+  - 通過 NLB SSH 進入新服務 3 後，外部 IP 查詢返回 `161.153.20.32`，確認出站已走 NAT Gateway。
+  - DNS 傳播存在短暫分裂：`1.1.1.1` 已解析 `dazhou.bond` / `www.dazhou.bond` 到 `132.226.146.175`，`8.8.8.8` 仍暫時解析到 `129.146.91.250`。
+- 注意事項：
+  - 之後服務 3 的入口應使用 NLB `132.226.146.175` 或解析到該 IP 的域名，不應再依賴實例直連公網 IP `129.146.91.250`。
+  - `18443/18453/24443` 的 NLB 入口已配置，但代理服務本體尚未恢復，所以目前端口不通屬於預期。
+
+## 2026-06-13 服務 3 Reality 節點恢復記錄
+
+- 修改文件：
+  - `docs/server3-rebuild-notes.md`
+  - `SYSTEM.md`
+- 遠端變更：
+  - 新服務 3 已安裝並啟用官方 `Xray 26.3.27`。
+  - 新增 `/usr/local/etc/xray/config.json`，恢復 `VLESS REALITY` 主節點，監聽 `0.0.0.0:24443`。
+  - `xray.service` 已設為開機自啟並處於 `active`。
+  - 已生成新的 Reality 節點憑據與訂閱檔，敏感值只寫入遠端配置與 `/var/www/proxy-subs/`，不寫入文檔。
+  - `/var/www/proxy-subs/clash.yaml` 與 `/var/www/proxy-subs/v2ray.txt` 已恢復，並將發布 server 設為 `dazhou.bond`。
+  - 因 SELinux enforcing，已將 `/var/www/proxy-subs` context 修正為 `httpd_sys_content_t`，避免 Nginx alias 返回 `403`。
+- 驗證結果：
+  - 遠端 `xray run -test -config /usr/local/etc/xray/config.json` 通過。
+  - 遠端 `systemctl is-active xray` 返回 `active`，`ss` 顯示 `*:24443` 已監聽。
+  - 本機外部 TCP 驗證：`132.226.146.175:24443`、`www.dazhou.bond:24443` 與 `dazhou.bond:24443` 均可連通。
+  - 本機外部 HTTP 驗證：`http://dazhou.bond/clash` 返回 `200`，`http://dazhou.bond/sub` 返回 `200`。
+  - 公共 DNS 存在短暫快取分裂：`1.1.1.1`、`9.9.9.9` 與本機解析已到 `132.226.146.175`，但 `8.8.8.8`、`223.5.5.5` 當時仍可能回舊直連 IP。
+- 影響範圍：
+  - 本次只恢復 Reality 主代理與訂閱入口，未恢復 opaiRe 專案、Let’s Encrypt 正式證書、Mihomo、MTG 或舊 `18443` SOCKS 入口。
+  - 客戶端需更新訂閱，當前應使用 `dazhou.bond` 對應的節點。
+
+## 2026-06-13 服務 3 訂閱合併與 HTTPS 證書恢復
+
+- 修改文件：
+  - `docs/server3-rebuild-notes.md`
+  - `SYSTEM.md`
+- 遠端變更：
+  - 將服務 3 `/var/www/proxy-subs/clash.yaml` 從單服務 3 節點恢復為雙節點訂閱，包含 `server3-reality` 與 `server4-reality`。
+  - 將服務 3 `/var/www/proxy-subs/v2ray.txt` 合併為 2 條 VLESS URI 後重新 Base64 發布。
+  - 新增並同步備用 IP 訂閱：`/clash-ip` 與 `/sub-ip`，其中服務 3 節點使用 NLB IP `132.226.146.175`，服務 4 節點仍使用 `xh-ai.cyou`。
+  - 安裝 `acme.sh` 到 `/home/opc/.acme.sh/acme.sh`，使用 webroot `/var/www/certbot` 成功簽發 `dazhou.bond` / `www.dazhou.bond` 的 Let's Encrypt ECC 證書。
+  - 將正式證書安裝到 Nginx 既有路徑 `/etc/nginx/ssl/dazhou.bond/fullchain.pem` 與 `/etc/nginx/ssl/dazhou.bond/privkey.pem`，替換臨時自簽證書。
+  - 已修正 `/var/www/certbot` 與 `/var/www/proxy-subs` 的 SELinux context，確保 Nginx 可讀 ACME challenge 與訂閱檔。
+- 驗證結果：
+  - 外部 HTTPS 正常校驗下，`https://dazhou.bond/clash`、`/sub`、`/clash-ip`、`/sub-ip` 均返回 `200`。
+  - `/clash` 與 `/clash-ip` 均確認包含 `server3-reality` 和 `server4-reality`。
+  - Nginx `nginx -t` 通過並已 reload。
+- 影響範圍：
+  - 修復手機 Clash 因自簽證書導致的 `TLS verifier failed` 訂閱拉取失敗。
+  - 保留服務 4 節點，避免服務 3 重建恢復時把多節點訂閱降級成單節點。
+
+## 2026-06-13 服務 3 Reality 配置對齊舊文檔
+
+- 修改文件：
+  - `docs/server3-rebuild-notes.md`
+  - `SYSTEM.md`
+- 對照結論：
+  - 舊文檔與服務 4 保存的舊服務 3 節點使用 `www.cloudflare.com` 作為 Reality `serverName/dest`。
+  - 本次重建初始恢復時服務 3 被設為 `www.microsoft.com`，協議、端口與 flow 正常，但與舊文檔口徑不一致。
+- 遠端變更：
+  - 已將服務 3 `/usr/local/etc/xray/config.json` 的 Reality `dest/serverNames` 改回 `www.cloudflare.com:443` / `www.cloudflare.com`。
+  - 已同步更新 `/var/www/proxy-subs/clash.yaml`、`clash-ip.yaml`、`v2ray.txt`、`v2ray-ip.txt` 中的服務 3 SNI。
+  - 已恢復舊隱藏訂閱入口 `/subs/_Poi3yXpZERRuSer/clash.yaml` 與 `/subs/_Poi3yXpZERRuSer/v2ray.txt`。
+  - 已恢復舊節點優化中的 BBR/fq/tcp_fastopen 設定：`bbr`、`fq`、`tcp_mtu_probing=1`、`tcp_fastopen=3`。
+- 驗證結果：
+  - 服務 3 `xray run -test` 通過，`xray.service` 重啟後為 `active`。
+  - 服務 3 sysctl 已顯示 `bbr/fq/tcp_mtu_probing=1/tcp_fastopen=3`。
+  - 外部 `curl` 驗證 `/clash`、`/sub`、`/clash-ip`、`/sub-ip`、舊隱藏訂閱路徑均返回 `200`。
+  - 服務 2 使用服務 3 `/sub` 生成真 Xray 客戶端測試，經 Reality 代理訪問 `generate_204` 返回 `204`。
+
+## 2026-06-13 OCI NLB + NAT 無重建復刻文檔
+
+- 修改文件：
+  - `docs/oci-nlb-nat-runbook.md`
+  - `SYSTEM.md`
+- 記錄目的：
+  - 將服務 3 已驗證的「不刪實例、不重建實例」方案固定成 runbook，避免後續復刻到服務 4 時靠聊天記憶操作。
+  - 明確該方案核心是「公網 NLB 入站 + primary VNIC route table 改 NAT Gateway 出站」，不是刪機重建。
+- 服務 3 已驗證形態：
+  - NLB `server3-public-nlb` 公網入口 `132.226.146.175`。
+  - 後端指向服務 3 私網 IP `10.31.0.239`。
+  - Backend source preservation 關閉。
+  - 服務 3 primary VNIC 切到 NAT route table 後，出站 IP 變為 `161.153.20.32`。
+  - 服務 2 到 NLB 拉取測速約 `400Mbps`，明顯高於免費 AMD 直連 50Mbps 檔。
+- 服務 4 復刻判斷：
+  - 只讀核對顯示服務 4 當前私網 IP 為 `10.0.0.154`，當前出站 IP 仍為直連公網 `137.131.12.149`。
+  - 服務 4 當前活躍入口包括 `22/80/443/18444/18454/24444`。
+  - 復刻時應先建 NLB 並測通 NLB IP，再切 VNIC route table，最後才改 `xh-ai.cyou` / `www.xh-ai.cyou` DNS。
+- 影響與風險：
+  - 不需要修改服務 4 項目文件、資料庫、訂閱配置或 systemd 服務。
+  - 會改變服務 4 對外出站 IP；若項目、第三方 API、授權或安全策略綁定舊 IP，需要先核對。
+  - 因 `is_preserve_source=false`，Nginx/app 日誌可能看到 NLB 私網 IP，而不是真實客戶端 IP。
+
+## 2026-06-13 服務 4 共享 NLB 入站試接
+
+- 修改文件：
+  - `docs/oci-nlb-nat-runbook.md`
+  - `SYSTEM.md`
+- OCI 限制：
+  - 嘗試為服務 4 建立獨立 public NLB 時，OCI 返回 `LimitExceeded: max-nlb-flexible-count`。
+  - 因此本次改用「復用服務 3 既有 public NLB + VCN local peering」的低影響方案。
+- 已完成：
+  - 在服務 4 當前 VCN 建立 `server4-nat-gateway` 與 `server4-nat-route-table`，但尚未切換服務 4 VNIC 到該 route table。
+  - 建立服務 3 VCN 與服務 4 當前 VCN 的 LPG：`s3-to-s4-lpg` / `s4-to-s3-lpg`，狀態為 `PEERED`。
+  - 服務 3 NLB public subnet route table 已新增到服務 4 VCN `10.0.0.0/16` 的 LPG 路由。
+  - 服務 4 default route table 與 NAT route table 已新增到服務 3 VCN `10.31.0.0/16` 的 LPG 路由。
+  - 服務 3 public NLB 已新增服務 4 高位端口 listener/backend：`18444`、`18454`、`24444`，後端為 `10.0.0.154`，`is_preserve_source=false`。
+  - 服務 3 NLB subnet security list 已補充 `18444/18454/24444` TCP 入站。
+- 驗證結果：
+  - 本機與服務 2 到 `132.226.146.175:18444/18454/24444` TCP 均可連通。
+  - 服務 2 使用真 Xray 客戶端經 `132.226.146.175:24444` 連服務 4 Reality，訪問 `generate_204` 返回 `204`。
+  - 此階段服務 4 出站仍是直連公網 IP `137.131.12.149`，尚未切 NAT。
+  - 在不改 DNS、不改訂閱、不切 VNIC NAT 的測試下，服務 4 直連 `xh-ai.cyou:24444` 與共享 NLB `132.226.146.175:24444` 都能握手，但代理出口 IP 均仍為 `137.131.12.149`，下載測速約 `33-46Mbps`，未達服務 3 NAT + NLB 的 `400Mbps` 等級。
+- 暫停原因：
+  - 若直接把服務 4 primary VNIC 切到 NAT route table，而 `xh-ai.cyou` 仍指向直連公網 IP，服務 4 項目 `80/443` 很可能因回包路徑變化而中斷。
+  - 完整切 NAT 前，需要先決定服務 4 的項目入口是否也遷到 NLB / 反代，或先申請第二個 NLB 額度。
+
+## 2026-06-13 服務 4 共享 NLB + NAT 完整切換
+
+- 修改文件：
+  - `docs/oci-nlb-nat-runbook.md`
+  - `SYSTEM.md`
+- 執行方案：
+  - 使用既有共享 NLB 公網 IP `132.226.146.175` 承載服務 4。
+  - 用服務 3 Nginx 按 SNI 接 `xh-ai.cyou` / `www.xh-ai.cyou`，再經 VCN LPG 私網反代到服務 4 `10.0.0.154:443`。
+  - 服務 4 高位代理端口仍由 NLB listener 直接轉發到服務 4 私網：`18444/18454/24444`。
+- 遠端變更：
+  - 服務 3 已新增 `/etc/nginx/conf.d/xh-ai-proxy.conf`。
+  - 服務 3 已複製使用 `xh-ai.cyou` 既有 Let's Encrypt 證書到 `/etc/nginx/ssl/xh-ai.cyou/`。
+  - 服務 3 已啟用 `httpd_can_network_connect`，允許 Nginx 反代到服務 4 私網。
+  - 已新增臨時 SSH 兜底入口：`132.226.146.175:2224 -> 10.0.0.154:22`。
+  - 服務 4 primary VNIC 已切到 `server4-nat-route-table`，默認出站走 `server4-nat-gateway`。
+- DNS / IP：
+  - 用戶已將 `xh-ai.cyou` 與 `www.xh-ai.cyou` A 記錄改到 `132.226.146.175`。
+  - 服務 4 原直連公網 IP `137.131.12.149` 不再作為主要入口。
+- 驗證結果：
+  - `https://xh-ai.cyou/` 返回服務 4 應用層 `405` 響應，說明入口已到達後端。
+  - `https://xh-ai.cyou/clash` 返回 `200`。
+  - 經 `132.226.146.175:2224` 可 SSH 到服務 4。
+  - 服務 4 主機出站 IP 已變為 NAT IP `161.153.60.236`。
+  - 服務 2 使用真 Xray 客戶端經 `132.226.146.175:24444` 連服務 4 Reality，訪問 `generate_204` 返回 `204`，代理出口 IP 為 `161.153.60.236`。
+  - NAT 後代理下載測速：OVH 約 `108Mbps`，Hetzner 約 `288Mbps`，已明顯高於切換前約 `33-46Mbps`。
+- 影響範圍：
+  - 未修改服務 4 項目文件、資料庫或 systemd 服務。
+  - `xh-ai.cyou` 的 Web 入口現在經服務 3 NLB/Nginx 私網反代到服務 4；服務 4 Reality 代理出站仍由服務 4 自己走 NAT。
+
+## 2026-06-13 服務 3 / 服務 4 雙節點訂閱同步
+
+- 修改文件：
+  - `SYSTEM.md`
+- 遠端變更：
+  - 已將服務 3 的 `/var/www/proxy-subs/clash.yaml` 與 `/var/www/proxy-subs/v2ray.txt` 同步到服務 4。
+  - 兩邊主訂閱現在都包含 `server3-reality` 與 `server4-reality`。
+- 訂閱入口：
+  - `https://dazhou.bond/clash`
+  - `https://dazhou.bond/sub`
+  - `https://xh-ai.cyou/clash`
+  - `https://xh-ai.cyou/sub`
+- 驗證結果：
+  - 四個入口均返回 `200`。
+  - Clash 與 V2Ray/Base64 訂閱均確認包含服務 3 與服務 4 兩個節點。
+
+## 2026-06-13 雙節點 IP 版訂閱修正
+
+- 修改文件：
+  - `SYSTEM.md`
+- 問題現象：
+  - 服務 2 對 `xh-ai.cyou` 仍解析到舊 IP `137.131.12.149`，導致服務 4 節點按域名連接時超時。
+  - 本地與公共 DNS 已解析到 `132.226.146.175`，但部分客戶端 / resolver 仍有舊快取。
+- 遠端變更：
+  - 已將服務 3 與服務 4 的 IP 版訂閱更新為兩個節點都使用 NLB IP `132.226.146.175`：
+    - `server3-reality -> 132.226.146.175:24443`
+    - `server4-reality -> 132.226.146.175:24444`
+  - 已同步更新兩台機器的 `/var/www/proxy-subs/clash-ip.yaml` 與 `/var/www/proxy-subs/v2ray-ip.txt`。
+- 建議手機測試入口：
+  - `https://dazhou.bond/clash-ip`
+  - `https://xh-ai.cyou/clash-ip`
+- 驗證結果：
+  - 服務 2 使用 IP 版訂閱測試兩個 Reality 節點均返回 `204`。
+  - 服務 3 節點出口 IP：`161.153.20.32`。
+  - 服務 4 節點出口 IP：`161.153.60.236`。
+  - 兩個節點下載測速均可達約 `103-278Mbps`，明顯高於手機當前看到的 `17Mbps`。
+
+## 2026-06-13 下線臨時 IP 版訂閱入口
+
+- 修改文件：
+  - `SYSTEM.md`
+  - `docs/server3-rebuild-notes.md`
+- 背景：
+  - 使用者決定繼續使用原有域名訂閱，不再保留臨時 `/clash-ip` 與 `/sub-ip` 入口。
+- 遠端變更：
+  - 服務 3 Nginx 已移除 `/clash-ip` 與 `/sub-ip` location。
+  - 已刪除服務 3 臨時訂閱文件：
+    - `/var/www/proxy-subs/clash-ip.yaml`
+    - `/var/www/proxy-subs/v2ray-ip.txt`
+  - 保留原訂閱文件：
+    - `/var/www/proxy-subs/clash.yaml`
+    - `/var/www/proxy-subs/v2ray.txt`
+- 驗證結果：
+  - `nginx -t` 通過並已 reload。
+  - `https://dazhou.bond/clash` 與 `https://dazhou.bond/sub` 返回 `200`。
+  - `https://xh-ai.cyou/clash` 與 `https://xh-ai.cyou/sub` 返回 `200`。
+  - 兩個域名的 `/clash-ip` 與 `/sub-ip` 均返回 `404`。
+
+## 2026-06-13 服務端代理穩定性優化
+
+- 修改文件：
+  - `SYSTEM.md`
+  - `docs/oci-nlb-nat-runbook.md`
+- 背景：
+  - 本地 Clash 測速顯示服務 3/4 速度波動明顯，且服務 4 在當前本地線路下通常優於服務 3。
+- 遠端變更：
+  - 服務 3 Reality inbound 補齊 `sockopt`：
+    - `tcpFastOpen: true`
+    - `tcpNoDelay: true`
+    - `domainStrategy: UseIPv4`
+  - 服務 4 Reality inbound 確認並保持同樣 `sockopt`。
+  - 服務 3 與服務 4 新增 `/etc/sysctl.d/99-xray-performance.conf`，核心項包括：
+    - `net.ipv4.tcp_slow_start_after_idle = 0`
+    - `net.ipv4.ip_local_port_range = 10240 65535`
+    - `net.core.somaxconn = 8192`
+    - `net.core.netdev_max_backlog = 16384`
+    - 保持 `bbr` + `fq`、TFO、MTU probing。
+  - 兩台主訂閱的 Clash 策略與 V2Ray/Base64 訂閱順序改為服務 4 優先，服務 3 備用。
+- 本地 Clash 狀態：
+  - `GLOBAL -> 节点选择 -> 自动选择`。
+  - 當前自動選中 `server4-reality`，出口 IP 為 `161.153.60.236`。
+- 驗證結果：
+  - 兩台 Xray 配置均用 `xray run -test -config /usr/local/etc/xray/config.json` 驗證後重啟成功。
+  - `xray` 服務均為 `active`。
+  - 原訂閱入口 `/clash`、`/sub` 保持可用。
+  - 本地經 Clash 走服務 4 的 OVH 10MB 短測約 `2.77Mbps`，仍低於雲端服務 2 先前測得的百兆級速度，判斷本地到 OCI Phoenix / NLB 的線路仍是主要瓶頸。

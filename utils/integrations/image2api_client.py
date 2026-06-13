@@ -52,14 +52,9 @@ class Image2APIClient:
         if not tokens:
             return False, "没有需要上传的 Token"
 
-        # 过滤掉 None 或空字符串，防止推送 [null] 导致远端报错
-        valid_tokens = [t for t in tokens if t and isinstance(t, str) and t.strip()]
-        if not valid_tokens:
-            return False, "过滤后没有有效的 Token 需要上传"
-
         url = f"{self.api_url}/api/accounts"
         payload = {
-            "tokens": valid_tokens
+            "tokens": tokens
         }
 
         try:
@@ -71,14 +66,12 @@ class Image2APIClient:
                 **self.request_kwargs
             )
             status = response.status_code
+            response.close()
             if status in (200, 201, 204):
-                response.close()
                 logger.info(f"Image2API 推送成功: {len(tokens)} 个账号 (HTTP {status})")
                 return True, f"成功推送 {len(tokens)} 个账号"
             else:
-                body = response.text[:300] if response.text else ""
-                response.close()
-                logger.warning(f"Image2API 推送失败，返回状态码: HTTP {status}, 响应: {body}")
+                logger.warning(f"Image2API 推送失败，返回状态码: HTTP {status}")
                 return False, f"推送失败，远端返回状态码: {status}"
         except Exception as exc:
             logger.error("向 Image2API 推送网络请求失败: %s", exc)
