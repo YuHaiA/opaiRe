@@ -280,3 +280,72 @@ Validation:
   - `https://xh-ai.cyou/sub`
 - Local Clash selected `server4-reality` through the auto-test group and egressed as `161.153.60.236`.
 - Local short OVH download through Clash remained only a few Mbps, so the remaining bottleneck is likely the user's local ISP path to OCI Phoenix / the shared NLB rather than Server 4 NAT egress.
+
+## 2026-06-18 NAT Reassignment And Proxy Recovery
+
+Context:
+
+- Server 4 / code instance was reachable through the Server 3 jump host, but its private IP had changed from the older documented `10.0.0.154` to `10.0.0.112`.
+- Several Nginx upstreams and NLB backend sets still referenced `10.0.0.154`, which caused web proxy timeouts and stale proxy node failures.
+- The local OCI API config was restored on the workstation so NLB and security-list state could be inspected and updated safely.
+
+Current verified instance identity:
+
+- Server 3:
+  - Hostname: `instance-20260613-1403`
+  - Private IP: `10.31.0.239`
+  - Shared NLB public IP: `132.226.146.175`
+  - NAT egress observed from host: `161.153.20.32`
+- Server 4 / code:
+  - Hostname: `instance-20260604-1123`
+  - Current private IP: `10.0.0.112`
+  - Previous stale private IP: `10.0.0.154`
+
+Applied fixes:
+
+- Updated Server 3 Nginx `xh-ai.cyou` reverse proxy upstream from stale `10.0.0.154` to current `10.0.0.112`.
+- Added `xh-ai.cyou` subscription routes on Server 3 so subscription paths are served directly by the shared subscription files instead of falling through to the web app:
+  - `https://xh-ai.cyou/clash`
+  - `https://xh-ai.cyou/sub`
+  - `https://xh-ai.cyou/subs/_Poi3yXpZERRuSer/clash.yaml`
+  - `https://xh-ai.cyou/subs/_Poi3yXpZERRuSer/v2ray.txt`
+- Restored Xray on Server 4 and verified it listens on `0.0.0.0:24444/tcp`.
+- Updated shared NLB backend `s4-tcp-24444` to `10.0.0.112:24444`.
+- Added/verified the Server 4 subnet rule allowing Server 3 subnet `10.31.0.0/16` to reach TCP `24444`.
+- Updated shared NLB SSH fallback backend `s4-ssh-22` from stale `10.0.0.154:22` to `10.0.0.112:22`.
+
+Current public entries:
+
+- Server 3 SSH:
+  - `132.226.146.175:22 -> 10.31.0.239:22`
+- Server 4 SSH fallback:
+  - `132.226.146.175:2224 -> 10.0.0.112:22`
+- Server 4 Reality:
+  - `xh-ai.cyou:24444 -> shared NLB -> 10.0.0.112:24444`
+- Server 3 Reality:
+  - `dazhou.bond:2053 -> shared NLB / Server 3 -> 10.31.0.239:2053`
+- Server 3 MTProto:
+  - `132.226.146.175:18453 -> 10.31.0.239:18453`
+
+Current subscription state:
+
+- `https://xh-ai.cyou/clash` and `https://dazhou.bond/clash` both return the same Clash subscription.
+- The published Clash subscription currently contains two verified Reality nodes:
+  - `server4-reality-24444`
+  - `server3-reality-2053`
+- Raw node secrets, UUIDs, private keys, and direct encoded subscription links remain intentionally excluded from this repository.
+
+Validation:
+
+- `132.226.146.175:2224` reaches Server 4 and reports hostname `instance-20260604-1123`.
+- `132.226.146.175:24444`, `132.226.146.175:2053`, `132.226.146.175:18453`, and `132.226.146.175:443` are reachable from the workstation.
+- Temporary Xray client validation from Server 3 returned HTTP `204` through both published nodes:
+  - `server4-reality-24444`: about `0.081s`
+  - `server3-reality-2053`: about `0.153s`
+- Server-side subscription fetch is fast, while workstation-side fetch can vary by several seconds; when proxy protocol tests pass but the local client shows no delay, first refresh or re-import the Clash subscription to clear stale nodes.
+
+Known stale NLB entries:
+
+- Some old backend sets still point to `10.0.0.154` for legacy ports `2083`, `2087`, `2096`, `8443`, `18444`, `18454`, and UDP `443`.
+- Server 4 was not listening on those legacy ports during the 2026-06-18 recovery, so they were not republished in the active subscription.
+- Do not treat old subscriptions or old port nodes as valid unless those services are explicitly restored on `10.0.0.112` and revalidated with a real client test.
