@@ -15,6 +15,25 @@
 
 ## 最新修改
 - 修改文件：
+  - `SYSTEM.md`
+  - `.codex/docs/oci-nlb-nat-runbook.md`
+- 远端变更：
+  - 修复 xh-ai 页面实时日志不显示的问题。
+  - 在 Server 3 `/etc/nginx/conf.d/xh-ai-proxy.conf` 中为 `xh-ai.cyou` 新增精确 `location = /api/logs/stream`。
+  - 该 SSE 日志接口改为直接通过内网 HTTP 代理到 `http://10.0.0.154/api/logs/stream`，并关闭 Nginx buffering/cache/gzip，增加 `X-Accel-Buffering: no`。
+  - 其他 xh-ai 页面、API、订阅路径仍保持原有反代方式。
+  - Server 3 Nginx 备份：`/etc/nginx/conf.d/xh-ai-proxy.conf.bak-sse-20260619-123123`。
+- 修改原因：
+  - 后端 `code / 10.0.0.154` 内部 `/api/logs/stream` 已能返回 SSE `data:` 日志，但公网 `https://xh-ai.cyou/api/logs/stream` 没有数据，导致前端页面日志窗口一直显示待命。
+  - 根因在 Server 3 外层 Nginx 对 xh-ai 的通用 HTTPS 反代不适合 SSE 长连接实时流。
+- 验证结果：
+  - 内部 SSE：`127.0.0.1:8000/api/logs/stream` 返回日志数据。
+  - 外部 SSE：`https://xh-ai.cyou/api/logs/stream` 已返回日志数据。
+  - `https://xh-ai.cyou/`、`/clash`、`/sub` 均继续返回 `200`。
+- 影响范围：
+  - 只影响 xh-ai Web 页面日志 SSE 传输；不改动数据库、代理节点、订阅文件或 NAT/NLB backend。
+
+- 修改文件：
   - `wfxl_openai_regst.py`
   - `utils/stdout_log_bridge.py`
   - `SYSTEM.md`

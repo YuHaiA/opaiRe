@@ -798,4 +798,42 @@ Validation:
 - `bs-18453` backend health is `OK`.
 - `bs-18443` backend set is empty.
 
+## 2026-06-19 xh-ai Web Log SSE Repair
+
+Symptom:
+
+- The xh-ai page showed an empty "real-time logs" terminal even though the backend service was running.
+- Internal backend testing on `code / 10.0.0.154` showed `/api/logs/stream` returned SSE `data:` lines.
+- External testing through `https://xh-ai.cyou/api/logs/stream` returned no `data:` lines before the repair.
+
+Root cause:
+
+- The xh-ai public path is layered:
+  - Client -> shared NLB `132.226.146.175`
+  - Server 3 Nginx stream / HTTPS virtual host
+  - Server 3 Nginx reverse proxy to `10.0.0.154`
+  - Server 4/code local Nginx -> `127.0.0.1:8000`
+- The generic Server 3 xh-ai reverse proxy used `proxy_pass https://10.0.0.154`, which worked for normal pages but did not stream SSE logs reliably through the extra HTTPS proxy layer.
+
+Applied repair:
+
+- Added a precise Server 3 Nginx location for xh-ai logs:
+  - `location = /api/logs/stream`
+  - `proxy_pass http://10.0.0.154/api/logs/stream`
+  - `proxy_buffering off`
+  - `proxy_cache off`
+  - `proxy_read_timeout 3600s`
+  - `proxy_send_timeout 3600s`
+  - `gzip off`
+  - `X-Accel-Buffering: no`
+- The rest of xh-ai traffic still uses the existing generic reverse proxy.
+- Nginx backup created on Server 3:
+  - `/etc/nginx/conf.d/xh-ai-proxy.conf.bak-sse-20260619-123123`
+
+Validation:
+
+- Internal SSE test through `127.0.0.1:8000/api/logs/stream` returned `data:` lines.
+- External SSE test through `https://xh-ai.cyou/api/logs/stream` returned `data:` lines after reload.
+- `https://xh-ai.cyou/`, `https://xh-ai.cyou/clash`, and `https://xh-ai.cyou/sub` continued returning `200`.
+
 
