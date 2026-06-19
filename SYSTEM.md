@@ -15,6 +15,21 @@
 
 ## 最新修改
 - 修改文件：
+  - `wfxl_openai_regst.py`
+  - `utils/stdout_log_bridge.py`
+  - `SYSTEM.md`
+- 本次修复：
+  - 新增 stdout/stderr 日志桥接模块，将服务端 `print()` 输出同步写入内存 `log_history`。
+  - 在 Web 入口启动时安装桥接，保持原 systemd/journal 输出不变，同时让前端 `/api/logs/stream` 能收到启动和运行日志。
+- 修改原因：
+  - xh-ai 小服务器部署后，`journalctl -u opaire-lite.service` 能看到项目日志，但 Web 页面实时运行日志为空；原因是页面只读取进程内 `log_history`，而启动输出没有稳定写入该队列。
+- 影响范围：
+  - 只影响日志显示路径，不改变注册流程、数据库、代理配置、订阅文件或服务器网络配置。
+- 验证方式：
+  - 本地语法检查 `wfxl_openai_regst.py` 与 `utils/stdout_log_bridge.py`。
+  - 部署到 xh-ai 后验证 `opaire-lite.service`、`https://xh-ai.cyou/` 和 `/api/logs/stream`。
+
+- 修改文件：
   - `SYSTEM.md`
   - `.codex/skills/project-memory/SKILL.md`
   - `.codex/docs/README.md`

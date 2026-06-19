@@ -26,9 +26,12 @@ from utils.config import reload_all_configs
 from utils.log_stream_cache import RecentParsedLogCache
 from utils.email_providers import mail_service
 from utils.memory_predictor import build_memory_report
+from utils.stdout_log_bridge import install_stdout_log_bridge
 
 from global_state import engine, log_history, append_log
 from routers import api_routes
+
+install_stdout_log_bridge(append_log)
 
 
 def _get_env_int(name: str, default: int) -> int:
