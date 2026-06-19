@@ -15,6 +15,35 @@
 
 ## 最新修改
 - 修改文件：
+  - `routers/service_routes.py`
+  - `static/js/app.js`
+  - `utils/auth_core.cpython-311-aarch64-linux-gnu.so`
+  - `utils/auth_core.cpython-311-darwin.so`
+  - `utils/auth_core.cpython-311-x86_64-linux-gnu.so`
+  - `utils/auth_core.pyd`
+  - `utils/auth_pipeline/register.py`
+  - `utils/config.py`
+  - `utils/core_engine.py`
+  - `SYSTEM.md`
+- 本次吸收：
+  - 合并上游 `wenfxl/openai-cpa` 最新 `upstream/main`，对应远端最新标签 `v17.0.3` / 提交 `46b6b54`。
+  - 吸收上游 `v17.0.2 -> v17.0.3` 的 3 个提交：
+    - `740c62f`：修复自动部署内存池 Worker 因 Cloudflare 更新导致的问题。
+    - `e17749a`：优化报错和妙妙屋部分提示，并更新 `auth_core` 二进制。
+    - `46b6b54`：优化部分前端提醒。
+  - 本地 `APP_VERSION` 已同步到 `v17.0.3`。
+- 保留本地定制：
+  - 保留 `.codex/docs/` 与 project-memory 文档体系。
+  - 保留 `stdout_log_bridge` Web 日志桥接修复。
+  - 保留 `auth_fingerprint` 可配置指纹兼容路径。
+  - 保留 Image2API token 归一化兼容逻辑。
+- 影响范围：
+  - 涉及 Worker 部署、注册链路提示、前端提醒文案、`auth_core` 二进制和版本号。
+  - 不修改本地 `data/`、服务器运行态、Nginx/NLB 配置或代理订阅文件。
+- 待验证：
+  - 完成 Python 语法检查与必要测试后再推送远端。
+
+- 修改文件：
   - `SYSTEM.md`
   - `.codex/docs/oci-nlb-nat-runbook.md`
 - 远端变更：
