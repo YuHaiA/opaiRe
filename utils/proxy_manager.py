@@ -9,6 +9,7 @@ import os
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional
 from utils.clash_group_utils import resolve_group_name
 
 CLASH_API_URL = ""
@@ -209,7 +210,7 @@ def _lookup_group_nodes(node_map: dict, actual_group_name: str, configured_group
     return []
 
 
-def _resolve_group_candidate_nodes(proxies_data: dict, group_name: str, current_node: str = "", clash_conf: dict | None = None):
+def _resolve_group_candidate_nodes(proxies_data: dict, group_name: str, current_node: str = "", clash_conf: Optional[dict] = None):
     actual_group_name = resolve_group_name(proxies_data, group_name)
     if not actual_group_name:
         return "", [], {"preferred_only_mode": False, "preferred_nodes": [], "tested_nodes": [], "valid_nodes": []}
@@ -257,7 +258,7 @@ def _resolve_group_candidate_nodes(proxies_data: dict, group_name: str, current_
     }
 
 
-def _resolve_effective_candidate_count(proxy_url, clash_conf: dict, current_node: str) -> int | None:
+def _resolve_effective_candidate_count(proxy_url, clash_conf: dict, current_node: str) -> Optional[int]:
     current_api_url = get_api_url_for_proxy(proxy_url)
     headers = {"Authorization": f"Bearer {CLASH_SECRET}"} if CLASH_SECRET else {}
 

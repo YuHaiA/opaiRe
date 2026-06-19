@@ -15,6 +15,31 @@
 
 ## 最新修改
 - 修改文件：
+  - `SYSTEM.md`
+  - `utils/proxy_manager.py`
+- 本次整理与部署：
+  - 将本地代码继续同步到上游 `wenfxl/openai-cpa` 的 `v17.0.3` 基线上，并确认当前本地 `main` 已吸收该版本。
+  - 恢复并重新部署服务 3（`dazhou.bond`）的轻量项目运行态：当前服务 3 仍按“服务 3”记名，不是新机器别名。
+  - 服务 3 当前权威对应：
+    - 机器：`instance-20260613-1403`
+    - 私网 IP：`10.31.0.239`
+    - 域名：`dazhou.bond`、`www.dazhou.bond`
+  - 服务 4 当前权威对应：
+    - 机器：`code`
+    - 私网 IP：`10.0.0.154`
+    - 域名：`xh-ai.cyou`、`www.xh-ai.cyou`
+  - 服务 3 远端此前已退化成仅返回 `dazhou.bond server3 new host ok` 的 Nginx 占位页，`/home/opc/opaiRe` 与 `opaire-lite.service` 均不再是完整运行态；现已重新建立轻量源码部署目录、Python 3.11 虚拟环境与 systemd 服务，并把 Nginx `location /` 切回反代 `127.0.0.1:8000`。
+  - 针对代理管理模块，补充 Python 兼容性修正：将 `utils/proxy_manager.py` 中的 `dict | None` / `int | None` 注解改为 `Optional[...]`，避免较旧解释器在导入阶段直接报语法错误。
+- 修改原因：
+  - 用户要求继续把 `dazhou.bond` 也部署好，并把“服务 1/2/3/4”与域名、机器映射稳定记录到项目文档中，避免新电脑或后续恢复时再次把服务 4 错绑到别的 Oracle 主机。
+  - 服务 3 现场已经不是完整应用部署，只剩占位页；如果不恢复轻量服务与文档映射，后续再排障会持续混淆“域名入口”和“真实后端机器”。
+- 验证结果：
+  - 服务 3：`opaire-lite.service` 为 `active`，本机 `127.0.0.1:8000` 返回 `200`，外部 `https://dazhou.bond/`、`https://dazhou.bond/clash`、`https://dazhou.bond/sub` 均返回 `200`，页面已恢复为真实应用 HTML，不再是静态占位字符串。
+  - 服务 4：`https://xh-ai.cyou/`、`https://xh-ai.cyou/clash`、`https://xh-ai.cyou/sub` 继续返回 `200`，后端仍以 `code / 10.0.0.154` 为准。
+- 影响范围：
+  - 这次记录主要影响服务编号映射、服务 3 轻量部署状态说明，以及 `utils/proxy_manager.py` 的类型注解兼容性；不写入任何密钥、token、raw 节点链接或订阅私密参数。
+
+- 修改文件：
   - `routers/service_routes.py`
   - `static/js/app.js`
   - `utils/auth_core.cpython-311-aarch64-linux-gnu.so`

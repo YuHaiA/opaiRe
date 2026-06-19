@@ -28,6 +28,35 @@ Operational rules:
   - `dazhou.bond:18443` Xray SOCKS was intentionally removed on 2026-06-19.
 - Shared subscription files live on Server 3 under `/var/www/proxy-subs/`; the `server4-reality-443` entry must match the `code` machine Xray config.
 
+## 2026-06-19 Current State Correction
+
+This runbook had older historical sections that mentioned the temporary Server 4 drift target `10.0.0.112`. Those notes are now historical only.
+
+Current authoritative state after the 2026-06-19 repair:
+
+- Server 3 remains the public Web / subscription host:
+  - instance `instance-20260613-1403`
+  - private IP `10.31.0.239`
+  - domains `dazhou.bond`, `www.dazhou.bond`
+- Server 4 proxy backend has been corrected back to:
+  - instance `code`
+  - private IP `10.0.0.154`
+  - domains `xh-ai.cyou`, `www.xh-ai.cyou`
+- Do not reuse `instance-20260604-1123 / 10.0.0.112` as the live Server 4 backend unless a future migration is intentionally executed and revalidated.
+
+Additional 2026-06-19 verified state:
+
+- Server 3 lightweight app deployment was restored from a placeholder-only Nginx page back to a real source deployment under `/home/opc/opaiRe`.
+- Server 3 now again serves the real application through `opaire-lite.service` on `127.0.0.1:8000`.
+- Public validation succeeded for:
+  - `https://dazhou.bond/`
+  - `https://dazhou.bond/clash`
+  - `https://dazhou.bond/sub`
+- Server 4 public validation remained healthy for:
+  - `https://xh-ai.cyou/`
+  - `https://xh-ai.cyou/clash`
+  - `https://xh-ai.cyou/sub`
+
 ## Principle
 
 - Keep the existing instance and primary VNIC.
