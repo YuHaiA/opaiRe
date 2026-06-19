@@ -12,6 +12,7 @@ luckmail/__pycache__/
 
 # 本地数据库和日志
 data/
+tmp/
 *.db
 *.log
 

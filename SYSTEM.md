@@ -16,6 +16,71 @@
 ## 最新修改
 - 修改文件：
   - `SYSTEM.md`
+  - `scripts/oracle_proxy_reconcile.py`
+- 本次落地：
+  - 新增 Oracle 代理入口巡检 / 修复脚本：`scripts/oracle_proxy_reconcile.py`
+  - 该脚本现已实际部署到服务 3：
+    - 远端路径：`/home/opc/opaiRe/scripts/oracle_proxy_reconcile.py`
+  - 已完成服务 3 -> 服务 4 免密检查链路：
+    - 服务 3 上使用 `/home/opc/.ssh/server4_reconcile_key`
+    - 已可从服务 3 直接检查服务 4 主机身份与当前私网 IP
+  - 已完成 `systemd` 定时任务部署：
+    - `oracle-proxy-reconcile.service`
+    - `oracle-proxy-reconcile.timer`
+  - 当前定时策略：
+    - 开机后约 3 分钟自动执行一次
+    - 之后每 10 分钟自动执行一次
+  - 当前脚本已实际跑通并验证成功的能力：
+    - 检查服务 3 主机身份是否仍为 `instance-20260613-1403`
+    - 检查服务 4 主机身份是否仍为 `code`
+    - 检查并修复服务 3 `nginx stream upstream` 是否仍把 `xh-ai` Reality 路由到 `10.0.0.154:24444`
+    - 检查订阅发布是否仍为域名入口，而不是旧公网 IP / 临时 IP
+    - 检查并修复共享 OCI NLB backend 漂移
+  - 已完成一次共享 NLB backend 现场修正：
+    - `s4-tcp-24444` 旧后端 `10.0.0.112:24444` 已删除
+    - `s4-tcp-24444` 当前后端为 `10.0.0.154:24444`
+    - `s4-tcp-18454` 当前后端为 `10.0.0.154:18454`
+- 修改原因：
+  - 用户要求不要只巡检，还要做到“服务器重启后自动启动，并能自动修服务 4 IP 漂移导致的节点失效”。
+- 使用说明：
+  - 只巡检：
+    - `python scripts/oracle_proxy_reconcile.py`
+  - 手动执行完整修复：
+    - `python scripts/oracle_proxy_reconcile.py --apply-nginx-fix --apply-nlb-fix`
+  - 在服务 3 安装并启用定时巡检：
+    - `python scripts/oracle_proxy_reconcile.py --install-timer`
+
+- 修改文件：
+  - `SYSTEM.md`
+- 本次排查：
+  - 针对“本地 Clash 使用甲骨文外部节点测速不快”的问题，重新区分了“机器本身 NAT 出口速度”和“公开节点链路速度”。
+  - 当前服务 3 / 服务 4 主机自身 NAT 出口仍正常：
+    - 服务 3 出口 IP：`161.153.20.32`
+    - 服务 4 出口 IP：`161.153.60.236`
+  - 云端直连下载测试仍可达到数百兆，说明并未回退到 Oracle 经典 `50Mbps` 受限形态。
+  - 但当前公开给本地 Clash 使用的甲骨文外部节点，实测只跑到约 `200Mbps` 级：
+    - `server4-reality-443`（`xh-ai.cyou:443`）约 `195-221Mbps`
+    - `server3-reality-2053`（实际端口 `dazhou.bond:24443`）约 `216Mbps`
+  - 这说明“慢”主要发生在公开节点链路，而不是 Oracle NAT 是否失效。
+  - 重新核对服务 4 Reality 备用测试端口：
+    - 本机 `xray` 仍监听 `24444/8443/2083/2087/2096`
+    - 但当前公网入口实际稳定可用的仍只有 `xh-ai.cyou:443`
+    - 对 `24444/8443/2083/2087/2096` 的最新对外测速测试均未得到稳定有效结果，不应再把它们视为当前主用公开节点
+  - TG 入口本次未改动：
+    - 服务 3 `dazhou.bond:18453` 仍监听
+    - 服务 4 `xh-ai.cyou:18454` 本机仍监听
+- 修改原因：
+  - 用户反馈本地 Clash 连接甲骨文外部节点时速度不理想，需要区分“服务器自身是否仍突破 50Mbps”与“公开节点是否还能把数百兆完整带出来”。
+  - 现有文档中保留了较多历史 Reality 测试端口记录，容易让后续误以为 `8443/2083/2087/2096/24444` 仍是现网稳定主入口。
+- 结论：
+  - 当前不应再把服务 4 的 `24444/8443/2083/2087/2096` 视为现网稳定公开候选节点。
+  - 当前真实主用公开节点仍是：
+    - `server4-reality-443`
+    - `server3-reality-2053`（名称历史保留，但实际端口是 `24443`）
+  - 后续若要继续提速，应针对“公开节点入口形态”优化，而不是重复怀疑 NAT 是否失效。
+
+- 修改文件：
+  - `SYSTEM.md`
   - `utils/proxy_manager.py`
 - 本次整理与部署：
   - 将本地代码继续同步到上游 `wenfxl/openai-cpa` 的 `v17.0.3` 基线上，并确认当前本地 `main` 已吸收该版本。
