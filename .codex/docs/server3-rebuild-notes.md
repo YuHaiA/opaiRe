@@ -262,3 +262,5 @@ On the new host as of 2026-06-13, only SSH, Nginx `80/443`, and base system list
 8. Re-enable firewalld services/ports and SELinux boolean.
 9. Reinstall/configure Mihomo, Xray, and MTG only if still needed.
 10. Verify local app, Nginx, proxy ports, and public HTTPS before DNS update.
+
+

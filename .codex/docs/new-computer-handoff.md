@@ -22,8 +22,8 @@ Purpose: give a fresh development machine enough non-sensitive context to contin
   - `config.example.yaml`
 - Project memory and operation notes:
   - `SYSTEM.md`
-  - `docs/server3-rebuild-notes.md`
-  - `docs/oci-nlb-nat-runbook.md`
+  - `.codex/docs/server3-rebuild-notes.md`
+  - `.codex/docs/oci-nlb-nat-runbook.md`
 
 ## What Is Intentionally Not Uploaded
 
@@ -62,7 +62,7 @@ If a new computer needs to run the project, create its own local `data/config.ya
 
 ## Server Notes
 
-The durable operation record is in `SYSTEM.md` and `docs/`. Those files describe the important server and network work at a high level, including:
+The durable operation record is in `SYSTEM.md` and `.codex/docs/`. Those files describe the important server and network work at a high level, including:
 
 - Server 3 rebuild notes.
 - OCI NLB inbound plus NAT egress runbook.
@@ -87,4 +87,6 @@ The docs intentionally avoid storing raw secrets. Treat any host paths, IP addre
 - Keep `data/` ignored.
 - Do not commit runtime databases, account inventory, local configs, proxy subscriptions, logs, or credential files.
 - When changing behavior, update `SYSTEM.md` in the same commit.
-- Put future operational notes under `docs/` instead of scattering them in the project root.
+- Put future operational notes under `.codex/docs/` instead of scattering them in the project root.
+
+

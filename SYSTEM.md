@@ -15,7 +15,126 @@
 
 ## 最新修改
 - 修改文件：
-  - `docs/new-computer-handoff.md`
+  - `SYSTEM.md`
+  - `.codex/skills/project-memory/SKILL.md`
+  - `.codex/docs/README.md`
+  - `.codex/docs/2026-06-19-fix-summary.md`
+  - `.codex/docs/new-computer-handoff.md`
+  - `.codex/docs/oci-nlb-nat-runbook.md`
+  - `.codex/docs/server3-rebuild-notes.md`
+- 本次整理：
+  - 将根目录 `docs/` 下的运维 / 交接 / OCI NAT NLB 方案文档统一迁移到 `.codex/docs/`，让项目根目录和源代码目录更干净。
+  - 新增 `.codex/docs/README.md`，说明该目录用于保存 Codex 项目运维记录、交接记录和网络方案记录。
+  - 清空 `.codex/tmp/` 中已完成用途的临时二进制、SDK 解压包、测速文件和探测配置。
+  - 更新项目记忆，固定约定：面向 Codex 的运维文档放在 `.codex/docs/`，不要再散放到公开项目根目录。
+- 修改原因：
+  - 用户要求清理项目多余文件，并把文档统一整理到 `.codex` 项目记录里，保持应用代码与运维记录分离。
+- 影响范围：
+  - 不改变应用代码、服务配置、数据库、运行数据或远端服务器状态。
+  - `.codex/` 当前被 `.gitignore` 忽略，因此这些文档作为本机 Codex 项目记录保存；Git 中会表现为旧 `docs/` 路径删除。
+- 验证结果：
+  - `.codex/docs/` 已包含 5 个文档文件。
+  - `.codex/tmp/` 已确认为空。
+  - 未发现 `.codex/.codex` 错误路径引用。
+
+- 修改文件：
+  - `SYSTEM.md`
+  - `.codex/docs/oci-nlb-nat-runbook.md`
+- 远端变更：
+  - 按用户要求将两台 TG 入口统一为只保留 MTProto。
+  - Server 3 保留 `dazhou.bond:18453` MTProto，移除 `dazhou.bond:18443` Xray SOCKS。
+  - Server 4 保留 `xh-ai.cyou:18454` MTProto，继续保持 `xh-ai.cyou:18444` Xray SOCKS 已移除状态。
+  - 已从 Server 3 `/usr/local/etc/xray/config.json` 删除 `18443` inbound，并重启 `xray`；Server 3 Reality `2053/tcp` 与 `24443/tcp` 正常保留。
+  - 已从 Server 3 firewalld 移除 `18443/tcp` 与 `18443/udp`。
+  - 已清空共享 NLB backend set `bs-18443`；`bs-18453` 保持指向 `10.31.0.239:18453`。
+  - 已更新本机 `C:\Users\admin\Desktop\file\tg-links.txt`，只保留两条 MTProto 链接：
+    - `dazhou.bond:18453`
+    - `xh-ai.cyou:18454`
+- 验证结果：
+  - `dazhou.bond:18453` TCP 连通成功。
+  - `dazhou.bond:18443` TCP 不再连通，符合预期。
+  - `xh-ai.cyou:18454` TCP 连通成功。
+  - `xh-ai.cyou:18444` TCP 不再连通，符合预期。
+  - NLB backend health：
+    - `bs-18453`: `OK`, backend `10.31.0.239:18453`
+    - `bs-18443`: backend 为空
+    - `s4-tcp-18454`: `OK`, backend `10.0.0.154:18454`
+    - `s4-tcp-18444`: backend 为空
+- 影响范围：
+  - 只影响两台 TG SOCKS 入口；不影响两台 MTProto、Reality 节点、Web/订阅入口。
+
+- 修改文件：
+  - `SYSTEM.md`
+  - `.codex/docs/oci-nlb-nat-runbook.md`
+- 远端变更：
+  - 按用户要求在 `xh-ai.cyou` 服务4 TG 入口中只保留一个协议。
+  - 保留服务4 Telegram 原生 MTProto：`xh-ai.cyou:18454`。
+  - 移除服务4 Xray SOCKS TG 入站：`xh-ai.cyou:18444`。
+  - 已从 `code / 10.0.0.154` 的 `/usr/local/etc/xray/config.json` 删除 `18444` inbound，并重启 `xray`；`xray` 仍为 `active`，Reality `24444/tcp` 正常保留。
+  - 已从服务4 firewalld 移除 `18444/tcp` 与 `18444/udp`。
+  - 已删除共享 NLB backend set `s4-tcp-18444` 中的后端；`s4-tcp-18454` 保持指向 `10.0.0.154:18454`。
+  - 已更新本机 `C:\Users\admin\Desktop\file\tg-links.txt`，移除 `xh-ai.cyou:18444` SOCKS 链接，仅保留 `xh-ai.cyou:18454` MTProto 链接。
+- 修改原因：
+  - MTProto 是 Telegram 原生代理，手机 Telegram 直接添加更合适；SOCKS 更通用但暴露面更大。用户要求两种协议留一个，因此服务4只保留 MTProto。
+- 验证结果：
+  - `xh-ai.cyou:18454` TCP 连通成功。
+  - `xh-ai.cyou:18444` TCP 不再连通，符合预期。
+  - NLB backend health：
+    - `s4-tcp-18454`: `OK`, backend `10.0.0.154:18454`
+    - `s4-tcp-18444`: backend 为空
+  - `code` 机器监听项只剩 `18454/tcp` MTProto 与 `24444/tcp` Reality，不再监听 `18444`。
+- 影响范围：
+  - 只影响服务4 TG SOCKS 入口；不影响服务4 MTProto、Reality 节点、Web/订阅入口或服务3 TG 入口。
+
+- 修改文件：
+  - `SYSTEM.md`
+  - `.codex/docs/oci-nlb-nat-runbook.md`
+- 远端变更：
+  - 修复 Server 4 TG 入口的共享 NLB backend 漂移。
+  - `s4-tcp-18444` 从空 / 旧状态恢复为 `10.0.0.154:18444`。
+  - `s4-tcp-18454` 从旧 `10.0.0.112:18454` 改回当前权威后端 `10.0.0.154:18454`。
+  - 两个 backend set 均保持 `is_preserve_source=false`，和现有共享 NLB / NAT 路由形态一致。
+- 修改原因：
+  - Server 4 的 `code` 机器本机 `xray` SOCKS `18444/tcp,udp` 与 `mtg` `18454/tcp` 都正常监听，Server 3 到 `10.0.0.154:18444/18454` 内网也通，但公网 `xh-ai.cyou:18444/18454` 不通。
+  - OCI NLB 检查确认 Server 4 TG backend 仍指向旧 `10.0.0.112`，导致健康检查 `CRITICAL` 和公网连接失败。
+- 验证结果：
+  - NLB backend health：
+    - `s4-tcp-18444`: `OK`, backend `10.0.0.154:18444`
+    - `s4-tcp-18454`: `OK`, backend `10.0.0.154:18454`
+  - 公网 TCP 连通：
+    - `dazhou.bond:18453` 成功
+    - `dazhou.bond:18443` 成功
+    - `xh-ai.cyou:18454` 成功
+    - `xh-ai.cyou:18444` 成功
+  - 本地 `C:\Users\admin\Desktop\file\tg-links.txt` 中四个 TG 直连链接仍使用正确域名与端口，无需重生成 secret。
+- 影响范围：
+  - 仅修复 OCI NLB backend 指向；不改动 `code` 机器 Xray / MTG 配置、不改动 TG secret、不改动 Web 项目。
+
+- 修改文件：
+  - `.codex/docs/2026-06-19-fix-summary.md`
+  - `SYSTEM.md`
+- 远端变更：
+  - 已将当前服务器 / 域名 / 私网 IP 权威对照写入 `AGENTS.md`、`.codex/docs/2026-06-19-fix-summary.md`、`.codex/docs/oci-nlb-nat-runbook.md`，后续以该表为准。
+  - 当前服务 3 是 `instance-20260613-1403 / 10.31.0.239`，域名 `dazhou.bond` / `www.dazhou.bond`。
+  - 当前服务 4 代理后端是 `code / 10.0.0.154`，域名 `xh-ai.cyou` / `www.xh-ai.cyou`，Reality 后端监听 `24444/tcp`。
+  - 明确标注 `instance-20260604-1123 / 10.0.0.112` 不是当前服务 4 代理后端，除非未来重新迁移并验证。
+  - 按用户截图校正 Server 4 代理后端：当前应使用 `code` 机器，private IP `10.0.0.154`，不是 `instance-20260604-1123 / 10.0.0.112`。
+  - 已清理误放到 `instance-20260604-1123` 的临时 `/usr/local/bin/xray`，没有创建服务或写入配置。
+  - 通过 Server 3 跳板确认 `code` 机器 hostname 为 `code`，`xray` 为 `active`，并监听 `24444/tcp`。
+  - Server 3 `nginx.conf` 的 `xray_reality_443` 与 `server4_reality_24444` upstream 均指向 `10.0.0.154:24444`。
+  - 修正 Server 3 Nginx stream SNI：`xh-ai.cyou` / `www.xh-ai.cyou` 走 `nginx_https_4443` 用于 Web 与订阅，Reality 客户端使用 `servername: www.cloudflare.com` 时才分流到 `xray_reality_443`。
+  - 更新 Server 3 发布的 `/var/www/proxy-subs/clash.yaml` 与 `/var/www/proxy-subs/v2ray.txt`，使 `server4-reality-443` 的 UUID、Reality public key、short-id、SNI 对齐 `code / 10.0.0.154:24444` 的实际 Xray 配置。
+- 修改原因：
+  - 手机 / Clash 测不到服务4延迟，实际原因是订阅参数与 `code` 机器 Xray 配置不匹配，并且 `xh-ai.cyou` SNI 一度被误分流到 Xray，导致订阅 URL TLS 握手失败。
+- 验证结果：
+  - `https://xh-ai.cyou/clash` 本机返回 `200`。
+  - 服务器侧 `https://xh-ai.cyou/sub`、`https://dazhou.bond/clash`、`https://xh-ai.cyou/` 均返回 `200`。
+  - 使用 `https://xh-ai.cyou/clash` 中的 `server4-reality-443` 参数创建临时 Xray 客户端，访问 `https://www.gstatic.com/generate_204` 返回 `204`，耗时约 `0.149s`。
+- 影响范围：
+  - 仅影响代理订阅文件与 Server 3 Nginx stream 分流；不改动项目数据库、应用代码、Web 服务运行目录或 `code` 机器项目内容。
+
+- 修改文件：
+  - `.codex/docs/new-computer-handoff.md`
   - `SYSTEM.md`
   - Git 索引中的 `data/mihomo-pool/imported-subscriptions/krBDPZx.yaml`
 - 本次修改：
@@ -1416,7 +1535,7 @@
 ## 2026-06-13 服務 3 NAT 重建準備記錄
 
 - 新增文件：
-  - `docs/server3-rebuild-notes.md`
+  - `.codex/docs/server3-rebuild-notes.md`
 - 本次記錄：
   - 記錄服務 3 在刪除/重建 OCI 實例前的非敏感運維配置，用於之後在 `opaire-s3-nat-vcn2` 的 private subnet 重新搭建。
   - 覆蓋內容包含域名、目前 IP、目標 NAT VCN/subnet、systemd 服務、Nginx/TLS 路徑、firewalld、SELinux、Python/venv、Mihomo、Xray/MTG 端口與 opaiRe runtime 路徑。
@@ -1425,12 +1544,12 @@
   - 本次只做只讀盤點與文檔記錄，未停止服務 3、未備份實例、未修改現有 VCN/subnet、未遷移實例。
   - 目前服務 3 仍在 `vcn-20260527-2027` / `10.0.0.0/24`；目標重建網路是 `opaire-s3-nat-vcn2-private-subnet` / `10.31.1.0/24`。
 - 待驗證事項：
-  - 真正重建後，需按 `docs/server3-rebuild-notes.md` 逐項恢復並驗證 Nginx、TLS、opaire-lite、Mihomo、Xray/MTG 與 DNS。
+  - 真正重建後，需按 `.codex/docs/server3-rebuild-notes.md` 逐項恢復並驗證 Nginx、TLS、opaire-lite、Mihomo、Xray/MTG 與 DNS。
 
 ## 2026-06-13 服務 3 新機域名與 Nginx 基礎恢復
 
 - 修改文件：
-  - `docs/server3-rebuild-notes.md`
+  - `.codex/docs/server3-rebuild-notes.md`
   - `SYSTEM.md`
 - 遠端變更：
   - 新服務 3 實例 `instance-20260613-1403` 已確認位於 `opaire-s3-nat-vcn2` 的 `opaire-s3-nat-vcn2-public-subnet`，私網 IP 為 `10.31.0.239`，公網 IP 為 `129.146.91.250`。
@@ -1454,7 +1573,7 @@
 ## 2026-06-13 服務 3 NLB 入站 + NAT 出站切換
 
 - 修改文件：
-  - `docs/server3-rebuild-notes.md`
+  - `.codex/docs/server3-rebuild-notes.md`
   - `SYSTEM.md`
 - 遠端變更：
   - 已建立 OCI Network Load Balancer `server3-public-nlb`。
@@ -1475,7 +1594,7 @@
 ## 2026-06-13 服務 3 Reality 節點恢復記錄
 
 - 修改文件：
-  - `docs/server3-rebuild-notes.md`
+  - `.codex/docs/server3-rebuild-notes.md`
   - `SYSTEM.md`
 - 遠端變更：
   - 新服務 3 已安裝並啟用官方 `Xray 26.3.27`。
@@ -1497,7 +1616,7 @@
 ## 2026-06-13 服務 3 訂閱合併與 HTTPS 證書恢復
 
 - 修改文件：
-  - `docs/server3-rebuild-notes.md`
+  - `.codex/docs/server3-rebuild-notes.md`
   - `SYSTEM.md`
 - 遠端變更：
   - 將服務 3 `/var/www/proxy-subs/clash.yaml` 從單服務 3 節點恢復為雙節點訂閱，包含 `server3-reality` 與 `server4-reality`。
@@ -1517,7 +1636,7 @@
 ## 2026-06-13 服務 3 Reality 配置對齊舊文檔
 
 - 修改文件：
-  - `docs/server3-rebuild-notes.md`
+  - `.codex/docs/server3-rebuild-notes.md`
   - `SYSTEM.md`
 - 對照結論：
   - 舊文檔與服務 4 保存的舊服務 3 節點使用 `www.cloudflare.com` 作為 Reality `serverName/dest`。
@@ -1536,7 +1655,7 @@
 ## 2026-06-13 OCI NLB + NAT 無重建復刻文檔
 
 - 修改文件：
-  - `docs/oci-nlb-nat-runbook.md`
+  - `.codex/docs/oci-nlb-nat-runbook.md`
   - `SYSTEM.md`
 - 記錄目的：
   - 將服務 3 已驗證的「不刪實例、不重建實例」方案固定成 runbook，避免後續復刻到服務 4 時靠聊天記憶操作。
@@ -1559,7 +1678,7 @@
 ## 2026-06-13 服務 4 共享 NLB 入站試接
 
 - 修改文件：
-  - `docs/oci-nlb-nat-runbook.md`
+  - `.codex/docs/oci-nlb-nat-runbook.md`
   - `SYSTEM.md`
 - OCI 限制：
   - 嘗試為服務 4 建立獨立 public NLB 時，OCI 返回 `LimitExceeded: max-nlb-flexible-count`。
@@ -1583,7 +1702,7 @@
 ## 2026-06-13 服務 4 共享 NLB + NAT 完整切換
 
 - 修改文件：
-  - `docs/oci-nlb-nat-runbook.md`
+  - `.codex/docs/oci-nlb-nat-runbook.md`
   - `SYSTEM.md`
 - 執行方案：
   - 使用既有共享 NLB 公網 IP `132.226.146.175` 承載服務 4。
@@ -1650,7 +1769,7 @@
 
 - 修改文件：
   - `SYSTEM.md`
-  - `docs/server3-rebuild-notes.md`
+  - `.codex/docs/server3-rebuild-notes.md`
 - 背景：
   - 使用者決定繼續使用原有域名訂閱，不再保留臨時 `/clash-ip` 與 `/sub-ip` 入口。
 - 遠端變更：
@@ -1671,7 +1790,7 @@
 
 - 修改文件：
   - `SYSTEM.md`
-  - `docs/oci-nlb-nat-runbook.md`
+  - `.codex/docs/oci-nlb-nat-runbook.md`
 - 背景：
   - 本地 Clash 測速顯示服務 3/4 速度波動明顯，且服務 4 在當前本地線路下通常優於服務 3。
 - 遠端變更：
@@ -1695,3 +1814,351 @@
   - `xray` 服務均為 `active`。
   - 原訂閱入口 `/clash`、`/sub` 保持可用。
   - 本地經 Clash 走服務 4 的 OVH 10MB 短測約 `2.77Mbps`，仍低於雲端服務 2 先前測得的百兆級速度，判斷本地到 OCI Phoenix / NLB 的線路仍是主要瓶頸。
+
+## 2026-06-14 NLB / Reality 速度復測與日誌降噪
+
+- 修改文件：
+  - `SYSTEM.md`
+  - `.codex/docs/oci-nlb-nat-runbook.md`
+- 背景：
+  - 使用者反饋目前體感比先前 `400-500Mbps` 記錄更慢，需要重新核對服務端是否退化。
+- 遠端變更：
+  - 服務 3 與服務 4 的 Xray `log` 明確設置：
+    - `access: none`
+    - `error: none`
+    - `loglevel: warning`
+  - 兩台均使用 `xray run -test -config /usr/local/etc/xray/config.json` 驗證後重啟成功。
+- 2026-06-14 復測結果：
+  - 服務 3 主機直接經 NAT 拉 Cachefly 100MB：約 `546Mbps`；拉 OVH 100MB：約 `129Mbps`。
+  - 服務 4 主機直接經 NAT 拉 Cachefly 100MB：約 `359Mbps`；拉 OVH 100MB：約 `123Mbps`。
+  - 服務 2 經 Reality 代理拉 Cachefly 100MB：
+    - 服務 3：約 `320-331Mbps`
+    - 服務 4：約 `306-325Mbps`
+  - 服務 2 經 Reality 代理拉 OVH 100MB：
+    - 服務 3：約 `119Mbps`
+    - 服務 4：約 `108Mbps`
+  - 服務 3 NLB 原始 HTTPS 入口拉 100MB 測試文件：約 `253-357Mbps`，測後已刪除臨時文件。
+  - 服務 2 直連 Cachefly 100MB：約 `2.1Gbps`，確認服務 2 本身不是瓶頸。
+- 判斷：
+  - NAT 出口本身沒有退化，服務 3 直接出站仍可到 `500Mbps` 級。
+  - Reality 代理當前上限主要受共享 NLB 入口 / 跨雲路徑影響，穩定約 `300Mbps` 級。
+  - 先前 `400Mbps` 記錄屬於 NLB 拉取高點；當前 `300Mbps+` 與其同量級，但不是穩定 `500Mbps`。
+
+## 2026-06-14 本地入口端口優化
+
+- 修改文件：
+  - `SYSTEM.md`
+  - `.codex/docs/oci-nlb-nat-runbook.md`
+- 背景：
+  - 雲端經 Reality 可達 `300Mbps` 級，但本地 / 手機連原高端口 `24443/24444` 只有幾 Mbps 到十幾 Mbps，判斷可能受本地 ISP 到 OCI NLB 的端口 / 路由影響。
+- 遠端變更：
+  - 服務 3 新增 Reality 備用端口 `2053/tcp`。
+  - 服務 4 新增 Reality 備用端口：
+    - `8443/tcp`
+    - `2083/tcp`
+    - `2087/tcp`
+    - `2096/tcp`
+  - OCI NLB 新增 listener/backend：
+    - `2053 -> 10.31.0.239:2053`
+    - `8443 -> 10.0.0.154:8443`
+    - `2083 -> 10.0.0.154:2083`
+    - `2087 -> 10.0.0.154:2087`
+    - `2096 -> 10.0.0.154:2096`
+  - NLB subnet security list 已放行上述入口端口。
+  - 服務 4 NSG 已放行 `10.31.0.0/16` 到 `8443/2083/2087/2096`。
+  - 兩個主訂閱新增並優先發布：
+    - `server4-reality-2087`
+    - `server4-reality-8443`
+    - `server4-reality`
+    - `server3-reality-2053`
+    - `server3-reality`
+- 測試結果：
+  - 服務 2 雲端經 `server4-reality-2087` 拉 Cachefly 100MB：約 `336Mbps`；拉 OVH 100MB：約 `106Mbps`。
+  - 本機臨時 Xray 測試中，服務 4 備用端口對比：
+    - `2087`：Cachefly 約 `41.8Mbps`，OVH 10MB 約 `10.2Mbps`
+    - `8443`：Cachefly 約 `34.7Mbps`，OVH 10MB 約 `10.0Mbps`
+    - `2083`：Cachefly 約 `34.2Mbps`，OVH 10MB 約 `6.9Mbps`
+    - `2096`：Cachefly 約 `18.9Mbps`，OVH 10MB 約 `9.2Mbps`
+  - 後續本機 `2087` 復測降至約 `20Mbps`，說明本地到 OCI 入口路徑仍有明顯時段波動。
+- 本機 Clash 狀態：
+  - 已刷新本機 Clash Verge 當前配置，能看到新增節點。
+  - 模式已恢復為 `rule`。
+  - `节点选择` 當前選中 `server4-reality-2087`。
+
+## 2026-06-14 443 SNI 分流入口
+
+- 修改文件：
+  - `SYSTEM.md`
+  - `.codex/docs/oci-nlb-nat-runbook.md`
+- 背景：
+  - 備用端口可改善本地速度但仍無法接近雲端測速；繼續嘗試最可能被本地網路優待的 `443/tcp` 入口。
+- 遠端變更：
+  - 服務 3 安裝 `nginx-mod-stream`，並完整重啟 Nginx 以載入 stream 動態模塊。
+  - SELinux `http_port_t` 新增 `4443/tcp`，允許 Nginx 本機 HTTPS 後端綁定。
+  - 服務 3 Nginx 改為：
+    - 公網 `0.0.0.0:443` 由 stream 接管。
+    - `dazhou.bond`、`www.dazhou.bond`、`xh-ai.cyou`、`www.xh-ai.cyou` 仍轉到本機 HTTPS 後端 `127.0.0.1:4443`。
+    - Reality 握手 SNI `www.cloudflare.com` 轉發到服務 4 私網 Reality 後端 `10.0.0.154:24444`。
+  - 兩個主訂閱新增並優先發布 `server4-reality-443`。
+- 當前訂閱順序：
+  - `server4-reality-443`
+  - `server4-reality-2087`
+  - `server4-reality-8443`
+  - `server4-reality`
+  - `server3-reality-2053`
+  - `server3-reality`
+- 驗證結果：
+  - `https://dazhou.bond/` 返回 `200`。
+  - `https://xh-ai.cyou/` 返回 `200`。
+  - `https://dazhou.bond/clash`、`https://xh-ai.cyou/clash`、`/sub` 均包含上述節點順序。
+  - 服務 2 經 `xh-ai.cyou:443` Reality 進服務 4：
+    - Cachefly 100MB：約 `338Mbps`
+    - OVH 100MB：約 `110Mbps`
+  - 本機臨時 Xray 經 `xh-ai.cyou:443` Reality：
+    - Cachefly 100MB：約 `34Mbps`
+    - OVH 10MB：約 `20.5Mbps`
+  - 本機 Clash Verge 已刷新配置，`节点选择` 當前選中 `server4-reality-443`，模式為 `rule`。
+- 注意：
+  - `443` 入口當前只能給一個 Reality 後端使用，因為現有服務 3 / 服務 4 Reality 都使用 `servername: www.cloudflare.com`；目前選擇服務 4 作為 `443` 後端。
+  - 若未來需要服務 3 也使用 `443`，需要為另一台服務配置不同 Reality SNI 並同步 stream map。
+
+## 2026-06-14 Server 4 Hysteria2 UDP 443 實驗節點
+
+- 修改文件：
+  - `SYSTEM.md`
+  - `.codex/docs/oci-nlb-nat-runbook.md`
+- 背景：
+  - TCP / Reality 在雲端可達 `300Mbps+`，但本地與手機端仍多在幾十 Mbps，判斷瓶頸更偏向本地 ISP 到 OCI Phoenix NLB 的 TCP 入口路徑。
+  - 新增 `Hysteria2` / QUIC 節點作為 UDP 對照，不替換現有 Reality 節點。
+- 遠端變更：
+  - 服務 4 安裝 Hysteria `v2.9.2`。
+  - 服務 4 新增 `hysteria-server.service`，監聽 `:443/udp`。
+  - Hysteria 使用服務 4 既有 `xh-ai.cyou` TLS 證書副本，證書副本放在 `/etc/hysteria/tls/`，不改動 Nginx 原證書。
+  - 服務 4 firewalld 已放行 `443/udp`。
+  - OCI NLB 新增 UDP listener/backend：`132.226.146.175:443/udp -> 10.0.0.154:443/udp`。
+  - NLB subnet security list 已放行 `443/udp` 公網入口。
+  - 服務 4 NSG 已放行 `10.31.0.0/16` 到 `443/udp`。
+  - Hysteria bandwidth 參數已調整為 `500Mbps / 500Mbps`。
+- 訂閱變更：
+  - 兩個主 Clash 訂閱新增並優先發布 `server4-hy2-443`。
+  - `/sub` V2Ray/Base64 訂閱保持不變，因為 Hysteria2 不是 VLESS URI，避免 V2Ray 類客戶端解析失敗。
+- 當前 Clash 節點順序：
+  - `server4-hy2-443`
+  - `server4-reality-443`
+  - `server4-reality-2087`
+  - `server4-reality-8443`
+  - `server4-reality`
+  - `server3-reality-2053`
+  - `server3-reality`
+- 驗證結果：
+  - 本機 Hysteria Windows `v2.9.2` 客戶端可連上 `xh-ai.cyou:443/udp`，日誌確認 `udpEnabled: true`。
+  - TCP 網站未受影響：`https://dazhou.bond/` 與 `https://xh-ai.cyou/` 均返回 `200`。
+  - `https://dazhou.bond/clash` 與 `https://xh-ai.cyou/clash` 均包含 `server4-hy2-443`。
+  - 本機經 HY2 拉 Cloudflare 50MB：約 `46Mbps`；本機直連同測試約 `10.8Mbps`。
+  - 本機經 HY2 拉 OVH 100MB：約 `42-43Mbps`。
+  - 本機經 HY2 拉 Cachefly 100MB 約 `46-51Mbps`，但 Cachefly 測試出現過 10 秒左右提前截斷，該項只作參考。
+- 結論：
+  - HY2 對本地 HTTPS 類下載有改善，但仍未達 `100Mbps+`。
+  - 目前雲端出口與服務 4 NAT 都不是主要瓶頸；主要限制仍在本地 / 手機網路到 OCI NLB 公網入口的路由、丟包或運營商策略。
+
+## 2026-06-14 HY2 / Cloudflare 入口復測補充
+
+- 修改文件：
+  - `SYSTEM.md`
+  - `.codex/docs/oci-nlb-nat-runbook.md`
+- 訂閱修正：
+  - `server4-hy2-443` 已補充 `up: 500 Mbps`、`down: 500 Mbps`、`fast-open: true`。
+  - 兩個公開 Clash 訂閱均已驗證包含上述字段：
+    - `https://dazhou.bond/clash`
+    - `https://xh-ai.cyou/clash`
+- 服務 2 雲端 HY2 對照：
+  - Cachefly 100MB：約 `199Mbps`
+  - Cloudflare 50MB：約 `222Mbps`
+  - OVH 100MB：約 `74Mbps`
+  - 該結果證明 Server 4 HY2、OCI NLB UDP 443 與 NAT 出口並未被固定限制在 `50Mbps`。
+- 本機 HY2 對照：
+  - 四路並發 Cloudflare 50MB 聚合約 `49.5Mbps`，說明本地瓶頸不是單連接限制。
+  - 無 bandwidth / BBR 模式拉 Cloudflare 50MB 約 `31Mbps`，低於 `500Mbps` Brutal 配置。
+  - `80Mbps` Brutal 模式拉 Cloudflare 30MB 約 `27.6Mbps`，也低於 `500Mbps` Brutal 配置。
+  - 因此目前發布 `500Mbps / 500Mbps` 是已測得的較優 HY2 客戶端配置。
+- Cloudflare Tunnel 對照：
+  - 臨時測試了服務 4 本機 `VLESS WS` 入站與 `trycloudflare.com` quick tunnel。
+  - 已調大服務 4 UDP socket buffer，cloudflared 的 QUIC buffer 警告消失。
+  - 本機經 Cloudflare Tunnel / VLESS WS 拉 Cloudflare 50MB 約 `40-41Mbps`，未優於 HY2。
+  - 測試後已停止 cloudflared quick tunnel，並移除臨時 `cf-vless-ws-local` Xray 入站。
+- 補充結論：
+  - 若要讓手機端接近雲端 `200Mbps+`，下一步需要更接近用戶本地網路的入口 / 中轉，而不是繼續只調 OCI 服務端內核。
+
+## 2026-06-14 HY2 備用 UDP 端口排除
+
+- 修改文件：
+  - `SYSTEM.md`
+  - `.codex/docs/oci-nlb-nat-runbook.md`
+- 測試目的：
+  - 判斷本地瓶頸是否只針對 `443/udp`，嘗試不同 UDP 入口端口能否突破約 `50Mbps` 上限。
+- 測試內容：
+  - 嘗試 Server 4 原公網 IP `137.131.12.149:443/udp` 直連 HY2，客戶端握手超時；該入口不可用或舊公網 IP 已不再是有效入口。
+  - 臨時新增 HY2 `9443/udp`，並接入 NLB：
+    - Server 2 雲端可連，Cloudflare 20MB 約 `160Mbps` 級。
+    - 本機客戶端握手超時，說明本地網路對該 UDP 高端口更差。
+  - 臨時新增 HY2 `53/udp`，並接入 NLB：
+    - 本機可連，但 Cloudflare 50MB 約 `33Mbps`，低於 `443/udp`。
+- 清理結果：
+  - 已移除臨時 HY2 `53/8443/9443` systemd 服務與配置。
+  - 已移除 NLB 臨時 `53/udp`、`9443/udp` listener/backend。
+  - 已移除 NLB subnet 與 Server 4 NSG 中臨時 `53/8443/9443` UDP 規則。
+  - 目前只保留正式 `s4-hy2-udp-443`。
+- 結論：
+  - 對當前本地網路，HY2 `443/udp` 仍是已測得最佳 OCI 入口。
+  - 更換 OCI UDP 端口無法讓本地達到雲端測試速度。
+
+## 2026-06-14 現有 AWS 入口與 PMTU 排除
+
+- 修改文件：
+  - `SYSTEM.md`
+  - `.codex/docs/oci-nlb-nat-runbook.md`
+- AWS 入口測試：
+  - 服務 1（`mycodexy.duckdns.org` / `18.118.93.106`）通過 SSH 隧道拉取遠端 100MB 臨時文件：約 `42.6Mbps`。
+  - 服務 2（`mysuby.duckdns.org` / `3.22.185.140`）通過 SSH 隧道拉取遠端 100MB 臨時文件：約 `40.0Mbps`。
+  - 測試後已清理兩台 AWS 機器上的 `/tmp/codex-speed-*` 臨時文件與 HTTP 進程。
+  - 結論：現有 AWS 服務 1 / 服務 2 作為前置入口也無法明顯超過 OCI HY2，暫不適合作為提速中轉。
+- HY2 PMTU 測試：
+  - 臨時將服務 4 `/etc/hysteria/config.yaml` 的 `disablePathMTUDiscovery` 改為 `true` 並重啟。
+  - 本機 HY2 拉 Cloudflare 50MB 約 `46Mbps`，未突破原 `443/udp` 表現。
+  - 已恢復 `disablePathMTUDiscovery: false` 並重啟 `hysteria-server`。
+- 結論：
+  - 現有可控入口（OCI NLB、Cloudflare quick tunnel、AWS 服務 1 / 2）都未能讓本地達到雲端測速級別。
+  - 要接近雲端 `200Mbps+`，需要新增或更換更靠近用戶本地網路、且到 OCI / 目標站路由優良的前置入口。
+
+## 2026-06-14 訂閱節點精簡
+
+- 修改文件：
+  - `SYSTEM.md`
+- 背景：
+  - 客戶端刷新後顯示過多 Reality / 備用端口測試節點，使用者要求只保留最新可用節點，並保留服務 3 與服務 4 各一個入口。
+- 遠端變更：
+  - 服務 3 與服務 4 的 `/var/www/proxy-subs/clash.yaml` 均已精簡為兩個節點：
+    - `server4-hy2-443`
+    - `server3-reality-2053`
+  - Clash 策略組只保留 `节点选择`：
+    - `server4-hy2-443`
+    - `server3-reality-2053`
+    - `DIRECT`
+  - 服務 3 與服務 4 的 `/var/www/proxy-subs/v2ray.txt` 均已精簡為兩個 V2Ray 兼容節點：
+    - `server4-reality-443`
+    - `server3-reality-2053`
+  - HY2 不寫入 `/sub`，因為 V2Ray/Base64 訂閱不支持 Hysteria2 URI。
+- 清理：
+  - 清理了 Server 4 上測試用腳本、臨時 HY2 / Cloudflare Tunnel 文件與空 PMTU 備份文件。
+  - Server 4 目前只保留正式 `hysteria-server.service` 與 `xray.service`。
+  - Server 3 目前保留正式 `xray.service`。
+- 驗證結果：
+  - `https://dazhou.bond/clash` 與 `https://xh-ai.cyou/clash` 均只包含 `server4-hy2-443`、`server3-reality-2053`。
+  - `https://dazhou.bond/sub` 與 `https://xh-ai.cyou/sub` 均只包含 `server4-reality-443`、`server3-reality-2053`。
+  - 服務 3 `xray` active，並監聽 `2053/tcp` 與 `24443/tcp`。
+  - 服務 4 `hysteria-server` 與 `xray` 均 active。
+
+## 2026-06-14 Clash 恢復 TG 專用入口
+
+- 修改文件：
+  - `SYSTEM.md`
+- 背景：
+  - 使用者確認精簡後仍需要像之前一樣保留 TG 專用入口。
+- 遠端變更：
+  - 服務 3 與服務 4 的 `/var/www/proxy-subs/clash.yaml` 已新增 `server4-tg-socks`。
+  - `server4-tg-socks` 使用 Server 4 既有 Xray SOCKS5 入站 `xh-ai.cyou:18444`，保留 UDP 支持。
+  - Clash 規則新增：
+    - `DOMAIN-SUFFIX,telegram.org,server4-tg-socks`
+    - `DOMAIN-SUFFIX,t.me,server4-tg-socks`
+    - `DOMAIN-SUFFIX,tdesktop.com,server4-tg-socks`
+  - Clash 節點目前為：
+    - `server4-hy2-443`
+    - `server3-reality-2053`
+    - `server4-tg-socks`
+  - `/sub` 保持只包含 V2Ray 兼容節點：
+    - `server4-reality-443`
+    - `server3-reality-2053`
+- 注意：
+  - Server 4 的 MTProto `xh-ai.cyou:18454` 仍作為外部 Telegram 客戶端入口保留；Clash 訂閱不支持 MTProto 節點格式，因此不寫入 `/clash`。
+- 驗證：
+  - `https://dazhou.bond/clash` 與 `https://xh-ai.cyou/clash` 均包含上述 3 個 Clash 節點與 TG 規則。
+  - `xh-ai.cyou:18444/tcp` 與 `xh-ai.cyou:18454/tcp` 均可連通。
+
+## 2026-06-14 TG App 直連鏈接恢復為雙服務器
+
+- 修改文件：
+  - `SYSTEM.md`
+- 背景：
+  - 使用者要求 TG 代理是 Telegram App 直接添加的 `tg://...` 鏈接，且服務 3 / 服務 4 都要保留，不放入 Clash 訂閱。
+- 遠端變更：
+  - Server 3 恢復 Xray SOCKS5 TG 入站：
+    - `dazhou.bond:18443`
+    - `tg-socks-in`
+    - 支持 TCP / UDP
+  - Server 3 恢復 MTProto：
+    - 安裝 `/usr/local/bin/mtg`
+    - 新增並啟用 `mtg.service`
+    - 監聽 `dazhou.bond:18453`
+  - Server 4 原有 TG 入口保持不變：
+    - SOCKS5：`xh-ai.cyou:18444`
+    - MTProto：`xh-ai.cyou:18454`
+- 本機文件：
+  - 已重新生成 `C:\Users\admin\Desktop\file\tg-links.txt`。
+  - 文件中包含兩台服務器各自的 MTProto 與 SOCKS5 `tg://...` 直連鏈接。
+  - 該文件包含代理 secret / 密碼，不在聊天中直接輸出。
+- 驗證：
+  - `dazhou.bond:18453/tcp` 可連通。
+  - `dazhou.bond:18443/tcp` 可連通。
+  - `xh-ai.cyou:18454/tcp` 可連通。
+  - `xh-ai.cyou:18444/tcp` 可連通。
+  - `https://dazhou.bond/clash` 與 `https://xh-ai.cyou/clash` 仍不包含 TG 節點或 TG 分流規則。
+
+## 2026-06-19 Server 4 NLB 漂移修復與 443 訂閱恢復
+
+- 修改文件：
+  - `SYSTEM.md`
+  - `.codex/docs/oci-nlb-nat-runbook.md`
+- 問題現象：
+  - 使用者反饋新機器修復後 `xh-ai.cyou` 好像被換到別的機器，代理節點與先前可用方案不匹配，延遲偏高。
+  - NAT 路由 / 新機器恢復後，Server 4 的出站 IP 與舊文檔不同，容易讓節點與白名單判斷混亂。
+- 現場確認：
+  - `xh-ai.cyou`、`www.xh-ai.cyou`、`dazhou.bond` 均解析到共享 NLB：`132.226.146.175`。
+  - Server 4 仍可通過共享 NLB fallback SSH `132.226.146.175:2224` 進入，主機名為 `instance-20260604-1123`。
+  - Server 4 当前私网 IP 为 `10.0.0.112`。
+  - Server 4 当前 NAT 出站 IP 为 `129.146.42.246`；不能继续假设旧 NAT 出站 IP 恒定。
+  - Server 3 Nginx 中 `xh-ai.cyou` 相关 upstream 已指向 `10.0.0.112`，不是旧 `10.0.0.154`。
+- 本次修復：
+  - 使用 OCI SDK 检查共享 NLB `server3-public-nlb`。
+  - 将仍指向旧私网 IP `10.0.0.154` 的 Server 4 backend 替换为 `10.0.0.112`：
+    - `2083/tcp`
+    - `2087/tcp`
+    - `2096/tcp`
+    - `8443/tcp`
+    - `18444/tcp`
+    - `18454/tcp`
+    - `443/udp`
+  - 将公开订阅中的 Server 4 Reality 节点从 `server4-reality-24444` 恢复为更接近先前优化方案的 `server4-reality-443`：
+    - 客户端入口：`xh-ai.cyou:443`
+    - Reality SNI：`www.cloudflare.com`
+    - Server 3 Nginx stream 再转发到 `10.0.0.112:24444`
+  - 已更新 Server 3 的公开订阅文件：
+    - `/var/www/proxy-subs/clash.yaml`
+    - `/var/www/proxy-subs/v2ray.txt`
+- 当前订阅状态：
+  - `https://xh-ai.cyou/clash` 与 `https://dazhou.bond/clash` 均发布：
+    - `server4-reality-443`
+    - `server3-reality-2053`
+  - `/sub` 也对应两个 V2Ray 兼容 Reality 节点。
+- 验证结果：
+  - `https://xh-ai.cyou/clash` 返回 `200`。
+  - `https://dazhou.bond/clash` 返回 `200`。
+  - Server 3 临时 Xray 客户端真实代理测试返回 HTTP `204`：
+    - `server4-reality-443`：约 `0.333s`
+    - `server3-reality-2053`：约 `0.186s`
+  - NLB `s4-tcp-24444`、`s4-ssh-22`、`s4-hy2-udp-443` backend 均已指向 `10.0.0.112`，其中 `24444/tcp`、`22/tcp`、`443/udp` 健康为 `OK`。
+- 当前限制：
+  - Server 4 现场只监听 Nginx `443/tcp` 与 Xray `24444/tcp`。
+  - Server 4 当前没有 active 的 `hysteria-server` 或 `mtg` 服务，也未监听 `18444/tcp`、`18454/tcp`。
+  - 因此暂不应重新发布 HY2 或 Server 4 TG 直连节点，除非先恢复对应服务并重新验证。
+
+
