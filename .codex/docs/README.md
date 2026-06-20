@@ -1,29 +1,15 @@
-# Codex Project Operation Docs
+# Codex Operation Docs
 
-This directory stores local Codex-facing operation records for `opaiRe`.
+本目錄保存 opaiRe 的私有運維摘要。保留能接手維護的關鍵記錄，刪掉長命令、重複流水、臨時測試與過期細節。
 
-These files are intentionally kept under `.codex/docs/` instead of the public project root so the application code stays cleaner and operational notes remain separated from source code.
+## 文件索引
 
-## Index
+- `oracle-proxy-current.md`：Server 3 / Server 4 / NLB / Reality / TG 的當前權威狀態。
+- `maintenance-history.md`：已壓縮的歷史操作記錄，只保留結論、影響與驗證。
+- `new-computer-handoff.md`：新機接手最小清單。
 
-- `2026-06-19-fix-summary.md`
-  - Current Oracle proxy/domain authority table.
-  - Server 3 / Server 4 proxy backend repair notes.
-  - `xh-ai.cyou` Reality subscription and TG simplification notes.
-- `oci-nlb-nat-runbook.md`
-  - OCI shared NLB + NAT routing runbook.
-  - Current Server 3 / Server 4 backend mapping.
-  - Reality, MTProto, and NLB backend maintenance notes.
-- `server3-rebuild-notes.md`
-  - Server 3 rebuild checklist and runtime shape.
-  - Nginx, Xray, MTG, TLS, firewall, SELinux, and opaiRe service notes.
-- `new-computer-handoff.md`
-  - Local workspace handoff for a new computer.
-  - Source/data boundaries and Git hygiene notes.
+## 規則
 
-## Rules
-
-- Do not store secrets, raw proxy links, private keys, tokens, cookies, database dumps, or raw subscription URLs here.
-- Put temporary scripts, downloaded binaries, SDK extracts, and speed-test artifacts under `.codex/tmp/` and clean them after use.
-- Keep durable facts in these docs and summarize high-impact changes in `SYSTEM.md`.
-
+- 不保存 secret、raw proxy link、Token、Cookie、私鑰、資料庫內容或完整訂閱。
+- 排障時以遠端現場為準，文檔只作方向索引。
+- 重要變更同步摘要到根目錄 `SYSTEM.md`。
