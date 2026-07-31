@@ -1,0 +1,1 @@
+ubuntu ALL=(root) NOPASSWD: /opt/cpa-mihomo/mihomoctl, /opt/cpa-mihomo/mihomoctl *

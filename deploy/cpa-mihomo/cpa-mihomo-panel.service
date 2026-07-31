@@ -1,0 +1,29 @@
+[Unit]
+Description=CPA Mihomo subscription panel
+After=network-online.target cpa-mihomo.service
+Wants=network-online.target cpa-mihomo.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/cpa-mihomo
+Environment=MIHOMO_SYSTEMD=1
+Environment=MIHOMO_SERVICE=cpa-mihomo
+Environment=MIHOMO_PUBLIC_BASE=https://kaikj.bond/mihomo
+Environment=MIHOMO_PRESERVE_CONFIG=1
+Environment=MIHOMO_PROXY_GROUP=CPA-STABLE
+Environment=MIHOMO_DASHBOARD_ENABLED=0
+ExecStart=/usr/bin/python3 /opt/cpa-mihomo/manager.py serve
+Restart=on-failure
+RestartSec=3
+MemoryMax=128M
+TasksMax=64
+LimitNOFILE=4096
+UMask=0077
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/cpa-mihomo
+
+[Install]
+WantedBy=multi-user.target

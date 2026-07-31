@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>Mihomo 代理面板</title>
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"></div>
+  <main class="shell">
+    <header class="topbar reveal reveal-1">
+      <div>
+        <p class="eyebrow">SHARED PROXY CONTROL</p>
+        <h1>Mihomo <span>订阅面板</span></h1>
+      </div>
+      <div class="runtime-state" id="runtime-state">
+        <span class="status-dot"></span>
+        <span id="runtime-label">正在连接</span>
+      </div>
+    </header>
+
+    <section class="overview reveal reveal-2" aria-labelledby="status-title">
+      <div class="overview-primary">
+        <p class="section-kicker">运行状态</p>
+        <h2 id="status-title">等待 Mihomo 控制器</h2>
+        <p class="status-copy" id="status-copy">控制页会自动检查核心、订阅与当前出口。</p>
+        <div class="actions">
+          <button class="button primary" id="start-button">启动核心</button>
+          <button class="button" id="stop-button">停止</button>
+          <button class="button" id="test-button">目标站测活</button>
+          <button class="button" id="reload-button">重载配置</button>
+          <button class="button ghost" id="dashboard-button">高级面板 ↗</button>
+        </div>
+      </div>
+      <dl class="address-list">
+        <div>
+          <dt>HTTP / SOCKS 混合端口</dt>
+          <dd><code id="proxy-address">127.0.0.1:7890</code><button class="copy" data-copy="proxy-address">复制</button></dd>
+        </div>
+        <div>
+          <dt>控制器</dt>
+          <dd><code id="controller-address">127.0.0.1:9090</code></dd>
+        </div>
+        <div>
+          <dt>当前策略</dt>
+          <dd id="current-node">—</dd>
+        </div>
+        <div>
+          <dt>核心版本</dt>
+          <dd id="core-version">—</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="workspace reveal reveal-3" aria-labelledby="subscription-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">节点来源</p>
+          <h2 id="subscription-title">订阅导入与更新</h2>
+        </div>
+        <div class="subscription-meta">
+          <span id="subscription-kind">未识别</span>
+          <strong id="node-count">0 节点</strong>
+        </div>
+      </div>
+      <p class="muted">支持 Clash / Meta URL、v2rayN Base64 订阅，以及 vmess、vless、trojan、ss 分享链接。现有订阅不会在页面中明文回显。</p>
+      <textarea id="subscription-source" spellcheck="false" placeholder="粘贴订阅 URL，或粘贴多行 vless:// / vmess:// 分享链接"></textarea>
+      <div class="subscription-footer">
+        <p id="source-summary">尚未配置订阅</p>
+        <div class="actions compact">
+          <button class="button" id="update-button">更新现有订阅</button>
+          <button class="button primary" id="save-button">保存并导入</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="workspace reveal reveal-4" aria-labelledby="nodes-title">
+      <div class="section-heading node-heading">
+        <div>
+          <p class="section-kicker">出口选择</p>
+          <h2 id="nodes-title">节点与策略</h2>
+        </div>
+        <label class="search">
+          <span>筛选</span>
+          <input id="node-search" type="search" placeholder="名称或协议" />
+        </label>
+      </div>
+      <div class="node-table" role="table" aria-label="Mihomo 节点">
+        <div class="node-row node-header" role="row">
+          <span>节点</span><span>类型</span><span>延迟</span><span>操作</span>
+        </div>
+        <div id="node-list" class="node-list">
+          <div class="empty">核心启动后将在这里显示节点。</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="logs reveal reveal-4">
+      <button class="logs-toggle" id="logs-toggle" aria-expanded="false">查看运行日志 <span>＋</span></button>
+      <pre id="logs-output" hidden>暂无日志</pre>
+    </section>
+
+    <footer>
+      <p>本机代理 <code>http://127.0.0.1:7890</code> · Docker 内用 <code>http://172.20.0.1:7890</code>。</p>
+      <span id="last-refresh">—</span>
+    </footer>
+  </main>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js" defer></script>
+</body>
+</html>

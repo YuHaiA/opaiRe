@@ -1,0 +1,20 @@
+[Unit]
+Description=OpenAI-CPA email code bridge (WS/HTTP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/grok-email-bridge
+EnvironmentFile=/etc/grok-email-bridge.env
+ExecStart=/opt/grok-email-bridge/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8820
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/grok-email-bridge
+
+[Install]
+WantedBy=multi-user.target

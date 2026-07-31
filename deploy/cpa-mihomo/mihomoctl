@@ -1,0 +1,23 @@
+#!/bin/bash
+set -euo pipefail
+SERVICE=cpa-mihomo
+cmd="${1:-}"
+case "$cmd" in
+  start|stop|restart)
+    systemctl "$cmd" "$SERVICE"
+    ;;
+  is-active)
+    systemctl is-active "$SERVICE"
+    ;;
+  pid)
+    systemctl show -p MainPID --value "$SERVICE"
+    ;;
+  logs)
+    n="${2:-80}"
+    journalctl -u "$SERVICE" -n "$n" --no-pager
+    ;;
+  *)
+    echo "usage: mihomoctl start|stop|restart|is-active|pid|logs [n]" >&2
+    exit 2
+    ;;
+esac

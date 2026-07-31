@@ -1,0 +1,1547 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Proxy Panel</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --ink: #07111f;
+      --muted: #607089;
+      --line: rgba(15, 23, 42, 0.1);
+      --panel: rgba(248, 251, 255, 0.96);
+      --cyan: #22c8df;
+      --cyan-dark: #087f99;
+      --amber: #f6b21a;
+      --rose: #e42155;
+      --ease: cubic-bezier(0.23, 1, 0.32, 1);
+      --shadow-soft:
+        0 1px 2px rgba(0, 0, 0, 0.03),
+        0 8px 24px rgba(1, 8, 24, 0.08),
+        0 24px 70px rgba(1, 8, 24, 0.16);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 10% -10%, rgba(34, 200, 223, 0.2), transparent 34rem),
+        radial-gradient(circle at 92% 8%, rgba(20, 184, 166, 0.16), transparent 30rem),
+        linear-gradient(180deg, #060b1d 0%, #081022 46%, #050817 100%);
+      color: #edf7ff;
+      font-family: "Microsoft YaHei UI", "Noto Sans SC", "PingFang SC", sans-serif;
+    }
+
+    [v-cloak] {
+      display: none;
+    }
+
+    .shell {
+      width: min(1440px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: clamp(14px, 2.4vw, 26px) 0 28px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: end;
+      margin-bottom: 10px;
+    }
+
+    .eyebrow {
+      color: #67e8f9;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+    }
+
+    .title {
+      margin-top: 6px;
+      font-size: clamp(24px, 2.7vw, 36px);
+      line-height: 1;
+      letter-spacing: -0.045em;
+      font-weight: 950;
+      max-width: 820px;
+    }
+
+    .subtitle {
+      margin-top: 8px;
+      max-width: 920px;
+      color: rgba(210, 232, 255, 0.78);
+      font-size: clamp(12px, 1.1vw, 14px);
+      line-height: 1.42;
+    }
+
+    .action-primary {
+      min-width: 104px;
+      height: 40px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 18px;
+      background: linear-gradient(135deg, #47e2f3, #13b8d5);
+      color: #03111f;
+      font-weight: 950;
+      letter-spacing: 0.04em;
+      box-shadow: 0 18px 40px rgba(34, 200, 223, 0.26);
+      transition: transform 160ms var(--ease), filter 160ms var(--ease);
+      white-space: nowrap;
+    }
+
+    .action-primary:hover {
+      filter: brightness(1.04);
+      transform: translateY(-1px);
+    }
+
+    .action-primary:active,
+    .button:active,
+    .link-pill:active {
+      transform: scale(0.97);
+    }
+
+    .glass-panel {
+      background: var(--panel);
+      color: var(--ink);
+      border: 1px solid rgba(255, 255, 255, 0.72);
+      box-shadow: var(--shadow-soft);
+      backdrop-filter: blur(18px);
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      padding: 10px;
+      border-radius: 20px;
+      margin-bottom: 10px;
+    }
+
+    .stat-card {
+      min-height: 56px;
+      border-radius: 14px;
+      padding: 10px 12px;
+      background: linear-gradient(180deg, rgba(241, 247, 253, 0.98), rgba(232, 242, 250, 0.72));
+      border: 1px solid rgba(15, 23, 42, 0.04);
+    }
+
+    .stat-label {
+      color: #58708d;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0.06em;
+    }
+
+    .stat-value {
+      margin-top: 5px;
+      font-size: 22px;
+      line-height: 1;
+      font-weight: 950;
+      letter-spacing: -0.04em;
+    }
+
+    .stat-status {
+      margin-top: 7px;
+      font-size: 13px;
+      line-height: 1.1;
+      font-weight: 950;
+    }
+
+    .tabbar {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      margin-bottom: 10px;
+      border-radius: 14px;
+      background: rgba(237, 247, 255, 0.11);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      backdrop-filter: blur(14px);
+    }
+
+    .tab-button {
+      min-height: 32px;
+      border-radius: 10px;
+      padding: 0 14px;
+      color: rgba(226, 244, 255, 0.74);
+      font-size: 13px;
+      font-weight: 950;
+      letter-spacing: 0.02em;
+      transition:
+        color 180ms var(--ease),
+        background 180ms var(--ease),
+        transform 150ms var(--ease);
+    }
+
+    .tab-button.active {
+      color: #04111f;
+      background: linear-gradient(135deg, #e8fbff, #93eef8);
+      box-shadow: 0 10px 24px rgba(34, 200, 223, 0.18);
+    }
+
+    .tab-button:active {
+      transform: scale(0.97);
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+      gap: 12px;
+      align-items: stretch;
+      --panel-height: auto;
+    }
+
+    .section {
+      border-radius: 24px;
+      overflow: hidden;
+    }
+
+    .workspace > .section:not(.form-panel),
+    .tg-workspace > .section:not(.form-panel) {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 14px 18px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .section-title {
+      font-size: 20px;
+      line-height: 1.1;
+      font-weight: 950;
+      letter-spacing: -0.04em;
+    }
+
+    .section-copy {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .account-list {
+      display: grid;
+      gap: 0;
+    }
+
+    .dense-table {
+      display: grid;
+    }
+
+    .workspace > .section:not(.form-panel) .dense-table,
+    .tg-workspace > .section:not(.form-panel) .dense-table {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      align-content: start;
+    }
+
+    .subscription-table {
+      gap: 0;
+      padding: 8px;
+      overflow-x: hidden;
+      background: #edf6fb;
+    }
+
+    .tg-table {
+      gap: 0;
+      padding: 8px;
+      overflow-x: hidden;
+      background: #edf6fb;
+    }
+
+    .panel-head,
+    .panel-row {
+      display: grid;
+      align-items: center;
+      gap: 0;
+      padding: 8px 18px;
+    }
+
+    .panel-head {
+      min-height: 34px;
+      color: #6b7d94;
+      font-size: 10px;
+      font-weight: 950;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: #edf6fb;
+      border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    }
+
+    .subscription-table .panel-head,
+    .subscription-table .panel-row {
+      grid-template-columns: 1.22fr 0.68fr 0.92fr 0.86fr 0.68fr 0.68fr 0.92fr 1.14fr;
+      width: 100%;
+      min-width: 0;
+    }
+
+    .subscription-table .panel-head {
+      display: grid;
+      min-height: 22px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+
+    .subscription-table .panel-head,
+    .tg-table .panel-head {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      background: #edf6fb;
+    }
+
+    .subscription-table .panel-row {
+      min-height: 40px;
+      padding: 0;
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      border-bottom: 0;
+      border-radius: 0;
+      background: #f7fbff;
+      box-shadow: none;
+      overflow: hidden;
+    }
+
+    .subscription-table .panel-row:hover {
+      background: #f1fbfe;
+      box-shadow: none;
+    }
+
+    .tg-table .panel-head,
+    .tg-table .panel-row {
+      grid-template-columns: 0.76fr 1.08fr 1.22fr 1.2fr 0.72fr 1.42fr;
+      width: 100%;
+      min-width: 0;
+    }
+
+    .panel-row {
+      min-height: 38px;
+      background: #f7fbff;
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      border-bottom: 0;
+      transition:
+        background 180ms var(--ease),
+        box-shadow 220ms var(--ease);
+    }
+
+    .panel-row:hover {
+      background: #f1fbfe;
+      box-shadow: inset 3px 0 0 rgba(34, 200, 223, 0.42);
+    }
+
+    .dense-table .panel-row:last-child {
+      border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+    }
+
+    .cell-main {
+      min-width: 0;
+    }
+
+    .cell-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      min-width: 0;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 950;
+      letter-spacing: -0.01em;
+    }
+
+    .cell-code,
+    .cell-muted {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #5b6f87;
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .cell-code {
+      font-family: "Cascadia Mono", "Consolas", monospace;
+    }
+
+    .identity-line,
+    .metric-inline {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      white-space: nowrap;
+    }
+
+    .identity-line {
+      width: 100%;
+    }
+
+    .identity-line > .truncate {
+      min-width: 0;
+    }
+
+    .identity-line .cell-code,
+    .metric-inline .cell-muted {
+      overflow: visible;
+    }
+
+    .metric-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: #34465f;
+      font-size: 11px;
+      font-weight: 850;
+    }
+
+    .mini-actions,
+    .copy-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .row-actions {
+      display: flex;
+      gap: 4px;
+      flex-wrap: nowrap;
+      justify-content: flex-end;
+      align-items: center;
+    }
+
+    .data-cell {
+      min-height: 38px;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      padding: 4px 8px;
+      border: 0;
+      border-left: 1px solid rgba(15, 23, 42, 0.08);
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      transition:
+        background 180ms var(--ease),
+        transform 150ms var(--ease);
+    }
+
+    .data-cell:hover {
+      background: transparent;
+    }
+
+    .panel-row > .data-cell:first-child {
+      border-left: 0;
+      border-radius: 0;
+    }
+
+    .panel-row > .data-cell:last-child {
+      border-radius: 0;
+    }
+
+    .data-cell.compact-actions {
+      padding: 4px;
+    }
+
+    .data-cell.compact-actions .row-actions {
+      justify-content: center;
+    }
+
+    .panel-head > span {
+      min-width: 0;
+      min-height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 8px;
+      border-left: 1px solid rgba(15, 23, 42, 0.08);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .panel-head > span:first-child {
+      border-left: 0;
+    }
+
+    .cell-label {
+      color: #7c8ba1;
+      font-size: 10px;
+      font-weight: 950;
+      letter-spacing: 0.06em;
+      line-height: 1;
+    }
+
+    .cell-value {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #172338;
+      font-size: 12px;
+      font-weight: 950;
+      line-height: 1.2;
+    }
+
+    .pill-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      color: #5b6f87;
+      font-size: 11px;
+      line-height: 1.25;
+      white-space: nowrap;
+    }
+
+    .pill-usage {
+      min-width: 0;
+      border-radius: 0;
+      padding: 0;
+      background: transparent;
+      border: 0;
+    }
+
+    .split-pills {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .split-pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: rgba(241, 245, 249, 0.9);
+      color: #465a74;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .account-item {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 20px;
+      padding: 24px 28px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.45);
+      transition: background 180ms var(--ease);
+    }
+
+    .account-item:hover {
+      background: rgba(232, 249, 253, 0.52);
+    }
+
+    .account-name {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      font-size: 20px;
+      font-weight: 950;
+      letter-spacing: -0.02em;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .badge-ok {
+      background: #c9f9de;
+      color: #047857;
+    }
+
+    .badge-muted {
+      background: #e9eef5;
+      color: #64748b;
+    }
+
+    .badge-warn {
+      background: #ffe3e8;
+      color: #be123c;
+    }
+
+    .usage-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 16px;
+      margin-top: 11px;
+      color: #52657f;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .reset-hint {
+      margin-top: 2px;
+      font-size: 11px;
+      color: #71819a;
+    }
+
+    .reset-hint.unlimited {
+      color: #b45309;
+      font-weight: 800;
+    }
+
+    .link-grid {
+      display: grid;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .compact-link {
+      min-height: 26px;
+      border-radius: 9px;
+      padding: 0 6px;
+      border: 1px solid rgba(15, 23, 42, 0.1);
+      background: rgba(248, 250, 252, 0.92);
+      color: var(--cyan-dark);
+      font-size: 11px;
+      font-weight: 950;
+      transition:
+        border-color 160ms var(--ease),
+        background 160ms var(--ease),
+        transform 150ms var(--ease);
+    }
+
+    .compact-link:hover {
+      border-color: rgba(34, 200, 223, 0.56);
+      background: #f0fbff;
+    }
+
+    .link-pill {
+      display: grid;
+      grid-template-columns: 66px minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      min-height: 42px;
+      border: 1px solid rgba(15, 23, 42, 0.1);
+      border-radius: 16px;
+      background: rgba(248, 250, 252, 0.92);
+      padding: 0 14px;
+      text-align: left;
+      transition: border-color 160ms var(--ease), background 160ms var(--ease), transform 160ms var(--ease);
+    }
+
+    .link-pill:hover {
+      border-color: rgba(34, 200, 223, 0.5);
+      background: #f0fbff;
+    }
+
+    .link-label {
+      font-size: 12px;
+      font-weight: 950;
+      color: var(--cyan-dark);
+    }
+
+    .link-url {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: "Cascadia Mono", "Consolas", monospace;
+      font-size: 12px;
+      color: #0f172a;
+    }
+
+    .item-actions {
+      display: grid;
+      gap: 10px;
+      align-content: start;
+      min-width: 74px;
+    }
+
+    .button {
+      min-height: 38px;
+      border-radius: 13px;
+      padding: 0 12px;
+      font-size: 12px;
+      font-weight: 950;
+      transition: transform 160ms var(--ease), filter 160ms var(--ease);
+      white-space: nowrap;
+    }
+
+    .button-sm {
+      min-height: 26px;
+      border-radius: 9px;
+      min-width: 32px;
+      padding: 0 5px;
+      font-size: 11px;
+    }
+
+    .button:hover {
+      filter: brightness(1.03);
+    }
+
+    .button-dark {
+      background: #061022;
+      color: white;
+    }
+
+    .button-cyan {
+      background: #0796b5;
+      color: white;
+    }
+
+    .button-amber {
+      background: var(--amber);
+      color: #422006;
+    }
+
+    .button-rose {
+      background: var(--rose);
+      color: white;
+    }
+
+    .form-panel {
+      padding: 12px;
+      position: sticky;
+      top: 14px;
+      align-self: start;
+    }
+
+    .form-grid {
+      display: grid;
+      gap: 7px;
+      margin-top: 10px;
+    }
+
+    .field {
+      display: grid;
+      gap: 4px;
+    }
+
+    .field-label {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 0 4px;
+      color: #30435c;
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .field-unit {
+      color: #8290a4;
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .input,
+    .select,
+    .textarea {
+      width: 100%;
+      min-height: 36px;
+      border-radius: 10px;
+      border: 1px solid rgba(15, 23, 42, 0.12);
+      background: rgba(255, 255, 255, 0.9);
+      padding: 0 12px;
+      color: #07111f;
+      outline: none;
+      transition: border-color 160ms var(--ease), box-shadow 160ms var(--ease), background 160ms var(--ease);
+    }
+
+    .input:focus,
+    .select:focus,
+    .textarea:focus {
+      border-color: rgba(34, 200, 223, 0.78);
+      box-shadow: 0 0 0 4px rgba(34, 200, 223, 0.13);
+      background: white;
+    }
+
+    .textarea {
+      min-height: 48px;
+      padding-top: 9px;
+      resize: vertical;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+    }
+
+    .field-wide {
+      grid-column: 1 / -1;
+    }
+
+    .check-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #102033;
+      min-height: 36px;
+      padding: 0 4px;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .check-row input {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--cyan-dark);
+    }
+
+    .form-help {
+      border-radius: 14px;
+      background: #eef8fb;
+      color: #4a637d;
+      padding: 7px 9px;
+      font-size: 11px;
+      line-height: 1.38;
+    }
+
+    .tg-section {
+      margin-top: 24px;
+      border-radius: 30px;
+      padding: 26px 28px 28px;
+    }
+
+    .tg-workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+      gap: 12px;
+      align-items: stretch;
+      --panel-height: auto;
+    }
+
+    @media (min-width: 1101px) {
+      .workspace > .section:not(.form-panel),
+      .tg-workspace > .section:not(.form-panel) {
+        height: var(--panel-height);
+        max-height: var(--panel-height);
+      }
+    }
+
+    .tg-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .tg-card {
+      border: 1px solid rgba(15, 23, 42, 0.1);
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.58);
+      padding: 18px;
+    }
+
+    .tg-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 14px;
+    }
+
+    .tg-title {
+      font-size: 18px;
+      font-weight: 950;
+      letter-spacing: -0.02em;
+    }
+
+    .tg-endpoint {
+      margin-top: 4px;
+      color: #607089;
+      font-family: "Cascadia Mono", "Consolas", monospace;
+      font-size: 12px;
+    }
+
+    .tg-account {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      border-radius: 18px;
+      background: #f4f8fc;
+      padding: 12px;
+    }
+
+    .tg-account + .tg-account {
+      margin-top: 10px;
+    }
+
+    .tg-user {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: "Cascadia Mono", "Consolas", monospace;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .tg-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .login-card {
+      max-width: 460px;
+      border-radius: 30px;
+      padding: 28px;
+    }
+
+    .fade-in {
+      animation: rise 520ms cubic-bezier(0.23, 1, 0.32, 1) both;
+    }
+
+    @keyframes rise {
+      from {
+        opacity: 0;
+        transform: translateY(18px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @media (max-width: 1100px) {
+      .workspace,
+      .tg-workspace {
+        grid-template-columns: 1fr;
+      }
+
+      .tg-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .form-panel {
+        position: static;
+      }
+
+      .pill-meta {
+        flex-wrap: wrap;
+        white-space: normal;
+      }
+
+      .mini-actions,
+      .copy-actions,
+      .row-actions {
+        justify-content: flex-start;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .shell {
+        width: min(100% - 20px, 640px);
+        padding-top: 22px;
+      }
+
+      .hero {
+        grid-template-columns: 1fr;
+        align-items: start;
+      }
+
+      .action-primary {
+        width: 100%;
+      }
+
+      .stats-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        padding: 16px;
+        border-radius: 24px;
+      }
+
+      .tabbar {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        width: 100%;
+      }
+
+      .section-head,
+      .account-item,
+      .form-panel {
+        padding: 20px;
+      }
+
+      .account-item {
+        grid-template-columns: 1fr;
+      }
+
+      .item-actions {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .two-col {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app" class="shell" v-cloak>
+    <header class="hero fade-in">
+      <div>
+        <div class="eyebrow">Dazhou Proxy Panel</div>
+        <h1 class="title">账号、订阅、流量限制</h1>
+        <p class="subtitle">总额度按两台机器平分。例如 200GB 会拆成 Server 3 的 100GB 和 Server 4 的 100GB；任一台额度用尽后，该账号订阅会自动去掉对应节点。</p>
+      </div>
+      <button @click="load" class="action-primary">刷新</button>
+    </header>
+
+    <div v-if="!token" class="glass-panel login-card fade-in">
+      <h2 class="section-title">登录</h2>
+      <p class="section-copy">输入管理 token 后进入面板。</p>
+      <input v-model="loginToken" type="password" placeholder="Admin token" class="input mt-5">
+      <button @click="login" class="button button-dark w-full mt-4">进入</button>
+    </div>
+
+    <main v-else class="fade-in">
+      <section class="glass-panel stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">账号</div>
+          <div class="stat-value">{{ summary.accounts || 0 }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">启用</div>
+          <div class="stat-value text-emerald-700">{{ summary.enabled || 0 }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">可发布</div>
+          <div class="stat-value text-cyan-700">{{ summary.published || 0 }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">模板</div>
+          <div class="stat-status" :class="sync.clash_template_ready && sync.v2ray_template_ready ? 'text-emerald-700' : 'text-rose-700'">
+            {{ sync.clash_template_ready && sync.v2ray_template_ready ? '已同步真实订阅' : '模板缺失' }}
+          </div>
+        </div>
+      </section>
+
+      <nav class="tabbar" aria-label="账号类型切换">
+        <button class="tab-button" :class="{ active: activeTab === 'subs' }" @click="switchTab('subs')">
+          订阅账号 · {{ summary.accounts || 0 }}
+        </button>
+        <button class="tab-button" :class="{ active: activeTab === 'tg' }" @click="switchTab('tg')">
+          TG 账号 · {{ tgAccountCount() }}
+        </button>
+      </nav>
+
+      <div v-show="activeTab === 'subs'" class="workspace">
+        <section class="glass-panel section">
+          <div class="section-head">
+            <div>
+              <h2 class="section-title">订阅账号</h2>
+              <p class="section-copy">表格里直接看额度、两台机器分摊和发布状态；slug 推荐 4-7 位。</p>
+            </div>
+            <button @click="newAccount" class="button button-dark">新建</button>
+          </div>
+
+          <div class="dense-table subscription-table">
+            <div class="panel-head">
+              <span>账号</span>
+              <span>周期</span>
+              <span>总量</span>
+              <span>剩余</span>
+              <span>S3</span>
+              <span>S4</span>
+              <span>订阅</span>
+              <span>操作</span>
+            </div>
+
+            <article v-for="a in accounts" :key="a.id" class="panel-row">
+              <div class="data-cell">
+                <div class="identity-line">
+                  <span class="truncate">{{ a.name || '未命名账号' }}</span>
+                  <span class="cell-code">/{{ a.slug || 'auto' }}</span>
+                  <span class="badge" :class="a.enabled ? 'badge-ok' : 'badge-muted'">{{ a.enabled ? '启用' : '禁用' }}</span>
+                  <span v-if="!a.published" class="badge badge-warn">已停用发布</span>
+                </div>
+              </div>
+
+              <div class="data-cell">
+                <div class="cell-value" v-if="a.traffic_reset_mode === 'monthly'">每月 {{ a.reset_day }} 日</div>
+                <div class="cell-value text-amber-700" v-else>时间不限</div>
+              </div>
+
+              <div class="data-cell">
+                <div class="metric-inline">
+                  <span class="cell-value">{{ a.used_gb }} / {{ a.quota_gb }} GB</span>
+                </div>
+              </div>
+
+              <div class="data-cell">
+                <div class="metric-inline">
+                  <span class="cell-value">{{ a.remaining_gb }} GB</span>
+                  <span class="cell-muted">{{ Math.min(100, a.usage_percent) }}%</span>
+                </div>
+              </div>
+
+              <div class="data-cell">
+                <div class="cell-value">{{ a.used_gb_s3 }} / {{ a.per_server_quota_gb }}G</div>
+              </div>
+
+              <div class="data-cell">
+                <div class="cell-value">{{ a.used_gb_s4 }} / {{ a.per_server_quota_gb }}G</div>
+              </div>
+
+              <div class="data-cell compact-actions">
+                <div class="row-actions">
+                  <button @click="copy(origin + a.links.clash)" class="compact-link">Clash</button>
+                  <button @click="copy(origin + a.links.v2ray)" class="compact-link">V2Ray</button>
+                </div>
+              </div>
+
+              <div class="data-cell compact-actions">
+                <div class="row-actions">
+                  <button @click="edit(a)" class="button button-cyan button-sm">编辑</button>
+                  <button @click="rotate(a)" class="button button-amber button-sm">轮换</button>
+                  <button @click="delAccount(a)" class="button button-rose button-sm">删除</button>
+                </div>
+              </div>
+            </article>
+
+            <div v-if="!accounts.length" class="panel-row">
+              <div class="cell-muted">还没有面板订阅账号，右侧新建一个即可。</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="glass-panel section form-panel">
+          <h2 class="section-title">订阅设置</h2>
+          <p class="section-copy">保存后立即同步到订阅；总额度默认按 Server 3 / Server 4 平分。</p>
+
+          <div class="form-grid">
+            <div class="two-col">
+              <label class="field">
+                <span class="field-label"><span>账号名</span><span class="field-unit">显示名称</span></span>
+                <input v-model="form.name" class="input" placeholder="例如 owner">
+              </label>
+              <label class="field">
+                <span class="field-label"><span>总流量额度</span><span class="field-unit">GB 平分</span></span>
+                <input type="number" v-model="form.quota_gb" class="input" placeholder="200">
+              </label>
+            </div>
+
+            <div class="two-col">
+              <label class="field">
+                <span class="field-label"><span>流量周期</span><span class="field-unit">方式</span></span>
+                <select v-model="form.traffic_reset_mode" class="select">
+                  <option value="monthly">月重置</option>
+                  <option value="unlimited_time">时间不限</option>
+                </select>
+              </label>
+              <label class="field">
+                <span class="field-label"><span>每月重置日</span><span class="field-unit">1-28 日</span></span>
+                <input type="number" min="1" max="28" v-model="form.reset_day" class="input" placeholder="1">
+              </label>
+            </div>
+
+            <div class="two-col">
+              <label class="field">
+                <span class="field-label"><span>Server 3 已用</span><span class="field-unit">GB</span></span>
+                <input type="number" v-model="form.used_gb_s3" class="input" placeholder="0">
+              </label>
+              <label class="field">
+                <span class="field-label"><span>Server 4 已用</span><span class="field-unit">GB</span></span>
+                <input type="number" v-model="form.used_gb_s4" class="input" placeholder="0">
+              </label>
+            </div>
+
+            <div class="two-col">
+              <label class="field">
+                <span class="field-label"><span>订阅 slug</span><span class="field-unit">4-7 位</span></span>
+                <input v-model="form.slug" class="input font-mono" placeholder="自动生成">
+              </label>
+              <label class="check-row"><input type="checkbox" v-model="form.enabled">启用</label>
+            </div>
+
+            <label class="field">
+              <span class="field-label"><span>备注</span><span class="field-unit">可选</span></span>
+              <textarea v-model="form.notes" class="textarea" placeholder="备注"></textarea>
+            </label>
+            <div class="form-help">“时间不限”只是不按月清零，仍会按流量额度停用；Clash/V2Ray 订阅软件内的流量显示继续由订阅响应头提供。</div>
+            <button @click="save" class="button button-dark w-full !min-h-[48px]">保存设置</button>
+          </div>
+        </section>
+      </div>
+
+      <div v-show="activeTab === 'tg'" class="tg-workspace">
+        <section class="glass-panel section">
+          <div class="section-head">
+            <div>
+              <h2 class="section-title">TG SOCKS 账号</h2>
+              <p class="section-copy">只显示面板创建的 TG 用户；你原来自用账号会保留但隐藏。</p>
+            </div>
+            <button @click="load" class="button button-dark">同步状态</button>
+          </div>
+
+          <div class="dense-table tg-table">
+            <div class="panel-head">
+              <span>服务器</span>
+              <span>入口</span>
+              <span>账号</span>
+              <span>流量</span>
+              <span>周期</span>
+              <span>操作</span>
+            </div>
+
+            <template v-for="server in tgServers" :key="server.server">
+              <article v-for="account in server.accounts" :key="server.server + account.user" class="panel-row tg-data-row">
+                <div class="data-cell">
+                  <div class="cell-title">{{ server.name }}</div>
+                  <div class="cell-muted">{{ server.accounts.length }} 个面板账号</div>
+                </div>
+
+                <div class="data-cell">
+                  <div class="cell-code">{{ server.host }}:{{ server.port }}</div>
+                </div>
+
+                <div class="data-cell">
+                  <div class="cell-title">
+                    <span class="cell-code">{{ account.user }}</span>
+                    <span class="badge" :class="account.available ? 'badge-ok' : 'badge-warn'">{{ account.available ? '可用' : '已限流' }}</span>
+                    <span class="badge" :class="account.enabled ? 'badge-ok' : 'badge-muted'">{{ account.enabled ? '启用' : '禁用' }}</span>
+                  </div>
+                </div>
+
+                <div class="data-cell">
+                  <div class="metric-inline">
+                    <span>{{ account.used_gb }} / {{ account.quota_gb }} GB</span>
+                    <span>{{ Math.min(100, account.usage_percent) }}%</span>
+                    <span class="cell-muted">剩 {{ account.remaining_gb }} GB</span>
+                  </div>
+                </div>
+
+                <div class="data-cell">
+                  <span class="badge badge-muted">{{ account.traffic_reset_label }}</span>
+                </div>
+
+                <div class="data-cell compact-actions">
+                  <div class="row-actions">
+                    <button @click="copy(account.link)" class="button button-cyan button-sm">复制</button>
+                    <button @click="editTg(server.server, account)" class="button button-cyan button-sm">编辑</button>
+                    <button @click="rotateTg(server.server, account.user)" class="button button-amber button-sm">轮换</button>
+                    <button @click="deleteTg(server.server, account.user)" class="button button-rose button-sm">删除</button>
+                  </div>
+                </div>
+              </article>
+            </template>
+
+            <div v-if="!tgAccountCount()" class="panel-row">
+              <div class="cell-muted">还没有面板 TG 账号，右侧添加后才会显示。</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="glass-panel section form-panel">
+          <h2 class="section-title">TG 设置</h2>
+          <p class="section-copy">用户名和密码可留空自动生成；面板账号使用 panel_ 前缀，不和自用账号混在一起。</p>
+          <div class="form-grid">
+            <div class="two-col">
+              <label class="field">
+                <span class="field-label"><span>服务器</span><span class="field-unit">入口</span></span>
+                <select v-model="tgForm.server" class="select">
+                  <option value="s3">S3 · 18443</option>
+                  <option value="s4">S4 · 18444</option>
+                </select>
+              </label>
+              <label class="check-row"><input type="checkbox" v-model="tgForm.enabled">启用</label>
+            </div>
+
+            <div class="two-col">
+              <label class="field">
+                <span class="field-label"><span>用户名</span><span class="field-unit">自动生成</span></span>
+                <input v-model="tgForm.user" class="input font-mono" placeholder="panel_xxx">
+              </label>
+              <label class="field">
+                <span class="field-label"><span>密码</span><span class="field-unit">自动生成</span></span>
+                <input v-model="tgForm.password" class="input font-mono" placeholder="随机密码">
+              </label>
+            </div>
+
+            <div class="two-col">
+              <label class="field">
+                <span class="field-label"><span>流量额度</span><span class="field-unit">GB</span></span>
+                <input type="number" v-model="tgForm.quota_gb" class="input" placeholder="50">
+              </label>
+              <label class="field">
+                <span class="field-label"><span>已用流量</span><span class="field-unit">GB</span></span>
+                <input type="number" v-model="tgForm.used_gb" class="input" placeholder="0">
+              </label>
+            </div>
+
+            <div class="two-col">
+              <label class="field">
+                <span class="field-label"><span>流量周期</span><span class="field-unit">方式</span></span>
+                <select v-model="tgForm.traffic_reset_mode" class="select">
+                  <option value="monthly">月重置</option>
+                  <option value="unlimited_time">时间不限</option>
+                </select>
+              </label>
+              <label class="field">
+                <span class="field-label"><span>每月重置日</span><span class="field-unit">1-28 日</span></span>
+                <input type="number" min="1" max="28" v-model="tgForm.reset_day" class="input" placeholder="1">
+              </label>
+            </div>
+
+            <button @click="saveTg" class="button button-dark w-full !min-h-[48px]">添加 / 更新 TG 账号</button>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>Vue={};</script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script>
+    const { createApp } = Vue;
+    createApp({
+      data() {
+        return {
+          origin: location.origin,
+          token: localStorage.proxy_panel_token || '',
+          loginToken: '',
+          activeTab: 'subs',
+          accounts: [],
+          tgServers: [],
+          summary: {},
+          sync: {},
+          tgForm: {
+            id: '',
+            server: 's3',
+            user: '',
+            password: '',
+            enabled: true,
+            quota_gb: 50,
+            used_gb: 0,
+            traffic_reset_mode: 'monthly',
+            reset_day: 1,
+            notes: ''
+          },
+          form: {
+            id: '',
+            name: '',
+            enabled: true,
+            quota_gb: 200,
+            used_gb_s3: 0,
+            used_gb_s4: 0,
+            traffic_reset_mode: 'monthly',
+            reset_day: 1,
+            slug: '',
+            notes: ''
+          }
+        };
+      },
+      mounted() {
+        if (this.token) this.load();
+        this.panelResizeHandler = () => this.syncPanelHeights();
+        window.addEventListener('resize', this.panelResizeHandler);
+        this.$nextTick(() => {
+          if ('ResizeObserver' in window) {
+            this.panelResizeObserver = new ResizeObserver(this.panelResizeHandler);
+            document.querySelectorAll('.form-panel').forEach(panel => this.panelResizeObserver.observe(panel));
+          }
+          this.syncPanelHeights();
+        });
+      },
+      updated() {
+        this.$nextTick(this.syncPanelHeights);
+      },
+      beforeUnmount() {
+        window.removeEventListener('resize', this.panelResizeHandler);
+        if (this.panelResizeObserver) this.panelResizeObserver.disconnect();
+      },
+      methods: {
+        async api(url, options = {}) {
+          options.headers = {
+            ...(options.headers || {}),
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + this.token
+          };
+          const response = await fetch('/proxy-panel/api' + url, options);
+          if (!response.ok) throw new Error(await response.text());
+          return response.json();
+        },
+        async login() {
+          const response = await fetch('/proxy-panel/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: this.loginToken })
+          });
+          const data = await response.json();
+          this.token = data.token;
+          localStorage.proxy_panel_token = data.token;
+          this.load();
+        },
+        async load() {
+          const data = await this.api('/state');
+          this.accounts = data.accounts || [];
+          this.tgServers = data.tg_servers || [];
+          this.summary = data.summary || {};
+          this.sync = data.sync || {};
+        },
+        syncPanelHeights() {
+          document.querySelectorAll('.workspace, .tg-workspace').forEach(workspace => {
+            if (workspace.offsetParent === null) return;
+            const formPanel = workspace.querySelector('.form-panel');
+            const tablePanel = workspace.querySelector('.section:not(.form-panel)');
+            if (!formPanel || !tablePanel) return;
+            workspace.style.setProperty('--panel-height', formPanel.offsetHeight + 'px');
+          });
+        },
+        newAccount() {
+          this.form = {
+            id: '',
+            name: '',
+            enabled: true,
+            quota_gb: 200,
+            used_gb_s3: 0,
+            used_gb_s4: 0,
+            traffic_reset_mode: 'monthly',
+            reset_day: 1,
+            slug: '',
+            notes: ''
+          };
+        },
+        edit(account) {
+          this.form = {
+            id: account.id,
+            name: account.name,
+            enabled: account.enabled,
+            quota_gb: account.quota_gb,
+            used_gb_s3: account.used_gb_s3,
+            used_gb_s4: account.used_gb_s4,
+            traffic_reset_mode: account.traffic_reset_mode || 'monthly',
+            reset_day: account.reset_day,
+            slug: account.slug,
+            notes: account.notes
+          };
+        },
+        refreshSummary(accounts) {
+          this.summary = {
+            accounts: accounts.length,
+            enabled: accounts.filter(item => item.enabled).length,
+            published: accounts.filter(item => item.published).length
+          };
+        },
+        tgAccountCount() {
+          return this.tgServers.reduce((total, server) => total + (server.accounts || []).length, 0);
+        },
+        switchTab(tab) {
+          const scrollTop = window.scrollY;
+          this.activeTab = tab;
+          this.$nextTick(() => {
+            this.syncPanelHeights();
+            window.scrollTo(0, scrollTop);
+          });
+        },
+        async save() {
+          const data = await this.api('/accounts', {
+            method: 'POST',
+            body: JSON.stringify(this.form)
+          });
+          this.accounts = data.accounts || [];
+          this.sync = data.sync || {};
+          this.refreshSummary(this.accounts);
+          this.newAccount();
+        },
+        async saveTg() {
+          const data = await this.api('/tg-accounts', {
+            method: 'POST',
+            body: JSON.stringify(this.tgForm)
+          });
+          this.tgServers = data.tg_servers || [];
+          this.tgForm = {
+            id: '',
+            server: this.tgForm.server || 's3',
+            user: '',
+            password: '',
+            enabled: true,
+            quota_gb: 50,
+            used_gb: 0,
+            traffic_reset_mode: 'monthly',
+            reset_day: 1,
+            notes: ''
+          };
+        },
+        editTg(server, account) {
+          this.tgForm = {
+            id: account.id,
+            server,
+            user: account.user,
+            password: '',
+            enabled: account.enabled,
+            quota_gb: account.quota_gb,
+            used_gb: account.used_gb,
+            traffic_reset_mode: account.traffic_reset_mode || 'monthly',
+            reset_day: account.reset_day || 1,
+            notes: account.notes || ''
+          };
+        },
+        async rotateTg(server, user) {
+          if (!confirm('轮换 ' + user + ' 的 TG 密码？旧链接会失效。')) return;
+          const data = await this.api('/tg-accounts/rotate', {
+            method: 'POST',
+            body: JSON.stringify({ server, user })
+          });
+          this.tgServers = data.tg_servers || [];
+        },
+        async deleteTg(server, user) {
+          if (!confirm('删除 TG 账号 ' + user + '？')) return;
+          const data = await this.api('/tg-accounts/delete', {
+            method: 'POST',
+            body: JSON.stringify({ server, user })
+          });
+          this.tgServers = data.tg_servers || [];
+        },
+        async rotate(account) {
+          const data = await this.api('/accounts/rotate', {
+            method: 'POST',
+            body: JSON.stringify({ id: account.id })
+          });
+          this.accounts = data.accounts || [];
+          this.sync = data.sync || {};
+          this.refreshSummary(this.accounts);
+        },
+        async delAccount(account) {
+          if (!confirm('删除 ' + account.name + '?')) return;
+          const data = await this.api('/accounts/delete', {
+            method: 'POST',
+            body: JSON.stringify({ id: account.id })
+          });
+          this.accounts = data.accounts || [];
+          this.sync = data.sync || {};
+          this.refreshSummary(this.accounts);
+        },
+        async copy(text) {
+          await navigator.clipboard.writeText(text);
+          alert('已复制');
+        }
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

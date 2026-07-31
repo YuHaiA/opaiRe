@@ -1,0 +1,21 @@
+[Unit]
+Description=Sub2 Mihomo simple subscription panel
+After=network-online.target sub2-mihomo.service
+Wants=network-online.target sub2-mihomo.service
+
+[Service]
+Type=simple
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/opt/sub2-mihomo
+Environment=MIHOMO_SYSTEMD=1
+Environment=MIHOMO_SERVICE=sub2-mihomo
+Environment=MIHOMO_PUBLIC_BASE=https://tupai.cyou/mihomo
+ExecStart=/usr/bin/python3 /opt/sub2-mihomo/manager.py serve
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65535
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
