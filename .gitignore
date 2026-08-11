@@ -12,6 +12,7 @@ luckmail/__pycache__/
 
 # 本地数据库和日志
 data/
+tmp/
 *.db
 *.log
 
@@ -31,9 +32,17 @@ test_register4.py
 test_register5.py
 aitest.py
 register.py.bak
-.codex/
+.codex/*
+!.codex/docs/
+!.codex/docs/**
+!.codex/skills/
+.codex/skills/*
+!.codex/skills/project-memory/
+!.codex/skills/project-memory/**
 AGENTS.md
 stop_openai_cpa.ps1
+scripts/rollback_server1_to_f1.ps1
+code.py
 openai_totp.py
 register - 副本.py
 ChatGPT_team.py
