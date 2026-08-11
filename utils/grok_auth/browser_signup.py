@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
 
-SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com"
+SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com&return_to=%2F"
+POST_SIGNUP_URL = "https://grok.com/"
 
 EMAIL_ENTRY_SELECTORS = [
     'button:has-text("Sign up with email")',
@@ -66,6 +67,27 @@ COMPLETE_SELECTORS = [
 
 def _log_fn(log: Optional[Callable[[str], None]]):
     return log if callable(log) else (lambda *_a, **_k: None)
+
+
+def _settle_post_signup_page(page, log=None, rounds: int = 8) -> bool:
+    lg = _log_fn(log)
+    for _ in range(max(1, int(rounds))):
+        if "sign-up" not in str(getattr(page, "url", "") or "").lower():
+            break
+        time.sleep(1.0)
+    current_url = str(getattr(page, "url", "") or "")
+    if "sign-up" in current_url.lower():
+        lg("已生成登录会话，但注册页尚未确认完成")
+        return False
+    current_host = (urlparse(current_url).hostname or "").lower()
+    if current_host not in ("grok.com", "www.grok.com"):
+        try:
+            page.goto(POST_SIGNUP_URL, wait_until="domcontentloaded", timeout=60000)
+        except Exception:
+            return False
+    # Keep the browser context alive after redirect so xAI finishes provisioning.
+    time.sleep(12.0)
+    return True
 
 
 
@@ -204,12 +226,27 @@ def _click_first(page, selectors: List[str], *, force: bool = True) -> str:
             continue
     return ""
 
-def _click_email_signup(page, timeout: float = 12.0) -> bool:
+
+def _submit_is_pending(page) -> bool:
+    try:
+        return bool(page.evaluate(
+            """() => Array.from(document.querySelectorAll('button[type="submit"], button')).some((button) => {
+              const busy = button.disabled || button.getAttribute('aria-busy') === 'true';
+              if (!busy) return false;
+              return Boolean(button.querySelector('[class*="spin"], [class*="load"], svg'));
+            })"""
+        ))
+    except Exception:
+        return False
+
+
+def _click_email_signup(page, timeout: float = 15.0) -> bool:
+    """Click Grok email signup entry and wait until email input appears."""
     el, _ = _query_any(page, EMAIL_INPUT_SELECTORS)
     if el:
         return True
 
-    deadline = time.time() + timeout
+    deadline = time.time() + max(3.0, float(timeout or 15.0))
     js = (
         "() => {"
         "const nodes = Array.from(document.querySelectorAll('button, a, [role=\"button\"]'));"
@@ -224,26 +261,44 @@ def _click_email_signup(page, timeout: float = 12.0) -> bool:
         "  );"
         "});"
         "if (!target) return false;"
+        "target.scrollIntoView({block:'center', inline:'center'});"
         "target.click();"
         "return true;"
         "}"
     )
+
     while time.time() < deadline:
+        # 1) Playwright text locator (more reliable than query_selector + has-text alone)
+        try:
+            loc = page.get_by_role('button', name=re.compile(r'sign up with email|continue with email|使用邮箱注册|用邮箱注册', re.I))
+            if loc.count() > 0:
+                loc.first.click(force=True, timeout=2500)
+                time.sleep(1.0)
+                el, _ = _query_any(page, EMAIL_INPUT_SELECTORS)
+                if el:
+                    return True
+        except Exception:
+            pass
+
+        # 2) Classic selectors
         if _click_first(page, EMAIL_ENTRY_SELECTORS):
             time.sleep(1.2)
             el, _ = _query_any(page, EMAIL_INPUT_SELECTORS)
             if el:
                 return True
+
+        # 3) DOM text scan click
         try:
-            clicked = page.evaluate(js)
-            if clicked:
+            if page.evaluate(js):
                 time.sleep(1.2)
                 el, _ = _query_any(page, EMAIL_INPUT_SELECTORS)
                 if el:
                     return True
         except Exception:
             pass
-        time.sleep(0.6)
+
+        time.sleep(0.4)
+
     return bool(_query_any(page, EMAIL_INPUT_SELECTORS)[0])
 
 
@@ -472,31 +527,29 @@ def _signup_on_page(
 
         code_sel = ", ".join(CODE_INPUT_SELECTORS)
         code_ready = False
-        for _ in range(20):
+        last_submit_retry = time.time()
+        for _ in range(80):
             if time.time() > deadline:
                 break
             if page.query_selector(code_sel):
                 code_ready = True
                 break
-            _click_first(page, SUBMIT_SELECTORS)
-            time.sleep(1.0)
+            now = time.time()
+            if not _submit_is_pending(page) and now - last_submit_retry >= 2.0:
+                _click_first(page, SUBMIT_SELECTORS)
+                last_submit_retry = now
+            time.sleep(0.25)
 
         if not code_ready:
             _dump_debug(page, "code_page_missing")
             return {"ok": False, "error": "验证码页未出现", "url": page.url}
 
-        code = ""
-        for _attempt in range(1, 10):
-            if time.time() > deadline:
-                break
-            try:
-                code = str(fetch_code() or "").strip()
-            except Exception as exc:
-                lg(f"取验证码异常: {exc}")
-                code = ""
-            if code:
-                break
-            time.sleep(3.0)
+        # The backend fetcher owns the shared eight-second Grok OTP budget.
+        try:
+            code = str(fetch_code() or "").strip()
+        except Exception as exc:
+            lg(f"取验证码异常: {exc}")
+            code = ""
         if not code:
             return {"ok": False, "error": "邮箱验证码超时", "url": page.url}
 
@@ -876,4 +929,3 @@ def signup_with_camoufox(
         timeout=timeout,
         log=log,
     )
-

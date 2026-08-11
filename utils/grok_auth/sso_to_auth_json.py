@@ -18,7 +18,7 @@ except Exception:
     AUTH_FILE = Path(os.getenv('GROK2API_AUTH_FILE', str(Path.home() / '.grok' / 'auth.json')))
     GROK_CLI_CLIENT_ID = os.getenv('GROK2API_OIDC_CLIENT_ID', 'b1a00492-073a-47ea-816f-4c329264a828')
     OIDC_ISSUER = os.getenv('GROK2API_OIDC_ISSUER', 'https://auth.x.ai')
-    OIDC_SCOPES = os.getenv('GROK2API_OIDC_SCOPES', 'openid profile email offline_access grok-cli:access api:access conversations:read conversations:write')
+    OIDC_SCOPES = os.getenv('GROK2API_OIDC_SCOPES', 'openid profile email offline_access grok-cli:access api:access conversations:read conversations:write workspaces:read workspaces:write')
 AUTH_KEY = f'{OIDC_ISSUER}::{GROK_CLI_CLIENT_ID}'
 GROK_DEVICE_REFERRER = (os.getenv('GROK2API_DEVICE_REFERRER') or os.getenv('GROK_DEVICE_REFERRER') or 'grok-build').strip() or 'grok-build'
 SSO_COOKIE_DOMAINS = ('.x.ai', 'accounts.x.ai', 'auth.x.ai', '.accounts.x.ai', '.auth.x.ai')
@@ -28,7 +28,7 @@ GROK_PLAN = (os.getenv('GROK2API_OAUTH_PLAN') or 'generic').strip() or 'generic'
 REDIRECT_URI = (os.getenv('GROK2API_CPA_REDIRECT_URI') or 'http://127.0.0.1:56121/callback').strip()
 CLIENT_ID = GROK_CLI_CLIENT_ID
 SCOPES = OIDC_SCOPES
-GROK_VERSION = (os.getenv('GROK2API_CLI_VERSION') or '0.2.93').strip() or '0.2.93'
+GROK_VERSION = (os.getenv('GROK2API_CLI_VERSION') or '0.2.111').strip() or '0.2.111'
 GROK_TOKEN_UA = f'grok-shell/{GROK_VERSION} (linux; x86_64)'
 import threading as _threading
 _DEVICE_FLOW_LOCK = _threading.RLock()
@@ -199,13 +199,48 @@ def _poll_interval_sec(raw: Any=None) -> float:
         hinted = 1.0
     return max(0.4, min(hinted, 1.5))
 
+
+def _device_code_headers() -> dict:
+    return {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': '*/*',
+        'Accept-Encoding': 'gzip, br, deflate',
+        'User-Agent': GROK_TOKEN_UA,
+        'x-grok-client-version': GROK_VERSION,
+        'x-grok-client-surface': 'headless',
+    }
+
+
+def _refreshed_sso_cookie(session: Any, original_sso: str) -> str:
+    original = str(original_sso or '').strip()
+    jar = getattr(getattr(session, 'cookies', None), 'jar', None)
+    candidates = []
+    if jar is None:
+        return ''
+    for cookie in jar:
+        name = str(getattr(cookie, 'name', '') or '').lower()
+        value = str(getattr(cookie, 'value', '') or '').strip()
+        if name not in {'sso', 'sso-rw'} or not value or value == original:
+            continue
+        domain = str(getattr(cookie, 'domain', '') or '').lower().lstrip('.')
+        candidates.append((0 if name == 'sso-rw' else 1, 0 if domain in {'accounts.x.ai', 'x.ai'} else 1, value))
+    candidates.sort()
+    return candidates[0][2] if candidates else ''
+
+
+def _device_approval_form_variants(user_code: str, principal_id: str, overlay: dict):
+    with_referrer = {'user_code': user_code, 'action': 'allow', 'referrer': GROK_REFERRER, 'plan': GROK_PLAN, 'principal_type': 'User'}
+    if principal_id:
+        with_referrer['principal_id'] = principal_id
+    return [('overlay', overlay), ('referrer', with_referrer), ('go_minimal', {'user_code': user_code, 'action': 'allow'})]
+
 def request_device_code(session: Any | None=None, *, proxy_kw: dict | None=None) -> dict | None:
     """Request OIDC device code. Prefer shared curl_cffi session when given.
 
     Retries on xAI rate limits (HTTP 429 / slow_down) — common when several
     registration workers enter device-flow together.
     """
-    form = {'client_id': GROK_CLI_CLIENT_ID, 'scope': OIDC_SCOPES}
+    form = {'client_id': GROK_CLI_CLIENT_ID, 'scope': OIDC_SCOPES, 'referrer': GROK_REFERRER}
     timeout = _http_timeout()
     retries = _device_flow_retries()
     pkw = proxy_kw if proxy_kw is not None else _proxy_kwargs()
@@ -214,7 +249,7 @@ def request_device_code(session: Any | None=None, *, proxy_kw: dict | None=None)
         _wait_device_flow_slot()
         if session is not None:
             try:
-                r = session.post(f'{OIDC_ISSUER}/oauth2/device/code', data=form, headers={'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json'}, impersonate='chrome', timeout=timeout, **pkw)
+                r = session.post(f'{OIDC_ISSUER}/oauth2/device/code', data=form, headers=_device_code_headers(), impersonate='chrome', timeout=timeout, **pkw)
                 code = int(getattr(r, 'status_code', 0) or 0)
                 body = (getattr(r, 'text', None) or '')[:300]
                 if code >= 400:
@@ -277,7 +312,7 @@ def poll_token(device_code: str, interval: int | float=1, expires_in: int=1800, 
         first = False
         if session is not None:
             try:
-                r = session.post(f'{OIDC_ISSUER}/oauth2/token', data=form, headers={'Content-Type': 'application/x-www-form-urlencoded'}, impersonate='chrome', timeout=http_timeout, **pkw)
+                r = session.post(f'{OIDC_ISSUER}/oauth2/token', data=form, headers=_device_code_headers(), impersonate='chrome', timeout=http_timeout, **pkw)
                 code = int(getattr(r, 'status_code', 0) or 0)
                 if code < 400:
                     data = r.json()
@@ -489,6 +524,10 @@ def sso_to_token_device_flow(sso_cookie: str, *, quiet: bool=False, proxy: str='
     if _is_sign_in_url(final_url):
         log(f'  sso invalid (landed {final_url[:120]})')
         return None
+    refreshed_sso = _refreshed_sso_cookie(user, sso_cookie)
+    if refreshed_sso:
+        sso_cookie = refreshed_sso
+        _set_sso_cookies(user, sso_cookie)
     log('  sso ok')
     principal_id = _principal_id_from_sso(sso_cookie)
     if principal_id:
@@ -613,11 +652,7 @@ def sso_to_token_device_flow(sso_cookie: str, *, quiet: bool=False, proxy: str='
                         overlay['principal_id'] = principal_id
             except Exception as e:
                 log(f'  consent form load: {e}')
-            go_minimal = {'user_code': user_code, 'action': 'allow'}
-            with_referrer = {'user_code': user_code, 'action': 'allow', 'referrer': GROK_REFERRER, 'plan': GROK_PLAN, 'principal_type': 'User'}
-            if principal_id:
-                with_referrer['principal_id'] = principal_id
-            form_variants = [('referrer', with_referrer), ('overlay', overlay), ('go_minimal', go_minimal)]
+            form_variants = _device_approval_form_variants(user_code, principal_id, overlay)
             try:
                 for a_url in approve_urls:
                     for (form_name, form) in form_variants:

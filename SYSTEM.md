@@ -101,6 +101,58 @@
   - 主库存类页面重新回到“工具栏 / 统计区固定、表格内部滚动、分页固定”的结构，避免数据量上来后把整页撑开。
   - 云端列表分页现在基于前端已拉取的原始合并数据切片显示，筛选、搜索和翻页不再每次都重新触发全平台聚合请求。
 
+## 服务1 CPA 节点探测覆盖修复（2026-08-09）
+
+- 现象：28 路出口中 **18 路从未被探测过**，有数据的 10 路里最新的也已过期 126 分钟，中位数 19.5 小时，节点健康度基本处于盲区。
+- 根因一：`guard.go:1078` 的主动探测调度整段被 `if pol.Mode == "active" || pol.Mode == "hybrid"` 包住，而线上是 `mode=passive`，**整块是死代码**。因此原计划的「`active_interval_seconds` 3600 → 900」根本不会有任何效果，必须先切模式。少数几路有 active 数据，来自不受 mode 限制的隔离恢复路径 `guard.go:1074`。
+- 根因二：`soft_tps` / `hard_tps` 是 **反伪造上限**，不是速度下限。`classifyTPS`（`guard.go:236`）里 `tps >= hard` 判 hard、`tps >= soft` 判 soft，**吐字越快评级越差**，用途是识别伪造/重放响应。线上却被收紧成 `150/250`，落在正常输出区间内。
+- 实测误判：以 `150/250` 开启 hybrid 后，lane 10、11 分别在 252、308 TPS 被隔离，lane 1/2/17/19 在 218–226 TPS 记 soft，**14 路里误判 6 路**，且全部 `ContentValid=true`（首尾标记、`finish_reason`、正文均合法）。lane 10 还触发 `node_rotation_failed`，连轮换自救都做不到。
+- 阈值为什么会配错：被动通道采样真实用户流量，reasoning 密集、速度慢（约 58–170 TPS），`150/250` 看着合理；主动探测发的是 `max_tokens: 256` 的纯文本题目（TLS 1.3 握手 8 条事实），不含 reasoning，健康节点本就跑到 **101–348 TPS**。按被动流量收紧上限，等于给主动探测设了个够不着的天花板，同时也在误判被动通道。
+- 修复：阈值恢复作者默认 `soft_tps: 700` / `hard_tps: 1500`，再切 `mode: hybrid`、`active_interval_seconds: 900`。当前实测最高 348 TPS，距离软上限仍有 **2.0 倍余量**。
+- 结果：节点观测覆盖 10/28 → **28/28**，分类 **28 路全 healthy**，隔离 0 路，观测新鲜度中位数从 19.5 小时降到 15 分钟内。两次误隔离在阈值修正后自动解除（`quarantined=2, restored=2`），**没有任何账号被禁用**。已跨 `systemctl restart cliproxyapi` 验证：策略持久化在 `/opt/CLIProxyAPI/plugin-data/egress-guard/state.json`，28 路观测数据全部保留。
+- 调度节奏：30 秒 ticker 每次只探一个节点（`guard.go:1063-1090` 里显式 `break` 防止并发洪峰），冷启动约 14 分钟铺满 28 路，之后按 900 秒周期滚动。
+- **账号再平衡已无必要**：实测 339 个账号中 50 个绑定到 lane，289 个无 `proxy_url`（未纳管），28 路每路 1–2 个、**零空闲**，`capacity.plan` 显示 `required_nodes=26`、`sufficient=true`。此前记录的「14-19 路全空」已过期，不要再执行 rebalance —— 那会改写约 23 个账号的出口 IP，对养号敏感，却在解决一个不存在的问题。
+- ⚠️ 后续调阈值时**不能只看被动流量**：两个通道共用同一组上限，被动（reasoning）和主动（纯文本）TPS 差约 3 倍，改动前务必对照主动区间 101–348 校验。
+- 探测开销：`interval=900` 时约为 28 路 × 96 次/天 × 250 输出 token ≈ 67 万 token/天，全部走 `grok-4.5`（当前唯一有额度的模型）。嫌贵可调大间隔，覆盖率是平滑退化的。
+- 备份：`/opt/CLIProxyAPI/backups/probe-hybrid-20260809T050513Z/`（`state.json`、`config.yaml`），路径同时记录在 `/tmp/probe-bak-path`。回退主动探测只需 `POST /policy {"mode":"passive"}`；阈值应保持 700/1500，旧的 150/250 对两个通道都是错的。
+## 服务1 CPA 回归官方发行版 7.2.125（2026-08-09）
+
+- 线上主程序由自编译的 `7.2.71-stream-bootstrap.3-cgo` 升级为官方发行版 `CLIProxyAPI 7.2.125`（Commit `2e6b1d83`，BuiltAt `2026-08-08T21:13:51Z`），落后量为 54 个版本 / 366 提交 / 300 文件。
+- 升级前做了符号级比对，确认**主程序不含任何本地定制代码**：`opaire`、`grok2api-egress`、`mihomo`、`lane_manager`、`egress-guard`、`semanticguard` 在旧二进制中计数全为 0，`local-semantic-guard-cgo` 只是构建标签；163 个"仅旧版存在"的函数全部落在官方包路径下，属官方重构改名或内联。
+- 当初自编译的唯一理由 `streaming.bootstrap-retries`，官方 v7.2.125 已内置同名配置项 `streaming.{keepalive-seconds,bootstrap-retries}`，键名完全一致，`config.yaml` 原样保留即可，启动无 unknown field / deprecated 告警。
+- **结论：全部定制都在插件层，今后升级只需替换二进制，服务器不必再维护 Go 工具链。**
+- 官方资产用带插件支持的 `CLIProxyAPI_7.2.125_linux_amd64.tar.gz`（**不能用 no-plugin 版**），sha256 `4e940b7dc5bdf867b5c58ca30f1b368fae6dc2e041e8a351d5c2c07f3f610233`，已校验。
+- 升级前先在隔离实例（端口 `18825`，不碰生产）预验证：两插件正常加载、零 error/panic、`/v1/models` 返回 14 个、真实推理 3/3 全 200、`passive.total` 有增量，确认 service1.8 的 usage 修复在新版仍生效后才动生产。
+- 升级后核验：模型数 13 -> **14**（新增 `grok-imagine-video-1.5`），`cpa-xai-quota-guard 0.3.33-opaire.2` 与 `grok2api-egress 1.1.0-service1.8` 均正常注册，auths 保持 **339 个未动**，policy 三开关 `auto_rotate_accounts` / `auto_switch_on_degraded` / `auto_rotate_lanes` 全部为真，nodes 28 路，真实推理 3/3 HTTP 200，被动统计 `passive.total` 持续增长。
+- 回滚备份：`/opt/CLIProxyAPI/backups/upgrade-7.2.125-20260809T044131Z/`，含旧二进制 `cli-proxy-api-7.2.71-custom`、`config.yaml`、`egress-state.json`、`.management-key`、`auth-count.txt`、`status-before.json`。回滚即停服后 `install` 回旧二进制再起服。
+- 值得关注的上游改动：`fix(usage)` 三连（normalized token accounting v2、partial token 分类、canonical token 规范化，正是插件依赖的数据源）、xAI executor 输出控制与 x_search 注入、Grok Imagine Video 1.5 GA、Claude TLS 会话复用、`fix(pluginhost)` Windows response buffer、request lifecycle 插件拦截能力。
+
+### 陷阱：升级停服会连带停掉 cliproxy-login
+
+- `cliproxy-login.service` 带 `PartOf=cliproxyapi.service`，而 systemd 的 `PartOf` **只传播 stop/restart，不传播 start**。因此 `systemctl stop cliproxyapi` + `systemctl start cliproxyapi` 这种分开的升级操作会把 login 服务停掉且不再拉起，`Restart=always` 也救不回来（systemd 主动 stop 会抑制 Restart），表现为 `8012` 端口无监听、`https://kaikj.bond/` 打不开。
+- 已加固：新增 drop-in `/etc/systemd/system/cliproxyapi.service.d/10-login-companion.conf`，内容为 `[Unit] Wants=cliproxy-login.service`，让 start 时把 login 一起带起来。已实测 stop -> 两者同停、start -> 两者同起，`8012` 恢复监听，`https://kaikj.bond/` 302 跳 `/cliproxy/login` 并返回 200。
+## 服务1 CPA 出口守护（2026-08-07）
+
+- 服务1运行 CPA 原生插件 `grok2api-egress v1.1.0-service1.4`，源码位于 `C:\Users\yu\Desktop\grok2api-egress-service1\cpa-plugin\go`，不属于 opaiRe 主进程。
+- 插件“出口守护 -> 守护策略”负责自动轮换开关与分钟间隔；Mihomo Web 只负责物理节点查看、手动指定和立即轮换。
+- 当前策略：10% 灰度、36 个受管账号、13 路 `7951-7963`、每路最多 3 个账号、故障预留容量 1 路；账号按请求自动 Round Robin，物理出口自动轮换开启且每路间隔 10 分钟，多个通道错峰执行。
+- 质量探测只计算可见正文 Token；HTTP 200 空响应、固定首尾标记缺失、非 `finish_reason=stop` 或流未收到 `[DONE]` 都按错误处理。旧默认阈值 `700/1500` 已迁移为 `150/250`。
+- Mihomo 自动轮换候选必须有有效延迟、通过 xAI 连通验证，且物理节点名和实际出口 IP 都不得与其他通道重复。
+- 2026-08-07 线上验证：13 路连通检测全部成功且出口 IP 全部不同；账号分布为每路 2-3 个；CPA、Mihomo、Nginx 均为 active，内外 `/healthz` 均为 200。
+- 该阶段 CPA 为 `7.2.71-stream-bootstrap.2-cgo`，同时加载 `cpa-xai-quota-guard 0.3.33-opaire.2` 与 `grok2api-egress 1.1.0-service1.4`。配置为 `request-retry: 3`、`max-retry-credentials: 3`、`streaming.bootstrap-retries: 2`。（当前线上已升级到官方 `7.2.125`，见「回归官方发行版」章节。）
+- 服务器 `/opt/cpa-mihomo` 已增加订阅定时自动更新：Mihomo 页面“订阅导入与更新”可配置开关和间隔（5-10080 分钟），当前线上为开启、60 分钟。更新失败保留旧订阅/provider/通道，不与手动更新并发；面板状态显示上次尝试、成功、错误和下次时间。部署备份：`/opt/backups/cpa-mihomo-auto-update-20260807T152441Z`。本地 `grok2api-egress-service1/service1/cpa-mihomo` 仅为源码副本，不能替代线上运行态。
+- 完整回滚备份：服务1 `/opt/backups/cpa-rotation-20260807T142300Z`，包含新旧 CPA、插件、配置、state、完整 auths 与 Mihomo 状态。临时构建目录清理后根盘占用从 91% 降至 74%。`patrol-capacity-cooldown.timer` 继续保持 disabled/inactive。
+
+## 服务1 CPA 流式首包换号（2026-08-05）
+
+- 服务1已部署 `CLIProxyAPI 7.2.71-stream-bootstrap.1`（基线 `5b7f2361`），生产配置启用 `streaming.bootstrap-retries: 2`。
+- 公共流处理器现同时识别 Claude、OpenAI Chat Completions、OpenAI Responses 和 Gemini 的协议前导；消息 ID、角色、空 thinking、签名、空 content part 等事件会先缓存，不再过早提交给客户端。
+- 在首个真实正文、推理内容或工具参数之前发生 EOF / 5xx / 认证类错误时，CPA 可以丢弃失败账号的前导事件并重新选择账号；一旦已有真实内容下发，禁止自动重放，避免重复正文和工具调用。
+- 前导缓存上限为 64 块或 1 MiB；上游正常结束时会补发合法空响应的前导，未知协议保持原有首块即提交行为。
+- 生产切换前已验证 Linux CGO 二进制、`18818` 临时实例、健康端点及 `cpa-xai-quota-guard` / `grok2api-egress` 插件加载；生产回滚备份位于 `/var/backups/cliproxy-stream-bootstrap-20260805T083825Z`。
+- 线上 OpenAI Chat 与 OpenAI Responses 流均验证为 HTTP 200、包含真实 delta 和完整终止事件、无错误事件。
+- Claude 最小请求在新旧二进制上都可能首字节前长时间等待，已排除本次缓存逻辑和 `grok2api-egress` 插件回归。单账号对照显示，现有 `xai_health_check.py` 的极简 Responses 载荷返回 200，并不代表同账号能处理 Claude / Chat 转换后的 reasoning、include、store 和工具字段；后续账号测活应增加富载荷探测，不能只按当前 `live` 结果判断 Claude 可用性。
+
 ## 后续约定
 
 - 新增表格页时，优先复用 `.data-panel` 与 `.data-table-scroll`，避免再次出现外层滚动抢占的问题。

@@ -376,6 +376,7 @@ createApp({
             blacklistStr: "",
             warpListStr: "",
             rawProxyListStr: "",
+            rawProxyProbe: { loading: false, data: null, sourceLines: [], sampleSize: 20, timeoutSec: 8 },
             accountStatusFilter: 'all',
             accounts: [],
             selectedAccounts: [],
@@ -1490,13 +1491,39 @@ createApp({
                 if (this.config.clash_proxy_pool.sub_url !== undefined) {
                     this.clashPool.subUrl = this.config.clash_proxy_pool.sub_url;
                 }
+
+                if (!this.config.openai_cpa || typeof this.config.openai_cpa !== 'object') this.config.openai_cpa = {};
+                if (this.config.openai_cpa.bridge_enabled === undefined) this.config.openai_cpa.bridge_enabled = false;
+                if (this.config.openai_cpa.bridge_base_url === undefined) this.config.openai_cpa.bridge_base_url = '';
+                if (this.config.openai_cpa.bridge_token === undefined) this.config.openai_cpa.bridge_token = '';
+                if (this.config.openai_cpa.receive_mode === undefined || this.config.openai_cpa.receive_mode === '') {
+                    this.config.openai_cpa.receive_mode = this.config.openai_cpa.bridge_enabled ? 'remote_bridge' : 'local_webhook';
+                }
+                const cpaModeMap = {
+                    remote: 'remote_bridge',
+                    remote_bridge: 'remote_bridge',
+                    bridge: 'remote_bridge',
+                    server: 'remote_bridge',
+                    local: 'local_webhook',
+                    local_webhook: 'local_webhook',
+                    tunnel: 'local_webhook',
+                    dual: 'dual',
+                    both: 'dual',
+                    all: 'dual'
+                };
+                const rawCpaMode = String(this.config.openai_cpa.receive_mode || '').trim().toLowerCase().replace(/-/g, '_');
+                this.config.openai_cpa.receive_mode = cpaModeMap[rawCpaMode]
+                    || (this.config.openai_cpa.bridge_enabled ? 'remote_bridge' : 'local_webhook');
+                this.config.openai_cpa.bridge_enabled = ['remote_bridge', 'dual'].includes(this.config.openai_cpa.receive_mode);
                 if (!this.config.raw_proxy_pool || typeof this.config.raw_proxy_pool !== 'object' || Array.isArray(this.config.raw_proxy_pool)) {
-                    this.config.raw_proxy_pool = { enable: false, proxy_list: [] };
+                    this.config.raw_proxy_pool = { enable: false, success_pool_enabled: false, success_proxy_list: [], proxy_list: [] };
                 } else {
                     this.config.raw_proxy_pool.enable = normalizeBooleanLike(this.config.raw_proxy_pool.enable, false);
+                    this.config.raw_proxy_pool.success_pool_enabled = normalizeBooleanLike(this.config.raw_proxy_pool.success_pool_enabled, false);
                     if (!Array.isArray(this.config.raw_proxy_pool.proxy_list)) {
                         this.config.raw_proxy_pool.proxy_list = [];
                     }
+                    if (!Array.isArray(this.config.raw_proxy_pool.success_proxy_list)) this.config.raw_proxy_pool.success_proxy_list = [];
                 }
                 if(Array.isArray(this.config.warp_proxy_list)) {
                     this.warpListStr = this.config.warp_proxy_list.join('\n');
@@ -1849,10 +1876,17 @@ createApp({
                 this.config.cluster_upload_timeout_sec = Math.max(15, Math.min(3600, clusterUploadTimeout));
                 this.config.warp_proxy_list = this.warpListStr.split('\n').map(s => s.trim()).filter(s => s);
                 if (!this.config.raw_proxy_pool || typeof this.config.raw_proxy_pool !== 'object' || Array.isArray(this.config.raw_proxy_pool)) {
-                    this.config.raw_proxy_pool = { enable: false, proxy_list: [] };
+                    this.config.raw_proxy_pool = { enable: false, success_pool_enabled: false, success_proxy_list: [], proxy_list: [] };
                 }
                 this.config.raw_proxy_pool.enable = normalizeBooleanLike(this.config.raw_proxy_pool.enable, false);
+                this.config.raw_proxy_pool.success_pool_enabled = normalizeBooleanLike(this.config.raw_proxy_pool.success_pool_enabled, false);
                 this.config.raw_proxy_pool.proxy_list = this.rawProxyListStr.split('\n').map(s => s.trim()).filter(s => s);
+                if (!Array.isArray(this.config.raw_proxy_pool.success_proxy_list)) this.config.raw_proxy_pool.success_proxy_list = [];
+                this.config.raw_proxy_pool.success_proxy_list = [...new Set(this.config.raw_proxy_pool.success_proxy_list.map(s => String(s || '').trim()).filter(Boolean))];
+                if (this.config.raw_proxy_pool.enable && this.config.raw_proxy_pool.success_pool_enabled && !this.config.raw_proxy_pool.success_proxy_list.length) {
+                    this.showToast('成功代理池为空，请先测试并设为成功池', 'warning');
+                    return;
+                }
                 const res = await this.authFetch('/api/config', {
                     method: 'POST', body: JSON.stringify(this.config)
                 });
@@ -1864,6 +1898,55 @@ createApp({
                     this.queuePollStats();
                 } else { this.showToast("保存失败：" + data.message, "error"); }
             } catch (e) { this.showToast("保存失败网络异常", "error"); }
+        },
+        rawProxyInputLines() {
+            return String(this.rawProxyListStr || '').split(/\r?\n/).map(item => item.trim()).filter(Boolean);
+        },
+        rawProxySuccessPoolCount() {
+            return Array.isArray(this.config?.raw_proxy_pool?.success_proxy_list)
+                ? this.config.raw_proxy_pool.success_proxy_list.length : 0;
+        },
+        validateRawProxySuccessPoolToggle(event) {
+            const enabled = Boolean(event?.target?.checked);
+            if (enabled && this.rawProxySuccessPoolCount() <= 0) {
+                this.config.raw_proxy_pool.success_pool_enabled = false;
+                this.showToast('成功代理池为空，请先测试并设为成功池', 'warning');
+            }
+        },
+        async testRawProxyPool() {
+            const proxyList = this.rawProxyInputLines();
+            if (!proxyList.length || this.rawProxyProbe.loading) return;
+            this.rawProxyProbe.loading = true;
+            this.rawProxyProbe.data = null;
+            try {
+                const res = await this.authFetch('/api/proxy/raw/test', {
+                    method: 'POST',
+                    body: JSON.stringify({ proxy_list: proxyList, sample_size: this.rawProxyProbe.sampleSize, timeout_sec: this.rawProxyProbe.timeoutSec })
+                });
+                const payload = await res.json();
+                this.rawProxyProbe.data = payload.data || null;
+                this.rawProxyProbe.sourceLines = proxyList.slice();
+                this.showToast(payload.message || '代理测活完成', payload.status || 'success');
+            } catch (e) {
+                this.showToast('代理测活请求失败', 'error');
+            } finally {
+                this.rawProxyProbe.loading = false;
+            }
+        },
+        setRawProxySuccessPoolFromProbe() {
+            const results = Array.isArray(this.rawProxyProbe?.data?.results) ? this.rawProxyProbe.data.results : [];
+            const source = this.rawProxyProbe.sourceLines || [];
+            const entries = [...new Set(results.filter(item => item?.ok).map(item => source[Number(item.source_index) - 1]).filter(Boolean))];
+            if (!entries.length) return this.showToast('当前测活结果没有可用代理', 'warning');
+            this.config.raw_proxy_pool.success_proxy_list = entries;
+            this.config.raw_proxy_pool.success_pool_enabled = true;
+            this.config.raw_proxy_pool.enable = true;
+            this.showToast(`已生成 ${entries.length} 条成功代理池`, 'success');
+        },
+        clearRawProxySuccessPool() {
+            this.config.raw_proxy_pool.success_proxy_list = [];
+            this.config.raw_proxy_pool.success_pool_enabled = false;
+            this.showToast('成功代理池已清空', 'success');
         },
         filterLocalAccounts(status) {
             this.accountStatusFilter = status;
@@ -4008,6 +4091,30 @@ async exportSub2Api() {
                 this.showToast("请求异常", "error");
             }
         },
+
+        syncOpenaiCpaReceiveMode() {
+            if (!this.config.openai_cpa || typeof this.config.openai_cpa !== 'object') {
+                this.config.openai_cpa = {};
+            }
+            const modeMap = {
+                remote: 'remote_bridge',
+                remote_bridge: 'remote_bridge',
+                bridge: 'remote_bridge',
+                server: 'remote_bridge',
+                local: 'local_webhook',
+                local_webhook: 'local_webhook',
+                tunnel: 'local_webhook',
+                dual: 'dual',
+                both: 'dual',
+                all: 'dual'
+            };
+            const raw = String(this.config.openai_cpa.receive_mode || '').trim().toLowerCase().replace(/-/g, '_');
+            const mode = modeMap[raw] || (this.config.openai_cpa.bridge_enabled ? 'remote_bridge' : 'local_webhook');
+            this.config.openai_cpa.receive_mode = mode;
+            // Keep legacy bridge_enabled in sync for older readers / backend fallback.
+            this.config.openai_cpa.bridge_enabled = ['remote_bridge', 'dual'].includes(mode);
+        },
+
         async fetchClashPool() {
             this.clashPool.loading = true;
             try {

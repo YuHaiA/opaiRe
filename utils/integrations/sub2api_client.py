@@ -8,6 +8,11 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
 from utils import config as cfg
 from curl_cffi import requests as cffi_requests
+from utils.integrations.account_export import (
+    GROK_CLI_BASE_URL,
+    GROK_CLI_HEADERS,
+    detect_account_provider,
+)
 from utils.integrations.sub2api_proxy import parse_sub2api_proxy
 
 logger = logging.getLogger(__name__)
@@ -52,81 +57,24 @@ def _build_account_extra(settings: Dict[str, Any]) -> Dict[str, Any]:
     return extra
 
 
-def _build_account_item(token_data: Dict[str, Any], settings: Dict[str, Any], proxy_obj: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    email = str(token_data.get("email") or "unknown").strip() or "unknown"
-    name = email[:64]
+def _build_grok_account_extra(settings: Dict[str, Any]) -> Dict[str, Any]:
+    return {"load_factor": settings["load_factor"]}
 
-    provider = str(token_data.get("provider") or token_data.get("type") or "").lower()
-    status = str(token_data.get("status") or "").lower()
-    is_grok = (
-        provider in ("grok", "xai")
-        or status.startswith("grok")
-        or "grok_oauth" in status
-    )
 
-    if is_grok:
-        access = str(token_data.get("access_token") or "").strip()
-        refresh = str(token_data.get("refresh_token") or "").strip()
-
-        expires_in = token_data.get("expires_in", 21600)
+def _as_rfc3339(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    if isinstance(value, (int, float)) or str(value).strip().isdigit():
         try:
-            expires_in = int(expires_in)
-        except (TypeError, ValueError):
-            expires_in = 21600
+            return datetime.fromtimestamp(int(float(value)), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except (OverflowError, TypeError, ValueError):
+            return ""
+    return str(value).strip()
 
-        expires_at = token_data.get("expires_at")
-        if expires_at in (None, ""):
-            expires_at = int(time.time()) + expires_in
-        else:
-            try:
-                expires_at = int(expires_at)
-            except (TypeError, ValueError):
-                expires_at = int(time.time()) + expires_in
 
-        credentials: Dict[str, Any] = {
-            "access_token": access,
-            "refresh_token": refresh,
-            "token_type": str(token_data.get("token_type") or "Bearer"),
-            "email": email,
-            "expires_in": expires_in,
-            "expires_at": expires_at,
-        }
-        id_token = str(token_data.get("id_token") or "").strip()
-        if id_token:
-            credentials["id_token"] = id_token
-        base_url = str(token_data.get("base_url") or "").strip()
-        if base_url:
-            credentials["base_url"] = base_url
-        token_endpoint = str(token_data.get("token_endpoint") or "").strip()
-        if token_endpoint:
-            credentials["token_endpoint"] = token_endpoint
-        client_id = str(token_data.get("client_id") or "").strip()
-        if client_id:
-            credentials["client_id"] = client_id
-        scope = str(token_data.get("scope") or "").strip()
-        if scope:
-            credentials["scope"] = scope
-        sub = str(token_data.get("sub") or "").strip()
-        if sub:
-            credentials["sub"] = sub
-
-        account_item: Dict[str, Any] = {
-            "name": name,
-            "platform": "grok",
-            "type": "oauth",
-            "credentials": credentials,
-            "extra": {
-                "email": email,
-                "source": "openai-cpa",
-            },
-            "concurrency": settings["concurrency"],
-            "priority": settings["priority"],
-            "rate_multiplier": settings["rate_multiplier"],
-            "auto_pause_on_expired": True,
-        }
-    else:
-        account_item = {
-            "name": name,
+def _build_openai_account_item(token_data: Dict[str, Any], settings: Dict[str, Any], proxy_obj: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    account_item = {
+            "name": str(token_data.get("email", "unknown"))[:64],
             "platform": "openai",
             "type": "oauth",
             "credentials": {
@@ -159,6 +107,55 @@ def _build_account_item(token_data: Dict[str, Any], settings: Dict[str, Any], pr
     return account_item
 
 
+def _build_grok_account_item(token_data: Dict[str, Any], settings: Dict[str, Any], proxy_obj: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    credentials: Dict[str, Any] = {}
+    for key in (
+        "access_token", "refresh_token", "id_token", "token_type", "client_id",
+        "scope", "email", "sub", "team_id", "subscription_tier", "entitlement_status",
+    ):
+        value = token_data.get(key)
+        if value not in (None, ""):
+            credentials[key] = value
+    expires_at = _as_rfc3339(token_data.get("expires_at") or token_data.get("expired"))
+    if expires_at:
+        credentials["expires_at"] = expires_at
+    if token_data.get("expires_in") not in (None, ""):
+        credentials["expires_in"] = token_data["expires_in"]
+    credentials["base_url"] = str(token_data.get("base_url") or GROK_CLI_BASE_URL).strip()
+    headers = dict(GROK_CLI_HEADERS)
+    if isinstance(token_data.get("headers"), dict):
+        headers.update({str(key): str(value) for key, value in token_data["headers"].items() if value is not None})
+    credentials["headers"] = headers
+    if not any(credentials.get(key) for key in ("access_token", "refresh_token", "id_token")):
+        raise ValueError("Grok 账号缺少 OAuth 凭证，不能生成 Sub2API 数据导入结构")
+    account_item = {
+        "name": str(token_data.get("email", "unknown"))[:64],
+        "platform": "grok",
+        "type": "oauth",
+        "credentials": credentials,
+        "extra": _build_grok_account_extra(settings),
+        "concurrency": settings["concurrency"],
+        "priority": settings["priority"],
+        "rate_multiplier": settings["rate_multiplier"],
+        "auto_pause_on_expired": True,
+    }
+
+    if settings.get("group_ids"):
+        account_item["group_ids"] = settings["group_ids"]
+    if proxy_obj and "proxy_key" in proxy_obj:
+        account_item["proxy_key"] = proxy_obj["proxy_key"]
+    return account_item
+
+
+def _build_account_item(token_data: Dict[str, Any], settings: Dict[str, Any], proxy_obj: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    provider = detect_account_provider(token_data)
+    if provider == "grok":
+        return _build_grok_account_item(token_data, settings, proxy_obj)
+    if provider == "openai":
+        return _build_openai_account_item(token_data, settings, proxy_obj)
+    raise ValueError("账号缺少可导出的 OpenAI/Grok 凭证")
+
+
 def build_sub2api_export_bundle(
     token_items: List[Dict[str, Any]],
     settings: Optional[Dict[str, Any]] = None,
@@ -178,6 +175,8 @@ def build_sub2api_export_bundle(
         accounts.append(_build_account_item(token_data, push_settings, proxy_obj))
 
     return {
+        "type": "sub2api-data",
+        "version": 1,
         "exported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "proxies": list(proxies_by_key.values()),
         "accounts": accounts,
@@ -541,16 +540,34 @@ class Sub2APIClient:
         group_ids = settings.get("group_ids") or []
 
         is_grok = (
-            str(working_token_data.get("type", "") or "").lower() == "xai"
-            or str(working_token_data.get("provider", "") or "").lower() == "grok"
-            or str(working_token_data.get("status", "") or "").lower().startswith("grok")
+            detect_account_provider(working_token_data) == "grok"
             or (
                 bool(working_token_data.get("sso"))
                 and str(getattr(cfg, "REG_PROVIDER", "openai") or "").lower() == "grok"
             )
         )
         if is_grok:
+            has_oauth = any(
+                str(working_token_data.get(key) or "").strip()
+                for key in ("access_token", "refresh_token", "id_token")
+            )
+            if has_oauth:
+                ok, msg = self._import_account(working_token_data, settings)
+                if ok:
+                    self._force_bind_groups(account_name, group_ids)
+                    return True, "Sub2API Grok OAuth 数据导入成功"
+                sso_ok, sso_msg = self._import_grok_sso(working_token_data, settings)
+                if sso_ok:
+                    self._force_bind_groups(account_name, group_ids)
+                    return True, f"Sub2API Grok SSO 兜底成功（data 导入失败: {msg}）"
+                return False, f"Grok data 导入失败: {msg}；SSO 也失败: {sso_msg}"
             ok, msg = self._import_grok_sso(working_token_data, settings)
+            if not ok and "HTTP 404" in str(msg):
+                fallback_ok, fallback_msg = self._import_account(working_token_data, settings)
+                if fallback_ok:
+                    ok, msg = True, "Sub2API Grok 导入成功（通用数据接口兼容模式）"
+                else:
+                    msg = f"{msg}；通用数据接口也失败: {fallback_msg}"
             if ok:
                 self._force_bind_groups(account_name, group_ids)
             return ok, msg

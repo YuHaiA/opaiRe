@@ -31,6 +31,50 @@ def format_docker_url(url: str) -> str:
     return url
 
 
+OPENAI_CPA_RECEIVE_MODES = ("remote_bridge", "local_webhook", "dual")
+
+
+def normalize_openai_cpa_receive_mode(value, bridge_enabled=None) -> str:
+    """Normalize OpenAI-CPA code receive path.
+
+    remote_bridge: CF Worker -> public server bridge -> local WS/HTTP pull
+    local_webhook: CF Worker -> local /api/webhook/email (CF Tunnel or public panel)
+    dual: both paths active
+
+    Missing receive_mode falls back to legacy bridge_enabled.
+    """
+    raw = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "remote": "remote_bridge",
+        "remote_bridge": "remote_bridge",
+        "bridge": "remote_bridge",
+        "server": "remote_bridge",
+        "server_bridge": "remote_bridge",
+        "local": "local_webhook",
+        "local_webhook": "local_webhook",
+        "webhook": "local_webhook",
+        "tunnel": "local_webhook",
+        "cf_tunnel": "local_webhook",
+        "direct": "local_webhook",
+        "dual": "dual",
+        "both": "dual",
+        "all": "dual",
+    }
+    if raw in aliases:
+        return aliases[raw]
+    if bridge_enabled is None:
+        return "local_webhook"
+    return "remote_bridge" if bool(bridge_enabled) else "local_webhook"
+
+
+def openai_cpa_remote_bridge_enabled(receive_mode: str) -> bool:
+    return str(receive_mode or "").strip().lower() in {"remote_bridge", "dual"}
+
+
+def openai_cpa_local_webhook_enabled(receive_mode: str) -> bool:
+    return str(receive_mode or "").strip().lower() in {"local_webhook", "dual"}
+
+
 def normalize_raw_proxy_entry(entry: str) -> str:
     value = str(entry or "").strip()
     if not value or value.startswith("#"):
@@ -95,6 +139,10 @@ def normalize_raw_proxy_list(entries) -> list:
 
 def is_raw_proxy_pool_enabled() -> bool:
     return _raw_proxy_enable and bool(RAW_PROXY_LIST)
+
+
+def is_raw_proxy_success_pool_enabled() -> bool:
+    return _raw_proxy_enable and _raw_proxy_success_pool_enabled and bool(RAW_PROXY_SUCCESS_LIST)
 
 
 def is_clash_proxy_pool_enabled() -> bool:
@@ -354,6 +402,9 @@ CLASH_CLUSTER_COUNT: int = 5
 CLASH_SUB_URL: str = ""
 WARP_PROXY_LIST: list = []
 _raw_proxy_enable: bool = False
+_raw_proxy_success_pool_enabled: bool = False
+RAW_PROXY_SOURCE_LIST: list = []
+RAW_PROXY_SUCCESS_LIST: list = []
 RAW_PROXY_LIST: list = []
 PROXY_QUEUE: queue.Queue = queue.Queue()
 PROXY_QUEUE_GENERATION: int = 0
@@ -379,6 +430,7 @@ FVIA_TOKEN: str = ""
 TMAILOR_CURRENT_TOKEN: str = ""
 REG_MODE: str = "email"
 REG_PROVIDER: str = "openai"
+AUTH_FINGERPRINT_MODE: str = "compat"
 # Grok
 GROK_OAUTH_TIMEOUT: float = 180.0
 DB_TYPE: str = "sqlite"
@@ -394,6 +446,11 @@ GMAIL_OAUTH_SUFFIX_LEN_MIN: int = 8
 GMAIL_OAUTH_SUFFIX_LEN_MAX: int = 8
 DISABLE_FORCED_TAKEOVER: bool = True
 OPENAI_CPA_WEBHOOK_SECRET = ""
+OPENAI_CPA_RECEIVE_MODE: str = "local_webhook"
+OPENAI_CPA_BRIDGE_ENABLED: bool = False
+OPENAI_CPA_LOCAL_WEBHOOK: bool = True
+OPENAI_CPA_BRIDGE_BASE_URL: str = ""
+OPENAI_CPA_BRIDGE_TOKEN: str = ""
 USE_ORIGINAL_PASSWORD_FLOW: bool = False
 CF_API_EMAIL: str = ""
 CF_API_KEY: str = ""
@@ -457,7 +514,7 @@ def reload_all_configs(new_config_dict=None):
     global CPA_THREADS, CHECK_INTERVAL_MINUTES, ENABLE_TOKEN_REVIVE
     global NORMAL_SLEEP_MIN, NORMAL_SLEEP_MAX, NORMAL_TARGET_COUNT, NORMAL_SAVE_IMG_TO_LOCAL
     global _clash_enable, _clash_pool_mode, WARP_PROXY_LIST, PROXY_QUEUE, PROXY_QUEUE_GENERATION
-    global _raw_proxy_enable, RAW_PROXY_LIST
+    global _raw_proxy_enable, _raw_proxy_success_pool_enabled, RAW_PROXY_SOURCE_LIST, RAW_PROXY_SUCCESS_LIST, RAW_PROXY_LIST
     global CLASH_CLUSTER_COUNT, CLASH_SUB_URL
     global ENABLE_SUB2API_MODE, SUB2API_URL, SUB2API_KEY
     global SUB2API_MIN_THRESHOLD, SUB2API_BATCH_COUNT, SUB2API_CHECK_INTERVAL, SUB2API_THREADS, SUB2API_TEST_MODEL
@@ -486,6 +543,7 @@ def reload_all_configs(new_config_dict=None):
     global CLUSTER_SYNC_STALE_FILE_MAX_AGE_HOURS, CLUSTER_SYNC_MAX_FILE_SIZE_MB, CLUSTER_SYNC_MAX_RECORDS, CLUSTER_SYNC_REQUIRE_CUSTOM_SECRET
     global REG_MODE
     global REG_PROVIDER
+    global AUTH_FINGERPRINT_MODE
     # Grok 仅加载可配置项；其余固定常量不在此处改写
     global GROK_OAUTH_TIMEOUT
     global LOCAL_MS_ENABLE_FISSION, LOCAL_MS_MASTER_EMAIL, LOCAL_MS_PASSWORD, LOCAL_MS_CLIENT_ID, LOCAL_MS_REFRESH_TOKEN, LOCAL_MS_POOL_FISSION
@@ -507,6 +565,8 @@ def reload_all_configs(new_config_dict=None):
     global HERO_SMS_REUSE_PHONE, HERO_SMS_REUSE_MAX
     global FIVESIM_REUSE_PHONE, FIVESIM_REUSE_MAX
     global OPENAI_CPA_WEBHOOK_SECRET, USE_ORIGINAL_PASSWORD_FLOW
+    global OPENAI_CPA_RECEIVE_MODE, OPENAI_CPA_LOCAL_WEBHOOK
+    global OPENAI_CPA_BRIDGE_ENABLED, OPENAI_CPA_BRIDGE_BASE_URL, OPENAI_CPA_BRIDGE_TOKEN
     global TEAM_MODE_ENABLE, TEAM_MODE_OVERSPEED
     global ENABLE_CODEX_AGENT_IDENTITY
     base_yaml_config = init_config()
@@ -715,9 +775,22 @@ def reload_all_configs(new_config_dict=None):
     CF_API_EMAIL = _c.get("cf_api_email", "")
     CF_API_KEY = _c.get("cf_api_key", "")
 
-    _ocpa = _c.get("openai_cpa", {})
+    _ocpa = _c.get("openai_cpa", {}) if isinstance(_c.get("openai_cpa", {}), dict) else {}
     OPENAI_CPA_WEBHOOK_SECRET = str(_ocpa.get("webhook_secret", "")).strip()
     USE_ORIGINAL_PASSWORD_FLOW = bool(_ocpa.get("use_original_password_flow", False))
+    _legacy_bridge_enabled = safe_bool(_ocpa.get("bridge_enabled", False), default=False)
+    OPENAI_CPA_RECEIVE_MODE = normalize_openai_cpa_receive_mode(
+        _ocpa.get("receive_mode"),
+        bridge_enabled=_legacy_bridge_enabled,
+    )
+    OPENAI_CPA_BRIDGE_ENABLED = openai_cpa_remote_bridge_enabled(OPENAI_CPA_RECEIVE_MODE)
+    OPENAI_CPA_LOCAL_WEBHOOK = openai_cpa_local_webhook_enabled(OPENAI_CPA_RECEIVE_MODE)
+    OPENAI_CPA_BRIDGE_BASE_URL = str(format_docker_url(str(_ocpa.get("bridge_base_url", "") or "").strip()) or "").rstrip("/")
+    OPENAI_CPA_BRIDGE_TOKEN = str(_ocpa.get("bridge_token", "") or "").strip() or OPENAI_CPA_WEBHOOK_SECRET
+    # Keep yaml-facing keys aligned so UI/save round-trips stay consistent.
+    _ocpa["receive_mode"] = OPENAI_CPA_RECEIVE_MODE
+    _ocpa["bridge_enabled"] = OPENAI_CPA_BRIDGE_ENABLED
+    _c["openai_cpa"] = _ocpa
 
     DEFAULT_PROXY = format_docker_url(_c.get("default_proxy", ""))
 
@@ -804,7 +877,10 @@ def reload_all_configs(new_config_dict=None):
     WARP_PROXY_LIST = _c.get("warp_proxy_list", [])
     _raw_proxy_conf = _c.get("raw_proxy_pool", {})
     _raw_proxy_enable = safe_bool(_raw_proxy_conf.get("enable", False), default=False)
-    RAW_PROXY_LIST = normalize_raw_proxy_list(_raw_proxy_conf.get("proxy_list", []))
+    _raw_proxy_success_pool_enabled = safe_bool(_raw_proxy_conf.get("success_pool_enabled", False), default=False)
+    RAW_PROXY_SOURCE_LIST = normalize_raw_proxy_list(_raw_proxy_conf.get("proxy_list", []))
+    RAW_PROXY_SUCCESS_LIST = normalize_raw_proxy_list(_raw_proxy_conf.get("success_proxy_list", []))
+    RAW_PROXY_LIST = list(RAW_PROXY_SUCCESS_LIST if _raw_proxy_success_pool_enabled else RAW_PROXY_SOURCE_LIST)
     if is_raw_proxy_pool_enabled():
         _clash_enable = False
         _clash_pool_mode = False
@@ -837,6 +913,7 @@ def reload_all_configs(new_config_dict=None):
         LUCKMAIL_TAG_ID = None
 
     SUB_DOMAIN_LEVEL = _c.get("sub_domain_level", 1)
+    SUB_DOMAIN_COUNT = safe_int(_c.get("sub_domain_count", 10), 10, minimum=1)
     RANDOM_SUB_DOMAIN_LEVEL = _c.get("random_sub_domain_level", False)
     ENABLE_SUB_DOMAINS = _c.get("enable_sub_domains", False)
 
@@ -955,6 +1032,10 @@ def reload_all_configs(new_config_dict=None):
     REG_PROVIDER = str(_c.get("reg_provider", "openai")).strip().lower()
     if REG_PROVIDER not in {"openai", "grok"}:
         REG_PROVIDER = "openai"
+    auth_fingerprint = _c.get("auth_fingerprint", {}) if isinstance(_c.get("auth_fingerprint"), dict) else {}
+    AUTH_FINGERPRINT_MODE = str(auth_fingerprint.get("mode", "compat") or "compat").strip().lower()
+    if AUTH_FINGERPRINT_MODE not in {"compat", "upstream"}:
+        AUTH_FINGERPRINT_MODE = "compat"
 
     # Grok
     _grok = _c.get("grok", {}) if isinstance(_c.get("grok"), dict) else {}

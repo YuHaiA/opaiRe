@@ -1,0 +1,24 @@
+6';
+                if (this.config.enable_codex_agent_identity === undefined) this.config.enable_codex_agent_identity = false;
+                if (!this.config.openai_cpa || typeof this.config.openai_cpa !== 'object') this.config.openai_cpa = {};
+                if (this.config.openai_cpa.bridge_enabled === undefined) this.config.openai_cpa.bridge_enabled = false;
+                if (this.config.openai_cpa.bridge_base_url === undefined) this.config.openai_cpa.bridge_base_url = '';
+                if (this.config.openai_cpa.bridge_token === undefined) this.config.openai_cpa.bridge_token = '';
+                if (this.config.openai_cpa.receive_mode === undefined || this.config.openai_cpa.receive_mode === '') {
+                    this.config.openai_cpa.receive_mode = this.config.openai_cpa.bridge_enabled ? 'remote_bridge' : 'local_webhook';
+                }
+                const cpaModeMap = {
+                    remote: 'remote_bridge',
+                    remote_bridge: 'remote_bridge',
+                    bridge: 'remote_bridge',
+                    server: 'remote_bridge',
+                    local: 'local_webhook',
+                    local_webhook: 'local_webhook',
+                    tunnel: 'local_webhook',
+                    dual: 'dual',
+                    both: 'dual',
+                    all: 'dual'
+                };
+                const rawCpaMode = String(this.config.openai_cpa.receive_mode || '').trim().toLowerCase().replace(/-/g, '_');
+                this.config.openai_cpa.receive_mode = cpaModeMap[rawCpaMode]
+                    || (this.config.openai_

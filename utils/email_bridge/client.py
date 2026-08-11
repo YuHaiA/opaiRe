@@ -20,9 +20,9 @@ _stop = threading.Event()
 _DEFAULT_LISTENER_TTL_SEC = 300.0
 # Cloudflare / 公网反代上 websockets 默认 20s ping 很容易 1011 keepalive timeout，
 # 并在后台线程打出吓人的 traceback；收码以 HTTP 轮询为主、WS 只做加速。
-_WS_RECV_TIMEOUT_SEC = 15.0
-_HTTP_POLL_IDLE_SEC = 1.2
-_WS_RETRY_SLEEP_SEC = 1.0
+_WS_RECV_TIMEOUT_SEC = 8.0
+_HTTP_POLL_IDLE_SEC = 0.6
+_WS_RETRY_SLEEP_SEC = 0.6
 
 
 def _log(msg: str) -> None:
@@ -278,7 +278,7 @@ def _http_check(email: str) -> Optional[Dict[str, Any]]:
         try:
             import httpx
 
-            resp = httpx.get(url, headers=headers, timeout=5.0, trust_env=False)
+            resp = httpx.get(url, headers=headers, timeout=2.5, trust_env=False)
             if resp.status_code == 200:
                 data = resp.json()
                 if isinstance(data, dict) and data.get("code"):
@@ -291,7 +291,7 @@ def _http_check(email: str) -> Optional[Dict[str, Any]]:
             import urllib.request
 
             req = urllib.request.Request(url, headers=headers, method="GET")
-            with urllib.request.urlopen(req, timeout=5) as resp:  # nosec - controlled URL
+            with urllib.request.urlopen(req, timeout=2.5) as resp:  # nosec - controlled URL
                 raw = resp.read().decode("utf-8", errors="ignore")
             data = json.loads(raw) if raw else {}
             if isinstance(data, dict) and data.get("code"):

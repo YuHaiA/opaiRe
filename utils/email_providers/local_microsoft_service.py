@@ -7,6 +7,7 @@ import threading
 import imaplib
 import base64
 import email as email_lib
+import sys
 from email.header import decode_header
 from typing import List, Optional, Dict, Any
 from curl_cffi import requests as cffi_requests
@@ -272,8 +273,14 @@ class LocalMicrosoftService:
                 print(f"[{cfg.ts()}] [ERROR] 扫信接口请求失败: {resp.status_code} | {resp.text}")
         except MailboxAbuseModeError as e:
             mailbox["_polling_stopped"] = "abuse_mode"
-            print(str(e), flush=True)
+            sys.stdout.write(f"[{cfg.ts()}] [WARNING] Microsoft service abuse mode，已停止继续轮询: {e}\n")
+            sys.stdout.flush()
         except Exception as e:
+            if "service abuse mode" in str(e).lower():
+                mailbox["_polling_stopped"] = "abuse_mode"
+                sys.stdout.write(f"[{cfg.ts()}] [WARNING] Microsoft service abuse mode，已停止继续轮询: {e}\n")
+                sys.stdout.flush()
+                return all_msgs
             print(f"[{cfg.ts()}] [DEBUG-GRAPH] 扫信模块严重错误: {e}", flush=True)
         return all_msgs
 

@@ -1,12 +1,13 @@
 import os
-import uuid
 import random
 import time
 import urllib.parse
+import uuid
 from typing import Any, Dict, Optional, Tuple
 
 from curl_cffi import requests
 from utils import config as cfg
+from .auth_fingerprint import oai_headers as _fingerprint_oai_headers, token_impersonate
 
 
 def _ssl_verify() -> bool:
@@ -43,7 +44,7 @@ def _post_form(
             resp = requests.post(
                 url, data=data, headers=headers,
                 proxies=proxies, verify=_ssl_verify(),
-                timeout=timeout, impersonate="chrome110",
+                timeout=timeout, impersonate=token_impersonate(),
             )
             if resp.status_code != 200:
                 raise RuntimeError(
@@ -112,30 +113,7 @@ def _make_trace_headers() -> dict[str, str]:
 
 
 def _oai_headers(did: str, extra: dict = None, is_navigate: bool = False) -> dict:
-    h = {
-        "accept-language": "en-US,en;q=0.9",
-    }
-    if did:
-        h["oai-device-id"] = did
-    h.update(_make_trace_headers())
-    if is_navigate:
-        h.update({
-            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "sec-fetch-dest": "document",
-            "sec-fetch-mode": "navigate",
-            "sec-fetch-site": "same-origin",
-            "upgrade-insecure-requests": "1",
-        })
-    else:
-        h.update({
-            "accept": "application/json",
-            "sec-fetch-dest": "empty",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "same-origin",
-        })
-    if extra:
-        h.update(extra)
-    return h
+    return _fingerprint_oai_headers(did, extra=extra, is_navigate=is_navigate)
 
 
 def _follow_redirect_chain_local(

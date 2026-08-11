@@ -1,5 +1,6 @@
 import unittest
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from utils import core_engine
 from utils.grok_auth import browser_signup, sso_to_auth_json, xai_oauth
@@ -68,14 +69,48 @@ class GrokXaiOAuthContractTests(unittest.TestCase):
         self.assertIn("redirect=grok-com", browser_signup.SIGNUP_URL)
         self.assertIn("return_to=%2F", browser_signup.SIGNUP_URL)
 
-    def test_grok_registration_keeps_one_sticky_selector_node(self):
-        with patch.object(core_engine.cfg, "REG_PROVIDER", "grok", create=True):
+    def test_grok_registration_switches_shared_batch_but_keeps_worker_sticky(self):
+        with patch.object(core_engine.cfg, "REG_PROVIDER", "grok", create=True), \
+                patch.object(core_engine.cfg, "_clash_enable", True, create=True), \
+                patch.object(core_engine.cfg, "_clash_pool_mode", False, create=True), \
+                patch.object(core_engine.cfg, "is_raw_proxy_pool_enabled", return_value=False):
+            self.assertTrue(core_engine._should_switch_shared_batch())
             self.assertFalse(core_engine._should_switch_before_registration(False))
-            self.assertEqual(1, core_engine._registration_batch_size(4))
+            self.assertEqual(4, core_engine._registration_batch_size(4))
         with patch.object(core_engine.cfg, "REG_PROVIDER", "openai", create=True):
             self.assertTrue(core_engine._should_switch_before_registration(False))
             self.assertEqual(4, core_engine._registration_batch_size(4))
         self.assertFalse(core_engine._should_switch_before_registration(True))
+
+    def test_grok_shared_mode_switches_once_for_concurrent_batch(self):
+        args = SimpleNamespace(proxy="http://127.0.0.1:7890", once=True)
+        stop_event = Mock()
+        stop_event.is_set.return_value = False
+        stop_event.wait.return_value = False
+
+        with patch.object(core_engine.cfg, "REG_PROVIDER", "grok", create=True), \
+                patch.object(core_engine.cfg, "_clash_enable", True, create=True), \
+                patch.object(core_engine.cfg, "_clash_pool_mode", False, create=True), \
+                patch.object(core_engine.cfg, "POOL_EXHAUSTED", False, create=True), \
+                patch.object(core_engine.cfg, "ENABLE_MULTI_THREAD_REG", True, create=True), \
+                patch.object(core_engine.cfg, "REG_THREADS", 3, create=True), \
+                patch.object(core_engine.cfg, "NORMAL_TARGET_COUNT", 0, create=True), \
+                patch.object(core_engine.cfg, "NORMAL_SLEEP_MIN", 1, create=True), \
+                patch.object(core_engine.cfg, "NORMAL_SLEEP_MAX", 1, create=True), \
+                patch.object(core_engine.cfg, "EMAIL_API_MODE", "", create=True), \
+                patch.object(core_engine.cfg, "is_raw_proxy_pool_enabled", return_value=False), \
+                patch.object(core_engine, "smart_switch_node", return_value=True) as switch_node, \
+                patch.object(core_engine, "run_and_refresh", return_value="success") as run_registration, \
+                patch("builtins.print"):
+            core_engine.normal_main_loop(args, stop_event)
+
+        switch_node.assert_called_once_with(args.proxy)
+        self.assertEqual(3, run_registration.call_count)
+        for call in run_registration.call_args_list:
+            self.assertEqual(args.proxy, call.args[0])
+            self.assertIs(args, call.args[1])
+            self.assertFalse(call.args[2])
+            self.assertTrue(call.kwargs["skip_switch"])
 
     def test_default_scope_matches_current_official_cli_contract(self):
         self.assertEqual(
@@ -118,7 +153,7 @@ class GrokXaiOAuthContractTests(unittest.TestCase):
             )
 
         self.assertEqual("device-1", result["device_code"])
-        sleep.assert_called_once_with(5.0)
+        sleep.assert_called_once_with(1.5)
         self.assertTrue(session.url.endswith("/oauth2/token"))
         self.assertEqual("headless", session.headers["x-grok-client-surface"])
         self.assertEqual(sso_to_auth_json.GROK_TOKEN_UA, session.headers["User-Agent"])

@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 CLIPROXYAPI_GROK_BASE_URL = "https://cli-chat-proxy.grok.com/v1"
 CLIPROXYAPI_GROK_HEADERS = {
     "X-XAI-Token-Auth": "xai-grok-cli",
-    "x-grok-client-version": "0.2.93",
+    "x-grok-client-version": "0.2.111",
     "x-grok-client-identifier": "grok-shell",
 }
 

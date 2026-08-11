@@ -279,6 +279,87 @@ def _format_grouped_mail_log(label: str, email: str) -> str:
     masked_email = mask_email(email)
     return f"{group_label} {masked_email}" if group_label else masked_email
 
+def _consume_code_pool_code(target_email: str, ignore_code=None, *, allow_relay_fallback: bool = True) -> str:
+    """Upstream-compatible code_pool consume + optional bridge fallbacks."""
+    from utils.auth_core import code_pool
+
+    target_email = str(target_email or "").strip().lower()
+    ignore_code = str(ignore_code or "").strip() or None
+
+    def _accept(code: str) -> str:
+        code = str(code or "").strip()
+        if code and code != ignore_code:
+            code_pool.pop(target_email, None)
+            return code
+        return ""
+
+    def _from_payload(payload: str) -> str:
+        raw = str(payload or "")
+        if not raw.strip():
+            return ""
+        # Prefer upstream behavior: extract from full cleaned text.
+        extracted = _extract_otp_code(_clean_html_to_text(raw)) or ""
+        if extracted:
+            return extracted
+        # inject_code_pool may store "CODE\nraw..."
+        first = raw.splitlines()[0].strip()
+        if first and "@" not in first and len(first) <= 16 and " " not in first and "<" not in first:
+            if re.fullmatch(r"\d{6}", first):
+                return first
+            if re.fullmatch(r"[A-Za-z0-9]{3}-[A-Za-z0-9]{3}", first):
+                return first.upper()
+            labeled = _extract_otp_code(first)
+            if labeled:
+                return labeled
+        return ""
+
+    raw_text = code_pool.get(target_email, "")
+    if raw_text:
+        hit = _accept(_from_payload(raw_text))
+        if hit:
+            return hit
+
+    if not allow_relay_fallback:
+        return ""
+
+    # 1) local sqlite (local_webhook / dual)
+    try:
+        from utils.email_bridge import latest_code_sync, extract_code
+
+        row = latest_code_sync(target_email)
+        if row:
+            stored_code, _sender, raw = row
+            for cand in (
+                str(stored_code or "").strip(),
+                _from_payload(str(stored_code or "")),
+                extract_code(raw or ""),
+                _extract_otp_code(_clean_html_to_text(raw or "")),
+            ):
+                hit = _accept(cand)
+                if hit:
+                    return hit
+    except Exception:
+        pass
+
+    # 2) remote/local bridge HTTP (remote_bridge / dual)
+    try:
+        from utils.email_bridge.client import pull_latest_code, inject_code_pool
+
+        data = pull_latest_code(target_email)
+        if data and data.get("code"):
+            code = str(data.get("code") or "").strip()
+            raw_text = str(data.get("raw_text") or code)
+            if code and code != ignore_code:
+                try:
+                    inject_code_pool(target_email, code, raw_text)
+                except Exception:
+                    pass
+                code_pool.pop(target_email, None)
+                return code
+    except Exception:
+        pass
+    return ""
+
 def _clean_html_to_text(raw_html: str) -> str:
     if not raw_html:
         return ""
@@ -1360,11 +1441,28 @@ def get_email_and_token(
         print(f"[{cfg.ts()}] [AI-状态] 已开启 （{mask_email(email_str)}） AI 智能邮箱域名信息增强...")
 
     if mode == "openai_cpa":
-        if getattr(cfg, 'OPENAI_CPA_WEBHOOK_SECRET', ""):
+        if getattr(cfg, 'OPENAI_CPA_WEBHOOK_SECRET', "") or getattr(cfg, 'OPENAI_CPA_BRIDGE_ENABLED', False) or getattr(cfg, 'OPENAI_CPA_LOCAL_WEBHOOK', False):
+            receive_mode = str(getattr(cfg, 'OPENAI_CPA_RECEIVE_MODE', '') or '').strip() or (
+                "remote_bridge" if getattr(cfg, 'OPENAI_CPA_BRIDGE_ENABLED', False) else "local_webhook"
+            )
+            # 远程中转 / 本机直收都提前挂 WS：邮件一到立刻推入 code_pool，收码后自动断开。
+            if getattr(cfg, 'OPENAI_CPA_BRIDGE_ENABLED', False) or getattr(cfg, 'OPENAI_CPA_LOCAL_WEBHOOK', False):
+                try:
+                    from utils.email_bridge.client import ensure_listen
+                    ensure_listen(email_str)
+                    kind = "中转+本机WS" if (
+                        getattr(cfg, 'OPENAI_CPA_BRIDGE_ENABLED', False)
+                        and getattr(cfg, 'OPENAI_CPA_LOCAL_WEBHOOK', False)
+                    ) else ("中转WS" if getattr(cfg, 'OPENAI_CPA_BRIDGE_ENABLED', False) else "本机WS")
+                    print(f"[{cfg.ts()}] [INFO] OPENAI-CPA {kind}监听已启动({receive_mode}): {mask_email(email_str)}")
+                except Exception as e:
+                    print(f"[{cfg.ts()}] [WARNING] OPENAI-CPA WS监听启动失败: {e}")
+                    if getattr(cfg, 'OPENAI_CPA_LOCAL_WEBHOOK', False):
+                        print(f"[{cfg.ts()}] [INFO] OPENAI-CPA 本机直收仍可用(webhook注入): {mask_email(email_str)}")
             print(f"[{cfg.ts()}] [INFO] 成功通过 项目专属邮箱 OPENAI-CPA 指定创建邮箱: {mask_email(email_str)}")
             return email_str, ""
         else:
-            print(f"[{cfg.ts()}] [ERROR] 项目专属邮箱 OPENAI-CPA 未填写通讯密钥，无法生成邮箱！")
+            print(f"[{cfg.ts()}] [ERROR] 项目专属邮箱 OPENAI-CPA 未配置通讯密钥/中转，无法生成邮箱！")
             return None, None
 
     if mode == "cloudmail":
@@ -1602,6 +1700,60 @@ def _create_imap_conn(proxy_str=None):
     if proxy_str:
         return ProxyIMAP4_SSL(cfg.IMAP_SERVER, cfg.IMAP_PORT, proxy_url=proxy_str, timeout=15)
     return imaplib.IMAP4_SSL(cfg.IMAP_SERVER, cfg.IMAP_PORT, timeout=15)
+
+
+def _poll_local_ms_for_oai_code_graph(ms_service, target_email: str, mailbox_dict: dict, max_attempts: int) -> str:
+    """Poll Graph directly while keeping the mailbox-abuse stop state terminal."""
+    from datetime import datetime
+
+    if mailbox_dict.get("_polling_stopped") == "abuse_mode":
+        return ""
+
+    assigned_at = float(mailbox_dict.get("assigned_at") or time.time())
+    target = str(target_email or "").lower().strip()
+    master_email = target.split("+", 1)[0] + "@" + target.split("@", 1)[1] if "+" in target and "@" in target else target
+    processed_message_ids = set()
+
+    print(f"[{cfg.ts()}] [INFO] 进入 Graph 轮询器，靶向目标: {mask_email(target)}", flush=True)
+    for attempt in range(max(0, int(max_attempts or 0))):
+        if getattr(cfg, "GLOBAL_STOP", False) or mailbox_dict.get("_polling_stopped") == "abuse_mode":
+            return ""
+        messages = ms_service.fetch_openai_messages(mailbox_dict)
+        if mailbox_dict.get("_polling_stopped") == "abuse_mode":
+            return ""
+        for message in messages or []:
+            message_id = message.get("id")
+            if message_id and message_id in processed_message_ids:
+                continue
+            raw_date = str(message.get("receivedDateTime") or "").replace("Z", "+00:00")
+            try:
+                received_at = datetime.fromisoformat(raw_date).timestamp()
+            except Exception:
+                continue
+            if received_at < assigned_at - 60:
+                continue
+            sender = str(message.get("from", {}).get("emailAddress", {}).get("address", "")).lower()
+            subject = str(message.get("subject") or "").lower()
+            if "openai.com" not in sender or not any(key in subject for key in ("code", "verify", "chatgpt", "openai")):
+                continue
+            recipients = [
+                str(item.get("emailAddress", {}).get("address", "")).lower().strip()
+                for item in message.get("toRecipients", [])
+            ]
+            body = str(message.get("body", {}).get("content", ""))
+            is_target = target in recipients or f"to: {target}" in body.lower() or target in body.lower()
+            if not is_target and master_email in recipients and time.time() - received_at < 30:
+                is_target = True
+            if is_target:
+                code = _extract_otp_code(f"{subject}\n{body}")
+                if code:
+                    print(f"[{cfg.ts()}] [SUCCESS] 成功捕获验证码: {code} -> {mask_email(target)}", flush=True)
+                    return code
+            if message_id:
+                processed_message_ids.add(message_id)
+        if attempt + 1 < max_attempts and mailbox_dict.get("_polling_stopped") != "abuse_mode":
+            time.sleep(5)
+    return ""
 
 def get_oai_code(
         email: str,
@@ -2375,25 +2527,105 @@ def get_oai_code(
                 if not found:
                     pass
             elif mode == "openai_cpa":
-                if getattr(cfg, 'OPENAI_CPA_WEBHOOK_SECRET', ""):
+                # Fast path: background WS/HTTP listener injects code_pool and signals waiters.
+                # Main loop no longer blind-sleeps 2s + full remote HTTP every tick.
+                if getattr(cfg, 'OPENAI_CPA_WEBHOOK_SECRET', "") or getattr(cfg, 'OPENAI_CPA_BRIDGE_ENABLED', False) or getattr(cfg, 'OPENAI_CPA_LOCAL_WEBHOOK', False):
+                    target_email = email.lower().strip()
+                    bridge_stopper = None
+                    code_event = None
+                    wait_started = time.time()
+                    # Only Grok uses the short OTP budget; OpenAI keeps its configured polling window.
+                    is_grok_registration = str(getattr(cfg, "REG_PROVIDER", "openai") or "openai").strip().lower() == "grok"
+                    total_timeout = 8.0 if is_grok_registration else max(90.0, float(int(max_attempts) * 2.0))
+                    http_interval = 1.0 if getattr(cfg, 'OPENAI_CPA_BRIDGE_ENABLED', False) else 0.8
+                    idle_slice = 0.35
                     try:
-                        from utils.auth_core import code_pool
-                        target_email = email.lower().strip()
-                        for attempt in range(max_attempts):
-                            if target_email in code_pool:
-                                raw_text = code_pool.get(target_email, "")
-                                current_code = _extract_otp_code(_clean_html_to_text(raw_text))
-                                if current_code and current_code != ignore_code:
-                                    code_pool.pop(target_email, None)
-                                    print(f"[{cfg.ts()}] [SUCCESS] 项目专属邮箱 OPENAI-CPA ({mask_email(target_email)}) 提取成功: {current_code}")
-                                    return current_code
-                                elif current_code == ignore_code:
-                                    pass
-                            time.sleep(2)
-                        print(f"[{cfg.ts()}] [ERROR] 超时未获取到不同于 {ignore_code} 的新验证码")
+                        try:
+                            from utils.email_bridge.client import (
+                                ensure_listen,
+                                stop_listen,
+                                arm_code_wait,
+                                clear_code_wait,
+                                wait_code_signal,
+                            )
+                            bridge_stopper = stop_listen
+                            code_event = arm_code_wait(target_email)
+                            ensure_listen(target_email, ttl_sec=max(60.0, total_timeout + 20.0))
+                        except Exception as e:
+                            bridge_stopper = None
+                            code_event = None
+                            print(f"[{cfg.ts()}] [WARNING] OPENAI-CPA 快速监听未就绪: {e}")
+
+                        last_http_at = 0.0
+                        last_log_at = 0.0
+                        loops = 0
+                        while (time.time() - wait_started) < total_timeout:
+                            if getattr(cfg, 'GLOBAL_STOP', False):
+                                return ""
+
+                            # 1) local pool only (instant if WS/webhook already injected)
+                            current_code = _consume_code_pool_code(
+                                target_email,
+                                ignore_code=ignore_code,
+                                allow_relay_fallback=False,
+                            )
+                            now = time.time()
+                            # 2) periodic remote/sqlite fallback (avoid 1s RTT every 0.35s)
+                            if not current_code and (now - last_http_at) >= http_interval:
+                                current_code = _consume_code_pool_code(
+                                    target_email,
+                                    ignore_code=ignore_code,
+                                    allow_relay_fallback=True,
+                                )
+                                last_http_at = now
+
+                            if current_code:
+                                waited = time.time() - wait_started
+                                print(
+                                    f"[{cfg.ts()}] [SUCCESS] 项目专属邮箱 OPENAI-CPA ({mask_email(target_email)}) "
+                                    f"提取成功: {current_code}，等待 {waited:.1f}s"
+                                )
+                                return current_code
+
+                            loops += 1
+                            if (now - last_log_at) >= 5.0:
+                                print(
+                                    f"[{cfg.ts()}] [INFO] OPENAI-CPA 仍在等验证码 ({mask_email(target_email)}) "
+                                    f"已等 {now - wait_started:.1f}s / {total_timeout:.0f}s"
+                                )
+                                last_log_at = now
+
+                            # Event-driven wake when inject_code_pool marks arrival.
+                            if code_event is not None:
+                                try:
+                                    wait_code_signal(target_email, code_event, idle_slice)
+                                    if code_event.is_set():
+                                        code_event.clear()
+                                except Exception:
+                                    time.sleep(idle_slice)
+                            else:
+                                time.sleep(idle_slice)
+
+                        waited = time.time() - wait_started
+                        print(
+                            f"[{cfg.ts()}] [ERROR] 超时未获取到不同于 {ignore_code} 的新验证码 "
+                            f"({mask_email(target_email)}，已等 {waited:.1f}s，轮询 {loops} 次)"
+                        )
                         return ""
                     except ImportError:
                         print(f"[{cfg.ts()}] [ERROR] 无法导入内存池！")
+                    finally:
+                        try:
+                            if code_event is not None:
+                                from utils.email_bridge.client import clear_code_wait
+                                clear_code_wait(target_email, code_event)
+                        except Exception:
+                            pass
+                        if bridge_stopper is not None:
+                            try:
+                                bridge_stopper(target_email)
+                            except Exception:
+                                pass
             elif mode == "freemail":
                 if getattr(cfg, 'FREEMAIL_LOCAL_WEBHOOK', False):
                     try:
@@ -2551,3 +2783,17 @@ def get_oai_code(
 
     print(f"\n[{cfg.ts()}] [ERROR] ({mask_email(email)})邮箱接收验证码超时")
     return ""
+
+
+
+
+
+
+
+
+
+
+
+
+
+

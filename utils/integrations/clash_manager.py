@@ -12,10 +12,9 @@ from uuid import uuid4
 import docker
 import requests
 import yaml
-from curl_cffi import requests as cffi_requests
-
 import utils.config as cfg
-from utils.clash_group_utils import resolve_group_name
+from utils.clash_group_utils import resolve_group_name, strip_group_decorations
+from utils.integrations.subscription_fetcher import fetch_subscription_text
 BASE_PATH = os.path.join(os.getcwd(), "data", "mihomo-pool")
 os.makedirs(BASE_PATH, exist_ok=True)
 
@@ -27,6 +26,85 @@ MANUAL_SUBSCRIPTION_PATH = os.path.join(BASE_PATH, "manual-subscription.txt")
 MANUAL_CONFIG_PATH = os.path.join(BASE_PATH, "manual-config.yaml")
 SINGLE_CORE_LOG_PATH = os.path.join(BASE_PATH, "mihomo-core.log")
 SINGLE_CORE_PID_PATH = os.path.join(BASE_PATH, "mihomo-core.pid")
+
+KNOWN_RUNTIME_MODES = {
+    "docker_pool",
+    "linux_single_core",
+    "windows_single_core",
+    "local_gui",
+}
+
+
+def _configured_runtime_mode() -> str:
+    """Read explicit clash_proxy_pool.runtime_mode from config when present."""
+    config_data = _read_runtime_config()
+    clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
+    mode = str(clash_conf.get("runtime_mode") or "").strip().lower()
+    return mode if mode in KNOWN_RUNTIME_MODES else ""
+
+
+def _is_proxy_group_meta(meta: dict) -> bool:
+    if not isinstance(meta, dict):
+        return False
+    if isinstance(meta.get("all"), list):
+        return True
+    gtype = str(meta.get("type") or "").strip().lower()
+    return gtype in {"selector", "url-test", "urltest", "fallback", "load-balance", "loadbalance", "relay"}
+
+
+def _collect_groups_from_runtime(proxy_map: dict | None = None) -> list[dict]:
+    """Build strategy-group list purely from live controller /proxies data."""
+    groups = []
+    source = proxy_map if isinstance(proxy_map, dict) else {}
+    for name, meta in source.items():
+        if not _is_proxy_group_meta(meta):
+            continue
+        nodes = meta.get("all") if isinstance(meta.get("all"), list) else []
+        groups.append(
+            {
+                "name": str(name),
+                "type": str(meta.get("type") or "N/A"),
+                "nodes": list(nodes),
+                "count": len(nodes),
+                "current": str(meta.get("now") or ""),
+            }
+        )
+    return groups
+
+
+def _enrich_nodes_with_providers(base_url: str, secret: str, nodes: list) -> list:
+    """Merge provider node names so provider-backed groups stay complete."""
+    merged = []
+    seen = set()
+    for node in nodes or []:
+        name = str(node or "").strip()
+        if name and name not in seen:
+            seen.add(name)
+            merged.append(name)
+    try:
+        res = requests.get(
+            f"{base_url}/providers/proxies",
+            headers=_controller_headers(secret),
+            timeout=5,
+        )
+        if res.status_code != 200:
+            return merged
+        payload = res.json() or {}
+        providers = payload.get("providers") if isinstance(payload, dict) else {}
+        if not isinstance(providers, dict):
+            return merged
+        for provider in providers.values():
+            if not isinstance(provider, dict):
+                continue
+            for item in provider.get("proxies") or []:
+                name = str(item.get("name") or "").strip() if isinstance(item, dict) else str(item or "").strip()
+                if name and name not in seen:
+                    seen.add(name)
+                    merged.append(name)
+    except Exception:
+        return merged
+    return merged
+
 
 
 def get_client():
@@ -241,6 +319,98 @@ def clear_tested_nodes(group_name: str) -> tuple[bool, str]:
         return False, str(e)
 
 
+def set_preferred_only_mode(enabled: bool) -> tuple[bool, str]:
+    try:
+        config_data = _read_runtime_config()
+        clash_conf = config_data.get("clash_proxy_pool", {})
+        clash_conf = clash_conf if isinstance(clash_conf, dict) else {}
+        clash_conf["preferred_only_mode"] = bool(enabled)
+        config_data["clash_proxy_pool"] = clash_conf
+        cfg.reload_all_configs(new_config_dict=config_data)
+        return True, "已开启仅用标优节点模式。" if enabled else "已恢复为全部候选节点模式。"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def clear_preferred_nodes(group_name: str) -> tuple[bool, str]:
+    try:
+        config_data = _read_runtime_config()
+        clash_conf = config_data.get("clash_proxy_pool", {})
+        clash_conf = clash_conf if isinstance(clash_conf, dict) else {}
+        preferred_map = clash_conf.get("preferred_nodes", {})
+        preferred_map = preferred_map if isinstance(preferred_map, dict) else {}
+        target = strip_group_decorations(group_name)
+        for key in list(preferred_map):
+            normalized = strip_group_decorations(key)
+            if key == group_name or (target and (target == normalized or target in normalized or normalized in target)):
+                preferred_map.pop(key, None)
+        clash_conf["preferred_nodes"] = preferred_map
+        config_data["clash_proxy_pool"] = clash_conf
+        cfg.reload_all_configs(new_config_dict=config_data)
+        return True, f"已清空策略组 [{group_name}] 的标优节点池。"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _is_real_proxy_node(proxy_map: dict, node_name: str) -> bool:
+    name = str(node_name or "").strip()
+    if not name or name.upper() in {"DIRECT", "REJECT", "REJECT-DROP", "PASS"}:
+        return False
+    meta = proxy_map.get(name) if isinstance(proxy_map, dict) else None
+    if not isinstance(meta, dict):
+        return True
+    proxy_type = str(meta.get("type") or "").strip().lower()
+    return proxy_type not in {"selector", "urltest", "fallback", "loadbalance", "relay", "direct", "reject"}
+
+
+def set_preferred_node(group_name: str, proxy_name: str, enabled: bool = True, target: str = "all") -> tuple[bool, str]:
+    group_name = str(group_name or "").strip()
+    proxy_name = str(proxy_name or "").strip()
+    if not group_name or not proxy_name:
+        return False, "策略组和节点名称不能为空。"
+    try:
+        proxy_map = _fetch_controller_proxies(target)
+        runtime_group = resolve_group_name(proxy_map, group_name)
+        runtime_meta = proxy_map.get(runtime_group) if runtime_group else None
+        if not isinstance(runtime_meta, dict):
+            return False, f"未找到策略组 [{group_name}]。"
+        if proxy_name not in [node for node in runtime_meta.get("all", []) if _is_real_proxy_node(proxy_map, node)]:
+            return False, f"节点 [{proxy_name}] 不属于策略组 [{runtime_group or group_name}]。"
+
+        config_data = _read_runtime_config()
+        clash_conf = config_data.get("clash_proxy_pool", {})
+        clash_conf = clash_conf if isinstance(clash_conf, dict) else {}
+        preferred_map = clash_conf.get("preferred_nodes", {})
+        preferred_map = preferred_map if isinstance(preferred_map, dict) else {}
+        canonical_group = runtime_group or group_name
+        current_nodes = preferred_map.get(canonical_group, [])
+        current_nodes = current_nodes if isinstance(current_nodes, list) else []
+        updated_nodes = [node for node in current_nodes if str(node) != proxy_name]
+        if enabled:
+            updated_nodes.append(proxy_name)
+        preferred_map[canonical_group] = list(dict.fromkeys(updated_nodes)) if updated_nodes else []
+        clash_conf["preferred_nodes"] = preferred_map
+        config_data["clash_proxy_pool"] = clash_conf
+        cfg.reload_all_configs(new_config_dict=config_data)
+        action = "加入" if enabled else "移出"
+        return True, f"已将节点 [{proxy_name}] {action}策略组 [{canonical_group}] 的标优节点池。"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def clear_evicted_nodes() -> tuple[bool, str]:
+    try:
+        config_data = _read_runtime_config()
+        clash_conf = config_data.get("clash_proxy_pool", {})
+        clash_conf = clash_conf if isinstance(clash_conf, dict) else {}
+        clash_conf["evicted_nodes"] = []
+        config_data["clash_proxy_pool"] = clash_conf
+        cfg.reload_all_configs(new_config_dict=config_data)
+        return True, "已清空拉黑节点池。"
+    except Exception as exc:
+        return False, str(exc)
+
+
 def _build_requests_proxies() -> Optional[dict]:
     proxy_url = str(getattr(cfg, "DEFAULT_PROXY", "") or "").strip()
     if not proxy_url:
@@ -406,11 +576,43 @@ def _merge_runtime_groups(config_groups: list[dict], target: str = "all") -> lis
     tested_map = clash_conf.get("tested_nodes", {})
     if not isinstance(tested_map, dict):
         tested_map = {}
+
+    proxy_map = {}
+    base_url, secret = None, ""
     try:
+        base_url, secret = _get_controller_endpoint(target)
         proxy_map = _fetch_controller_proxies(target)
     except Exception:
+        proxy_map = {}
+
+    groups = list(config_groups or [])
+    if not groups and proxy_map:
+        groups = _collect_groups_from_runtime(proxy_map)
+
+    provider_names = None
+    def _maybe_enrich(nodes: list) -> list:
+        nonlocal provider_names
+        values = [str(x or "").strip() for x in (nodes or []) if str(x or "").strip()]
+        if not base_url:
+            return values
+        # Only pull provider metadata when the group looks provider-backed
+        # (empty / only references other groups), not on every healthy full list.
+        leaf_like = [n for n in values if n not in proxy_map or not _is_proxy_group_meta(proxy_map.get(n) or {})]
+        if values and leaf_like:
+            return values
+        if provider_names is None:
+            provider_names = _enrich_nodes_with_providers(base_url, secret, [])
+        merged_nodes = []
+        seen = set()
+        for name in list(values) + list(provider_names or []):
+            if name and name not in seen:
+                seen.add(name)
+                merged_nodes.append(name)
+        return merged_nodes
+
+    if not proxy_map:
         merged = []
-        for group in config_groups:
+        for group in groups:
             item = dict(group)
             healthy_nodes = tested_map.get(str(group.get("name", "")), [])
             if isinstance(healthy_nodes, list) and healthy_nodes:
@@ -419,7 +621,8 @@ def _merge_runtime_groups(config_groups: list[dict], target: str = "all") -> lis
         return merged
 
     merged = []
-    for group in config_groups:
+    seen_names = set()
+    for group in groups:
         runtime_name = resolve_group_name(proxy_map, group.get("name", ""))
         runtime = proxy_map.get(runtime_name) if runtime_name else None
         item = dict(group)
@@ -429,16 +632,38 @@ def _merge_runtime_groups(config_groups: list[dict], target: str = "all") -> lis
         if isinstance(runtime, dict):
             nodes = runtime.get("all")
             if isinstance(nodes, list) and nodes:
-                item["nodes"] = nodes
-                item["count"] = len(nodes)
+                item["nodes"] = _maybe_enrich(list(nodes))
+                item["count"] = len(item["nodes"])
             item["current"] = str(runtime.get("now") or "")
             if runtime.get("type"):
                 item["type"] = runtime.get("type")
             if runtime_name:
                 item["runtime_name"] = runtime_name
+                seen_names.add(runtime_name)
+        elif isinstance(item.get("nodes"), list):
+            item["nodes"] = _maybe_enrich(item.get("nodes") or [])
+            item["count"] = len(item["nodes"])
+        merged.append(item)
+
+    # Ensure live groups missing from local YAML still appear (shared external core).
+    for name, meta in proxy_map.items():
+        if name in seen_names or not _is_proxy_group_meta(meta):
+            continue
+        nodes = meta.get("all") if isinstance(meta.get("all"), list) else []
+        nodes = _maybe_enrich(nodes)
+        item = {
+            "name": str(name),
+            "type": str(meta.get("type") or "N/A"),
+            "nodes": list(nodes),
+            "count": len(nodes),
+            "current": str(meta.get("now") or ""),
+            "runtime_name": str(name),
+        }
+        healthy_nodes = tested_map.get(str(name), [])
+        if isinstance(healthy_nodes, list) and healthy_nodes:
+            item["healthy_nodes"] = healthy_nodes
         merged.append(item)
     return merged
-
 
 def _apply_config_to_controller(config_path: str, target: str = "all") -> tuple[bool, str]:
     try:
@@ -483,6 +708,57 @@ def switch_proxy_group(group_name: str, proxy_name: str, target: str = "all") ->
         return False, str(e)
 
 
+def _is_nested_or_special_proxy(node_name: str, proxy_map: dict | None = None) -> bool:
+    name = str(node_name or "").strip()
+    if not name:
+        return True
+    upper = name.upper()
+    if upper in {"DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL"}:
+        return True
+    meta = (proxy_map or {}).get(name)
+    if isinstance(meta, dict):
+        if isinstance(meta.get("all"), list):
+            return True
+        ptype = str(meta.get("type") or "").strip().lower()
+        if ptype in {"direct", "reject", "rejectdrop", "pass", "compatible", "relay", "selector", "url-test", "urltest", "fallback", "load-balance", "loadbalance"}:
+            return True
+    return False
+
+
+def _fetch_group_delay_map(
+    base_url: str,
+    secret: str,
+    group_name: str,
+    delay_url: str,
+    timeout_ms: int = 6000,
+) -> dict[str, int]:
+    """Batch latency via Mihomo /group/{name}/delay.
+
+    Provider-backed nodes often 404 on /proxies/{name}/delay; group delay is the
+    reliable path used by the desktop shared-mihomo manager.
+    """
+    encoded = urllib.parse.quote(str(group_name or ""), safe="")
+    res = requests.get(
+        f"{base_url}/group/{encoded}/delay",
+        headers=_controller_headers(secret),
+        params={"timeout": int(timeout_ms), "url": delay_url},
+        timeout=max(45.0, float(timeout_ms) / 1000.0 + 30.0),
+    )
+    if res.status_code != 200:
+        raise RuntimeError(f"group delay HTTP {res.status_code}: {res.text[:160]}")
+    payload = res.json() or {}
+    if not isinstance(payload, dict):
+        return {}
+    out: dict[str, int] = {}
+    for name, value in payload.items():
+        try:
+            delay = int(value)
+        except (TypeError, ValueError):
+            delay = 0
+        out[str(name)] = delay if delay > 0 else 0
+    return out
+
+
 def test_group_latency(group_name: str, target: str = "all") -> Tuple[bool, Union[dict, str]]:
     if not group_name:
         return False, "策略组不能为空。"
@@ -498,51 +774,131 @@ def test_group_latency(group_name: str, target: str = "all") -> Tuple[bool, Unio
 
         config_data = _read_runtime_config()
         clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
-        delay_url = str(clash_conf.get("test_proxy_url") or "").strip() or "https://www.gstatic.com/generate_204"
+        # Keep empty test_proxy_url as "use default probe URL", not as mixed-port proxy.
+        raw_test_url = str(clash_conf.get("test_proxy_url") or "").strip()
+        if raw_test_url.startswith("http://") and (":789" in raw_test_url or raw_test_url.count(":") == 2):
+            # Legacy misconfig sometimes put local mixed-port here; ignore it for delay URL.
+            delay_url = "https://www.gstatic.com/generate_204"
+        elif raw_test_url.startswith("http://") or raw_test_url.startswith("https://"):
+            delay_url = raw_test_url
+        else:
+            delay_url = "https://www.gstatic.com/generate_204"
+        timeout_ms = 6000
+        try:
+            timeout_ms = max(2000, int(clash_conf.get("delay_timeout_ms") or timeout_ms))
+        except (TypeError, ValueError):
+            timeout_ms = 6000
+
         base_url, secret = _get_controller_endpoint(target)
         if not base_url:
             return False, "未找到可用的 Clash 控制接口。"
         headers = _controller_headers(secret)
 
-        def _probe(node_name: str):
+        # Candidate set: group members + provider leaves (shared-mihomo style).
+        ordered_nodes: list[str] = []
+        seen = set()
+        for node in list(nodes) + _enrich_nodes_with_providers(base_url, secret, []):
+            name = str(node or "").strip()
+            if name and name not in seen:
+                seen.add(name)
+                ordered_nodes.append(name)
+        if not ordered_nodes:
+            return False, f"策略组 [{group_name}] 没有可测速节点。"
+
+        results: dict[str, dict] = {}
+        group_delay_error = ""
+        try:
+            delay_map = _fetch_group_delay_map(
+                base_url,
+                secret,
+                runtime_name or group_name,
+                delay_url,
+                timeout_ms=timeout_ms,
+            )
+            for name, delay in delay_map.items():
+                if delay > 0:
+                    results[name] = {"status": "ok", "delay": int(delay), "via": "group"}
+                else:
+                    results[name] = {"status": "error", "message": "timeout", "via": "group"}
+        except Exception as exc:
+            group_delay_error = str(exc)
+
+        def _probe_single(node_name: str):
             encoded = urllib.parse.quote(node_name, safe="")
             try:
                 res = requests.get(
                     f"{base_url}/proxies/{encoded}/delay",
                     headers=headers,
-                    params={"timeout": 5000, "url": delay_url},
-                    timeout=8,
+                    params={"timeout": min(5000, timeout_ms), "url": delay_url},
+                    timeout=max(8.0, min(12.0, timeout_ms / 1000.0 + 3.0)),
                 )
+                if res.status_code == 404:
+                    return node_name, {"status": "error", "message": "HTTP 404 (provider 节点请用组测速)", "via": "node"}
                 if res.status_code != 200:
-                    return node_name, {"status": "error", "message": f"HTTP {res.status_code}"}
+                    return node_name, {"status": "error", "message": f"HTTP {res.status_code}", "via": "node"}
                 payload = res.json() or {}
                 delay = payload.get("delay")
                 if isinstance(delay, (int, float)) and delay > 0:
-                    return node_name, {"status": "ok", "delay": int(delay)}
-                return node_name, {"status": "error", "message": "timeout"}
+                    return node_name, {"status": "ok", "delay": int(delay), "via": "node"}
+                return node_name, {"status": "error", "message": "timeout", "via": "node"}
             except Exception as e:
-                return node_name, {"status": "error", "message": str(e)}
+                return node_name, {"status": "error", "message": str(e), "via": "node"}
 
-        results = {}
-        worker_count = max(1, min(20, len(nodes)))
-        with ThreadPoolExecutor(max_workers=worker_count) as executor:
-            futures = [executor.submit(_probe, node) for node in nodes]
-            for future in as_completed(futures):
-                node_name, result = future.result()
-                results[node_name] = result
+        # Fallback only for real top-level proxies still missing a result.
+        pending = []
+        for name in ordered_nodes:
+            if name in results:
+                continue
+            meta = proxy_map.get(name)
+            if isinstance(meta, dict) and isinstance(meta.get("all"), list):
+                results[name] = {"status": "skip", "message": "nested-group", "via": "skip"}
+                continue
+            if isinstance(meta, dict) and str(meta.get("type") or "").lower() in {"direct", "reject", "rejectdrop", "pass", "compatible"}:
+                results[name] = {"status": "skip", "message": str(meta.get("type") or "special"), "via": "skip"}
+                continue
+            if isinstance(meta, dict):
+                pending.append(name)
+            else:
+                # Provider-only node not returned by group delay this round.
+                results[name] = {
+                    "status": "error",
+                    "message": group_delay_error or "group-delay miss",
+                    "via": "group",
+                }
+
+        if pending:
+            worker_count = max(1, min(12, len(pending)))
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = [executor.submit(_probe_single, node) for node in pending]
+                for future in as_completed(futures):
+                    node_name, result = future.result()
+                    results[node_name] = result
+
+        if not results:
+            return False, group_delay_error or f"策略组 [{group_name}] 测速未返回任何结果。"
 
         healthy_nodes = [
-            node_name for node_name, result in sorted(
+            node_name
+            for node_name, result in sorted(
                 results.items(),
-                key=lambda item: item[1].get("delay", 10**9) if item[1].get("status") == "ok" else 10**9
+                key=lambda item: item[1].get("delay", 10**9) if item[1].get("status") == "ok" else 10**9,
             )
-            if result.get("status") == "ok"
+            if result.get("status") == "ok" and not _is_nested_or_special_proxy(node_name, proxy_map)
         ]
+        # Persist under both UI name and runtime name for switch/reload compatibility.
         _persist_tested_nodes(group_name, healthy_nodes)
+        if runtime_name and runtime_name != group_name:
+            _persist_tested_nodes(runtime_name, healthy_nodes)
 
+        ok_count = sum(1 for item in results.values() if item.get("status") == "ok")
         return True, {
             "group_name": runtime_name or group_name,
             "test_url": delay_url,
+            "method": "group_delay" if not group_delay_error else "node_fallback",
+            "group_delay_error": group_delay_error,
+            "total": len(ordered_nodes),
+            "ok_count": ok_count,
+            "healthy_count": len(healthy_nodes),
             "results": results,
             "healthy_nodes": healthy_nodes,
         }
@@ -556,6 +912,8 @@ def control_runtime(action: str) -> tuple[bool, str]:
     if action not in {"start", "stop", "restart"}:
         return False, "不支持的运行操作。"
 
+    if mode == "windows_single_core":
+        return False, "当前为 Windows 外部单核（共享代理）模式：请用桌面「mihomo共享代理」启停核心；本项目只读控制器、切换节点与测速，不会启动/停止/杀掉外部进程。"
     if mode == "local_gui":
         return False, "当前为本地 GUI 模式，请直接在本机 Clash/Mihomo 客户端中操作。"
 
@@ -651,7 +1009,57 @@ def _build_single_core_status() -> dict:
     }
 
 
+def _build_windows_single_core_status() -> dict:
+    config_data = _read_runtime_config()
+    clash_conf = config_data.get("clash_proxy_pool", {}) if isinstance(config_data.get("clash_proxy_pool"), dict) else {}
+    proxy_url = str(config_data.get("default_proxy") or "").strip()
+    api_url = str(clash_conf.get("api_url") or "").strip()
+    secret = str(clash_conf.get("secret") or "").strip()
+    running = _probe_local_ports(
+        _extract_port_from_url(api_url, 9097),
+        _extract_port_from_url(proxy_url, 7897),
+        secret,
+    )
+    # Always prefer live controller groups for external shared core.
+    # Local manual-config.yaml may be stale leftover from GUI/server modes.
+    groups = _merge_runtime_groups([])
+    return {
+        "mode": "windows_single_core",
+        "subscriptions": get_subscription_state(),
+        "instances": [
+            {
+                "name": "shared-mihomo",
+                "status": "running" if running else "external-offline",
+                "ports": f"{proxy_url or '-'} / {api_url or '-'}",
+            }
+        ],
+        "groups": groups,
+        "message": (
+            "当前为 Windows 外部单核（共享代理）模式：对接桌面 mihomo 共享代理控制器，"
+            "可切换节点/测速/读状态，但不会改写其配置，也不会启动、停止或杀掉外部进程。"
+            + (" 已检测到共享 Mihomo 正在运行。" if running else " 暂未检测到共享 Mihomo 控制口或代理口，请先启动桌面共享代理。")
+        ),
+    }
+
+
 def _detect_runtime_mode(client) -> str:
+    """Resolve Clash/Mihomo runtime mode.
+
+    Priority:
+    1) explicit clash_proxy_pool.runtime_mode
+    2) auto: docker_pool / linux_single_core / local_gui
+
+    Local Windows supports both:
+    - windows_single_core: external shared mihomo (desktop project)
+    - local_gui: Clash Verge / other GUI client
+    Server modes remain:
+    - linux_single_core
+    - docker_pool
+    """
+    configured = _configured_runtime_mode()
+    if configured in KNOWN_RUNTIME_MODES:
+        return configured
+
     if client:
         return "docker_pool"
     if os.name != "nt" and shutil.which("mihomo"):
@@ -742,6 +1150,8 @@ def _start_single_core() -> tuple[bool, str]:
 def get_pool_status():
     client = get_client()
     mode = _detect_runtime_mode(client)
+    if mode == "windows_single_core":
+        return _build_windows_single_core_status()
     if mode == "local_gui":
         return _build_local_gui_status()
     if mode == "linux_single_core":
@@ -766,6 +1176,8 @@ def get_pool_status():
 def deploy_clash_pool(count):
     client = get_client()
     mode = _detect_runtime_mode(client)
+    if mode == "windows_single_core":
+        return False, "当前为 Windows 外部单核（共享代理）模式，无需同步 Docker 实例；订阅与核心由桌面共享代理维护。"
     if mode == "local_gui":
         return False, "当前未检测到 Docker。本地 Windows GUI 模式无需同步实例，请直接在本机 Clash/Mihomo 中导入订阅。"
     if mode == "linux_single_core":
@@ -814,32 +1226,11 @@ def patch_and_update(url, target, subscription_id: str = ""):
         parsed = urllib.parse.urlparse(normalized_url)
         if parsed.scheme not in {"http", "https"}:
             return False, "订阅链接不是完整的 http/https URL，无法在服务器端直接拉取。"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        }
-        request_kwargs = {"headers": headers, "timeout": 30, "impersonate": "chrome136"}
         proxies = _build_requests_proxies()
-        if proxies:
-            request_kwargs["proxies"] = proxies
-        fallback_kwargs = dict(request_kwargs)
-        fallback_kwargs.pop("proxies", None)
-        try:
-            r = cffi_requests.get(normalized_url, **request_kwargs)
-        except Exception as proxy_error:
-            if not proxies:
-                raise
-            try:
-                r = cffi_requests.get(normalized_url, **fallback_kwargs)
-            except Exception:
-                raise proxy_error
-        if proxies and r.status_code >= 400:
-            direct_resp = cffi_requests.get(normalized_url, **fallback_kwargs)
-            if direct_resp.status_code < r.status_code:
-                r = direct_resp
-        if r.status_code >= 400:
-            return False, f"订阅拉取失败：HTTP {r.status_code}，目标站点拒绝了服务器请求。"
-        raw_text = str(r.text or "")
+        fetch_result = fetch_subscription_text(normalized_url, proxies=proxies)
+        if not fetch_result.ok:
+            return False, fetch_result.message
+        raw_text = fetch_result.text
         _persist_sub_url(normalized_url, subscription_id)
         os.makedirs(BASE_PATH, exist_ok=True)
         with open(MANUAL_SUBSCRIPTION_PATH, "w", encoding="utf-8") as f:
@@ -847,9 +1238,24 @@ def patch_and_update(url, target, subscription_id: str = ""):
 
         raw_yaml = yaml.safe_load(raw_text)
         if not isinstance(raw_yaml, dict):
+            if mode == "windows_single_core":
+                return True, "订阅链接已保存。当前为 Windows 外部单核（共享代理）模式，非 YAML 订阅请在共享代理控制台导入/更新。"
             if mode == "local_gui":
                 return True, "订阅链接已保存，但内容不是 YAML。当前为本地 GUI 模式，请让 GUI 自己导入该订阅链接。"
             return False, "订阅内容不是 Clash/Mihomo YAML，无法直接下发到核心。请使用 YAML 订阅链接。"
+
+        if mode == "windows_single_core":
+            # Keep a local copy for reference only; never force-load into the external shared core.
+            try:
+                with open(MANUAL_CONFIG_PATH, "w", encoding="utf-8") as f:
+                    yaml.dump(raw_yaml, f, allow_unicode=True, sort_keys=False)
+            except Exception:
+                pass
+            return True, (
+                "订阅内容已保存到本项目参考文件，但当前为 Windows 外部单核（共享代理）模式："
+                "不会改写/热更新/重启桌面共享 Mihomo。请在共享代理控制台更新订阅；"
+                "本面板继续用于节点切换、测速与状态读取。"
+            )
 
         if mode == "local_gui":
             _write_single_core_config(raw_yaml)

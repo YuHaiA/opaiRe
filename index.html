@@ -1883,6 +1883,38 @@
                                             <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 inline text-rose-500 align-text-bottom" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 3L4 14h6l-1 7 9-11h-6l1-7z"></path></svg> 注意：请务必确保上方填写的密钥与 CF Worker 变量中的 <code>EMAIL_WEBHOOK_SECRET</code> 严格一致！非公网域名环境访问面板请不要使用该邮箱
                                         </p>
 
+                                        <div class="mt-4 p-4 rounded-xl border border-sky-200 bg-sky-50/70 space-y-3">
+                                            <div>
+                                                <label class="block text-xs font-extrabold text-slate-700 mb-1.5">收码路径 receive_mode</label>
+                                                <select v-model="config.openai_cpa.receive_mode" @change="syncOpenaiCpaReceiveMode()" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-3 focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 shadow-sm text-sm font-bold">
+                                                    <option value="remote_bridge">服务器中转反拉 (remote_bridge)</option>
+                                                    <option value="local_webhook">本机直收 / CF Tunnel (local_webhook)</option>
+                                                    <option value="dual">双通道：本机直收 + 服务器备份 (dual)</option>
+                                                </select>
+                                            </div>
+                                            <p class="text-[11px] text-slate-500 leading-relaxed">
+                                                <span v-if="config.openai_cpa.receive_mode === 'remote_bridge'">CF Worker 推到<strong>公网服务器</strong>，本机 WS/HTTP 反拉写入 code_pool。本机无需公网/隧道。</span>
+                                                <span v-else-if="config.openai_cpa.receive_mode === 'local_webhook'">CF Worker 直推本机 <code class="bg-white px-1 rounded border">/api/webhook/email</code>（可用 CF Tunnel 内网穿透）。少一层服务器中转。</span>
+                                                <span v-else>本机 webhook 直收优先，同时保留服务器中转反拉作备份。Worker 通常仍指向本机隧道；服务器桥可作备用入口。</span>
+                                            </p>
+                                            <div v-show="['remote_bridge', 'dual'].includes(config.openai_cpa.receive_mode)" class="space-y-3 pt-1">
+                                                <div>
+                                                    <label class="block text-xs font-extrabold text-slate-600 mb-1">中转服务器地址 bridge_base_url</label>
+                                                    <input type="text" v-model="config.openai_cpa.bridge_base_url" placeholder="https://tupai.cyou" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-3 focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 shadow-sm font-mono text-sm">
+                                                </div>
+                                                <div>
+                                                    <label class="block text-xs font-extrabold text-slate-600 mb-1">中转密钥 bridge_token（可空，默认复用 webhook_secret）</label>
+                                                    <input type="password" v-model="config.openai_cpa.bridge_token" placeholder="默认与 EMAIL_WEBHOOK_SECRET 相同" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-3 focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 shadow-sm font-mono text-sm">
+                                                </div>
+                                                <p class="text-[11px] text-sky-800 bg-white/70 border border-sky-100 rounded-lg p-2">服务器侧 Worker / 备用入口可填：<code class="font-mono">https://你的服务器域名/api/webhook/email</code></p>
+                                            </div>
+                                            <div v-show="['local_webhook', 'dual'].includes(config.openai_cpa.receive_mode)" class="text-[11px] text-emerald-800 bg-white/70 border border-emerald-100 rounded-lg p-2 leading-relaxed">
+                                                本机直收：保持面板在线；CF Worker 的 <code class="font-mono">EMAIL_WEBHOOK_URL</code> 指向本机可公网访问地址（推荐 Cloudflare Tunnel）。密钥仍用上方 <code>EMAIL_WEBHOOK_SECRET</code>。
+                                            </div>
+                                        </div>
+
+
+                                        
                                         <div class="mt-6 pt-5 border-t border-indigo-200/50">
                                         <h5 class="text-sm font-black text-indigo-700 uppercase tracking-wider mb-4 flex items-center gap-2">
                                             <span><svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="4" rx="1.5" stroke-width="2"></rect><rect x="6" y="14" width="5" height="4" rx="1.2" stroke-width="2"></rect><rect x="13" y="14" width="5" height="4" rx="1.2" stroke-width="2"></rect><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.5 10v4"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.5 10v4"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.5 12h7"></path></svg></span> 内存池专属流水线 (依赖上方全局配置)
@@ -3173,6 +3205,16 @@
                                             支持 `http://...`、`https://...`、`socks5://...`、`socks5h://...`；未写协议时默认按 `socks5h://` 解析
                                         </p>
                                         <textarea v-model="rawProxyListStr" class="w-full appearance-none bg-white border border-cyan-200 text-cyan-900 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-colors shadow-inner h-[160px] font-mono text-xs leading-relaxed placeholder:text-cyan-300" placeholder="http://user:pass@1.2.3.4:8080&#10;socks5://user:pass@1.2.3.5:1080&#10;1.2.3.6:1080:user:pass"></textarea>
+                                        <div class="flex flex-wrap items-center gap-2 mt-3">
+                                            <button @click="testRawProxyPool" :disabled="rawProxyProbe.loading" class="px-4 py-2 rounded-lg bg-cyan-600 text-white text-xs font-black disabled:opacity-50">{{ rawProxyProbe.loading ? '测活中...' : '抽样测活' }}</button>
+                                            <button @click="setRawProxySuccessPoolFromProbe" class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-black">设为成功池</button>
+                                            <button @click="clearRawProxySuccessPool" class="px-4 py-2 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 text-xs font-black">清空成功池</button>
+                                            <label class="inline-flex items-center gap-2 text-xs font-bold text-cyan-800">
+                                                <input type="checkbox" v-model="config.raw_proxy_pool.success_pool_enabled" @change="validateRawProxySuccessPoolToggle">
+                                                注册只使用成功池（{{ rawProxySuccessPoolCount() }} 条）
+                                            </label>
+                                        </div>
+                                        <p v-if="rawProxyProbe.data" class="text-xs text-cyan-700 mt-2">测活结果：{{ rawProxyProbe.data.ok_count || 0 }}/{{ rawProxyProbe.data.sampled_count || 0 }} 可用</p>
                                     </div>
                                 </div>
                             </div>
@@ -3201,7 +3243,19 @@
                                                 <span class="ml-3 text-sm block tracking-wide">延迟优选</span>
                                             </label>
                                         </div>
-                                        <div>
+                                                                                    <div>
+                                                <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">本机运行模式 runtime_mode</label>
+                                                <select v-model="config.clash_proxy_pool.runtime_mode" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors shadow-sm text-sm">
+                                                    <option value="">自动识别</option>
+                                                    <option value="windows_single_core">Windows 共享单核（桌面 mihomo 共享代理）</option>
+                                                    <option value="local_gui">本地 GUI（Clash Verge 等）</option>
+                                                    <option value="linux_single_core">Linux 单核心（服务器）</option>
+                                                    <option value="docker_pool">Docker 集群（服务器）</option>
+                                                </select>
+                                                <p class="mt-1.5 text-[11px] text-slate-400 leading-relaxed">本地可在「共享代理」与「GUI 客户端」间切换；服务器请用 linux_single_core / docker_pool，不会被本地模式去掉。</p>
+                                            </div>
+
+<div>
                                             <label class="block text-slate-700 text-xs font-extrabold mb-2 uppercase tracking-wider">控制台 API 地址</label>
                                             <div class="relative">
                                                 <input v-if="!showPwd.clash_api" readonly :value="maskValue(config.clash_proxy_pool.api_url)"
@@ -3274,6 +3328,7 @@
                                                 {{
                                                     clashPool.mode === 'docker_pool' ? 'Docker 集群' :
                                                     clashPool.mode === 'linux_single_core' ? 'Linux 单核心' :
+                                                    clashPool.mode === 'windows_single_core' ? 'Windows 共享单核' :
                                                     clashPool.mode === 'local_gui' ? '本地 GUI' : '未知模式'
                                                 }}
                                             </span>
@@ -3285,15 +3340,15 @@
                                     </div>
                                     <div class="flex flex-wrap items-center gap-2.5 w-full sm:w-auto sm:justify-end">
                                         <div class="inline-flex items-center gap-2 rounded-2xl bg-white/80 border border-slate-200 px-2.5 py-2 shadow-sm backdrop-blur-sm">
-                                            <button @click="handleClashRuntime('start')" :disabled="clashPool.runtimeActionLoading" class="h-10 px-4 rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 active:scale-95 transition-all shadow-sm shadow-emerald-500/20 font-black text-sm inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed">
+                                            <button @click="handleClashRuntime('start')" :disabled="clashPool.runtimeActionLoading || clashPool.mode === 'local_gui' || clashPool.mode === 'windows_single_core'" class="h-10 px-4 rounded-xl bg-emerald-500 text-white hover:bg-emerald-600 active:scale-95 transition-all shadow-sm shadow-emerald-500/20 font-black text-sm inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed">
                                                 <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-5.197-3.03A1 1 0 008 9.03v6.94a1 1 0 001.555.832l5.197-3.03a1 1 0 000-1.664z"></path></svg>
                                                 启动
                                             </button>
-                                            <button @click="handleClashRuntime('restart')" :disabled="clashPool.runtimeActionLoading" class="h-10 px-4 rounded-xl bg-amber-400 text-amber-950 hover:bg-amber-500 active:scale-95 transition-all shadow-sm shadow-amber-500/20 font-black text-sm inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed">
+                                            <button @click="handleClashRuntime('restart')" :disabled="clashPool.runtimeActionLoading || clashPool.mode === 'local_gui' || clashPool.mode === 'windows_single_core'" class="h-10 px-4 rounded-xl bg-amber-400 text-amber-950 hover:bg-amber-500 active:scale-95 transition-all shadow-sm shadow-amber-500/20 font-black text-sm inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed">
                                                 <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h5"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 20v-5h-5"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.64 19A9 9 0 0019 18.36L20 15"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.36 5A9 9 0 005 5.64L4 9"></path></svg>
                                                 重启
                                             </button>
-                                            <button @click="handleClashRuntime('stop')" :disabled="clashPool.runtimeActionLoading" class="h-10 px-4 rounded-xl bg-rose-500 text-white hover:bg-rose-600 active:scale-95 transition-all shadow-sm shadow-rose-500/20 font-black text-sm inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed">
+                                            <button @click="handleClashRuntime('stop')" :disabled="clashPool.runtimeActionLoading || clashPool.mode === 'local_gui' || clashPool.mode === 'windows_single_core'" class="h-10 px-4 rounded-xl bg-rose-500 text-white hover:bg-rose-600 active:scale-95 transition-all shadow-sm shadow-rose-500/20 font-black text-sm inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed">
                                                 <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="8" y="8" width="8" height="8" rx="1" stroke-width="2"></rect></svg>
                                                 停止
                                             </button>

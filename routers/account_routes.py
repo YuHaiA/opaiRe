@@ -10,6 +10,7 @@ from curl_cffi import requests as cffi_requests
 from global_state import verify_token
 from utils import core_engine, db_manager
 import utils.config as cfg
+from utils.integrations.account_export import build_cpa_export_records
 from utils.integrations.sub2api_client import Sub2APIClient, build_sub2api_export_bundle, get_sub2api_push_settings
 from utils.integrations.image2api_client import Image2APIClient
 from utils.auth_core import email_jwt
@@ -142,7 +143,16 @@ async def get_image_accounts(
 async def export_selected_accounts(req: ExportReq, token: str = Depends(verify_token)):
     if not req.emails: return {"status": "error", "message": "未收到任何要导出的账号"}
     tokens = db_manager.get_tokens_by_emails(req.emails)
-    return {"status": "success", "data": tokens} if tokens else {"status": "error", "message": "未能提取到选中账号的有效 Token"}
+    if not tokens:
+        return {"status": "error", "message": "未能提取到选中账号的有效 Token"}
+    records, skipped = build_cpa_export_records(tokens)
+    if not records:
+        return {"status": "error", "message": "选中账号没有可导出到 CPA 的 OpenAI/Grok 凭证"}
+    return {
+        "status": "success",
+        "data": records,
+        "meta": {"exported": len(records), "skipped": len(skipped)},
+    }
 
 
 @router.post("/api/accounts/delete")
@@ -498,7 +508,7 @@ def process_cloud_action(req: CloudActionReq, token: str = Depends(verify_token)
     from curl_cffi import requests
     from concurrent.futures import ThreadPoolExecutor
 
-    success_count, fail_count, updated_details_map = 0, 0, {}
+    success_count, fail_count, preserved_count, updated_details_map = 0, 0, 0, {}
     sub2api_client = Sub2APIClient(api_url=cfg.SUB2API_URL, api_key=cfg.SUB2API_KEY) if getattr(cfg, 'SUB2API_URL',None) and getattr(cfg,'SUB2API_KEY',None) else None
 
     cpa_files_map = {}
@@ -531,7 +541,7 @@ def process_cloud_action(req: CloudActionReq, token: str = Depends(verify_token)
         return None
 
     def _worker(acc: CloudAccountItem):
-        is_success, details = False, None
+        is_success, details, preserved_enabled = False, None, False
         try:
             if acc.type == "sub2api" and sub2api_client:
                 if req.action == "check":
@@ -555,14 +565,22 @@ def process_cloud_action(req: CloudActionReq, token: str = Depends(verify_token)
                         item, cfg.CPA_API_URL, cfg.CPA_API_TOKEN
                     )
                     if core_engine._is_xai_like_token(item):
+                        failure_class = str(item.get("_cpa_failure_class") or "")
+                        preserved_enabled = (
+                            not is_success
+                            and core_engine.should_preserve_enabled_state(failure_class)
+                        )
                         details = {
                             "platform": "xai",
                             "type": item.get("type") or item.get("provider") or "xai",
                             "check_msg": check_msg,
+                            "upstream_status": item.get("_cpa_status_code") or 0,
+                            "failure_class": failure_class,
+                            "preserved_enabled": preserved_enabled,
                         }
                     elif "_raw_usage" in item:
                         details = parse_cpa_usage_to_details(item["_raw_usage"])
-                    if not is_success:
+                    if not is_success and not preserved_enabled:
                         core_engine.set_cpa_auth_file_status(
                             cfg.CPA_API_URL, cfg.CPA_API_TOKEN, acc.id, disabled=True
                         )
@@ -593,7 +611,7 @@ def process_cloud_action(req: CloudActionReq, token: str = Depends(verify_token)
                     pass
         except:
             pass
-        return (is_success, acc.id, details)
+        return (is_success, acc.id, details, preserved_enabled)
 
     target_threads = 5
     if any(a.type == "cpa" for a in req.accounts): target_threads = max(target_threads, int(
@@ -611,15 +629,24 @@ def process_cloud_action(req: CloudActionReq, token: str = Depends(verify_token)
                 time.sleep(0.5)
 
         for future in futures:
-            is_success, acc_id, details = future.result()
+            is_success, acc_id, details, preserved_enabled = future.result()
             if is_success:
                 success_count += 1
             else:
                 fail_count += 1
+            if preserved_enabled:
+                preserved_count += 1
             if details:
                 updated_details_map[acc_id] = details
 
-    msg = f"测活完毕 | 存活: {success_count} 个 | 失效并已自动禁用: {fail_count} 个" if req.action == "check" else f"指令已下发 | 成功: {success_count} 个 | 失败: {fail_count} 个"
+    if req.action == "check":
+        disabled_count = max(0, fail_count - preserved_count)
+        msg = (
+            f"测活完毕 | 存活: {success_count} 个 | 已禁用: {disabled_count} 个"
+            f" | 代理/上游异常并保留启用: {preserved_count} 个"
+        )
+    else:
+        msg = f"指令已下发 | 成功: {success_count} 个 | 失败: {fail_count} 个"
 
     return {"status": "success" if fail_count == 0 else "warning", "message": msg,
             "updated_details": updated_details_map}

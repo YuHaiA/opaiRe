@@ -1,0 +1,22 @@
+syncOpenaiCpaReceiveMode() {
+            if (!this.config.openai_cpa || typeof this.config.openai_cpa !== 'object') {
+                this.config.openai_cpa = {};
+            }
+            const modeMap = {
+                remote: 'remote_bridge',
+                remote_bridge: 'remote_bridge',
+                bridge: 'remote_bridge',
+                server: 'remote_bridge',
+                local: 'local_webhook',
+                local_webhook: 'local_webhook',
+                tunnel: 'local_webhook',
+                dual: 'dual',
+                both: 'dual',
+                all: 'dual'
+            };
+            const raw = String(this.config.openai_cpa.receive_mode || '').trim().toLowerCase().replace(/-/g, '_');
+            const mode = modeMap[raw] || (this.config.openai_cpa.bridge_enabled ? 'remote_bridge' : 'local_webhook');
+            this.config.openai_cpa.receive_mode = mode;
+            // Keep legacy bridge_enabled in sync for older readers / backend fallback.
+            this.config.openai_cpa.bridge_enabled = ['remote_bridge', 'dual'].includes(mode);
+        }

@@ -1,0 +1,32 @@
+<div class="mt-4 p-4 rounded-xl border border-sky-200 bg-sky-50/70 space-y-3">
+                                            <div>
+                                                <label class="block text-xs font-extrabold text-slate-700 mb-1.5">收码路径 receive_mode</label>
+                                                <select v-model="config.openai_cpa.receive_mode" @change="syncOpenaiCpaReceiveMode()" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-3 focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 shadow-sm text-sm font-bold">
+                                                    <option value="remote_bridge">服务器中转反拉 (remote_bridge)</option>
+                                                    <option value="local_webhook">本机直收 / CF Tunnel (local_webhook)</option>
+                                                    <option value="dual">双通道：本机直收 + 服务器备份 (dual)</option>
+                                                </select>
+                                            </div>
+                                            <p class="text-[11px] text-slate-500 leading-relaxed">
+                                                <span v-if="config.openai_cpa.receive_mode === 'remote_bridge'">CF Worker 推到<strong>公网服务器</strong>，本机 WS/HTTP 反拉写入 code_pool。本机无需公网/隧道。</span>
+                                                <span v-else-if="config.openai_cpa.receive_mode === 'local_webhook'">CF Worker 直推本机 <code class="bg-white px-1 rounded border">/api/webhook/email</code>（可用 CF Tunnel 内网穿透）。少一层服务器中转。</span>
+                                                <span v-else>本机 webhook 直收优先，同时保留服务器中转反拉作备份。Worker 通常仍指向本机隧道；服务器桥可作备用入口。</span>
+                                            </p>
+                                            <div v-show="['remote_bridge', 'dual'].includes(config.openai_cpa.receive_mode)" class="space-y-3 pt-1">
+                                                <div>
+                                                    <label class="block text-xs font-extrabold text-slate-600 mb-1">中转服务器地址 bridge_base_url</label>
+                                                    <input type="text" v-model="config.openai_cpa.bridge_base_url" placeholder="https://tupai.cyou" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-3 focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 shadow-sm font-mono text-sm">
+                                                </div>
+                                                <div>
+                                                    <label class="block text-xs font-extrabold text-slate-600 mb-1">中转密钥 bridge_token（可空，默认复用 webhook_secret）</label>
+                                                    <input type="password" v-model="config.openai_cpa.bridge_token" placeholder="默认与 EMAIL_WEBHOOK_SECRET 相同" class="w-full appearance-none bg-white border border-slate-200 text-slate-700 rounded-lg py-2.5 px-3 focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 shadow-sm font-mono text-sm">
+                                                </div>
+                                                <p class="text-[11px] text-sky-800 bg-white/70 border border-sky-100 rounded-lg p-2">服务器侧 Worker / 备用入口可填：<code class="font-mono">https://你的服务器域名/api/webhook/email</code></p>
+                                            </div>
+                                            <div v-show="['local_webhook', 'dual'].includes(config.openai_cpa.receive_mode)" class="text-[11px] text-emerald-800 bg-white/70 border border-emerald-100 rounded-lg p-2 leading-relaxed">
+                                                本机直收：保持面板在线；CF Worker 的 <code class="font-mono">EMAIL_WEBHOOK_URL</code> 指向本机可公网访问地址（推荐 Cloudflare Tunnel）。密钥仍用上方 <code>EMAIL_WEBHOOK_SECRET</code>。
+                                            </div>
+                                        </div>
+
+
+                                        

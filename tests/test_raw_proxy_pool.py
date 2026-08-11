@@ -13,6 +13,9 @@ class RawProxyPoolTests(unittest.TestCase):
         self._original_unfinished_tasks = cfg.PROXY_QUEUE.unfinished_tasks
         self._original_queue_generation = cfg.PROXY_QUEUE_GENERATION
         self._original_raw_enable = getattr(cfg, "_raw_proxy_enable", False)
+        self._original_raw_success_pool_enabled = getattr(cfg, "_raw_proxy_success_pool_enabled", False)
+        self._original_raw_source_list = list(getattr(cfg, "RAW_PROXY_SOURCE_LIST", []))
+        self._original_raw_success_list = list(getattr(cfg, "RAW_PROXY_SUCCESS_LIST", []))
         self._original_raw_list = list(getattr(cfg, "RAW_PROXY_LIST", []))
         self._original_clash_enable = cfg._clash_enable
         self._original_clash_pool_mode = cfg._clash_pool_mode
@@ -24,6 +27,9 @@ class RawProxyPoolTests(unittest.TestCase):
 
     def tearDown(self):
         cfg._raw_proxy_enable = self._original_raw_enable
+        cfg._raw_proxy_success_pool_enabled = self._original_raw_success_pool_enabled
+        cfg.RAW_PROXY_SOURCE_LIST = self._original_raw_source_list
+        cfg.RAW_PROXY_SUCCESS_LIST = self._original_raw_success_list
         cfg.RAW_PROXY_LIST = self._original_raw_list
         cfg._clash_enable = self._original_clash_enable
         cfg._clash_pool_mode = self._original_clash_pool_mode
@@ -135,6 +141,70 @@ class RawProxyPoolTests(unittest.TestCase):
             ],
             self._queue_values(),
         )
+
+    def test_reload_all_configs_uses_only_success_pool_when_enabled(self):
+        fake_config = {
+            "default_proxy": "http://default:8000",
+            "raw_proxy_pool": {
+                "enable": True,
+                "success_pool_enabled": True,
+                "proxy_list": [
+                    "http://user:pass@127.0.0.1:8080",
+                    "http://user:pass@127.0.0.2:8080",
+                ],
+                "success_proxy_list": [
+                    "socks5://good:pwd@127.0.0.9:1080",
+                ],
+            },
+        }
+
+        with patch("utils.config.init_config", return_value=fake_config), patch(
+            "utils.config.reload_proxy_config"
+        ):
+            cfg.reload_all_configs()
+
+        self.assertTrue(cfg.is_raw_proxy_pool_enabled())
+        self.assertTrue(cfg.is_raw_proxy_success_pool_enabled())
+        self.assertEqual(
+            [
+                "http://user:pass@127.0.0.1:8080",
+                "http://user:pass@127.0.0.2:8080",
+            ],
+            cfg.RAW_PROXY_SOURCE_LIST,
+        )
+        self.assertEqual(
+            ["socks5h://good:pwd@127.0.0.9:1080"],
+            cfg.RAW_PROXY_SUCCESS_LIST,
+        )
+        self.assertEqual(
+            ["socks5h://good:pwd@127.0.0.9:1080"],
+            self._queue_values(),
+        )
+
+    def test_empty_success_pool_does_not_fall_back_to_untested_source_list(self):
+        fake_config = {
+            "default_proxy": "http://default:8000",
+            "raw_proxy_pool": {
+                "enable": True,
+                "success_pool_enabled": True,
+                "proxy_list": ["http://user:pass@127.0.0.1:8080"],
+                "success_proxy_list": [],
+            },
+        }
+
+        with patch("utils.config.init_config", return_value=fake_config), patch(
+            "utils.config.reload_proxy_config"
+        ):
+            cfg.reload_all_configs()
+
+        self.assertFalse(cfg.is_raw_proxy_pool_enabled())
+        self.assertFalse(cfg.is_raw_proxy_success_pool_enabled())
+        self.assertEqual(
+            ["http://user:pass@127.0.0.1:8080"],
+            cfg.RAW_PROXY_SOURCE_LIST,
+        )
+        self.assertEqual([], cfg.RAW_PROXY_LIST)
+        self.assertEqual(["http://default:8000"], self._queue_values())
 
     def test_pooled_proxy_slot_drops_stale_proxy_after_reload(self):
         old_config = {

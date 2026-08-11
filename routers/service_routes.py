@@ -30,6 +30,9 @@ class ClashRuntimeReq(BaseModel): action: str
 class ClashSwitchReq(BaseModel): group_name: str; proxy_name: str; target: str = "all"
 class ClashDelayReq(BaseModel): group_name: str; target: str = "all"
 class ClashTestedNodesClearReq(BaseModel): group_name: str
+class ClashPreferredNodesClearReq(BaseModel): group_name: str
+class ClashPreferredNodeReq(BaseModel): group_name: str; proxy_name: str; enabled: bool = True; target: str = "all"
+class ClashPreferredModeReq(BaseModel): enabled: bool
 class ClashSubscriptionAddReq(BaseModel): name: str = ""; url: str; make_selected: bool = False
 class ClashSubscriptionSelectReq(BaseModel): subscription_id: str; target: str = "all"; resolved_url: str = ""
 class ClashSubscriptionDeleteReq(BaseModel): subscription_id: str
@@ -39,6 +42,20 @@ class GmailCredentialsReq(BaseModel):content: str
 class CFDeployWorkerReq(BaseModel):api_email: str; api_key: str; worker_name: str; webhook_url: str; webhook_secret: str
 class CFZoneBaseReq(BaseModel):domains: str; api_email: str; api_key: str
 class CFSetupRoutingReq(CFZoneBaseReq):worker_name: str
+
+
+async def _cloudflare_request_with_retry(client: httpx.AsyncClient, method: str, url: str, **kwargs):
+    """Retry transient Cloudflare disconnects without hiding the final error."""
+    last_error = None
+    for attempt in range(3):
+        try:
+            return await client.request(method, url, **kwargs)
+        except httpx.RequestError as exc:
+            last_error = exc
+            if attempt >= 2:
+                raise
+            await asyncio.sleep(0.8 * (attempt + 1))
+    raise last_error
 
 
 @router.post("/api/config/add_wildcard_dns")
@@ -281,13 +298,49 @@ async def post_clash_switch(req: ClashSwitchReq, token: str = Depends(verify_tok
 async def post_clash_delay(req: ClashDelayReq, token: str = Depends(verify_token)):
     success, result = clash_manager.test_group_latency(req.group_name, req.target)
     if success:
-        healthy_count = len(result.get("healthy_nodes", [])) if isinstance(result, dict) else 0
-        return {"status": "success", "data": result, "message": f"已完成策略组 [{req.group_name}] 节点延迟测试，并自动保存 {healthy_count} 个有效节点"}
+        healthy_count = 0
+        total = 0
+        method = ""
+        if isinstance(result, dict):
+            healthy_count = int(result.get("healthy_count") or len(result.get("healthy_nodes") or []))
+            total = int(result.get("total") or len(result.get("results") or {}))
+            method = str(result.get("method") or "")
+        via = "（组测速）" if method == "group_delay" else ("（节点回退）" if method else "")
+        scope = f"{healthy_count}/{total}" if total else str(healthy_count)
+        return {
+            "status": "success",
+            "data": result,
+            "message": f"已完成策略组 [{req.group_name}] 延迟测试{via}，有效节点 {scope}",
+        }
     return {"status": "error", "message": str(result)}
 
 @router.post("/api/clash/tested_nodes/clear")
 async def post_clash_tested_nodes_clear(req: ClashTestedNodesClearReq, token: str = Depends(verify_token)):
     success, msg = clash_manager.clear_tested_nodes(req.group_name)
+    return {"status": "success" if success else "error", "message": msg}
+
+
+@router.post("/api/clash/preferred_nodes/clear")
+async def post_clash_preferred_nodes_clear(req: ClashPreferredNodesClearReq, token: str = Depends(verify_token)):
+    success, msg = clash_manager.clear_preferred_nodes(req.group_name)
+    return {"status": "success" if success else "error", "message": msg}
+
+
+@router.post("/api/clash/preferred_node")
+async def post_clash_preferred_node(req: ClashPreferredNodeReq, token: str = Depends(verify_token)):
+    success, msg = clash_manager.set_preferred_node(req.group_name, req.proxy_name, req.enabled, req.target)
+    return {"status": "success" if success else "error", "message": msg}
+
+
+@router.post("/api/clash/evicted_nodes/clear")
+async def post_clash_evicted_nodes_clear(token: str = Depends(verify_token)):
+    success, msg = clash_manager.clear_evicted_nodes()
+    return {"status": "success" if success else "error", "message": msg}
+
+
+@router.post("/api/clash/preferred_mode")
+async def post_clash_preferred_mode(req: ClashPreferredModeReq, token: str = Depends(verify_token)):
+    success, msg = clash_manager.set_preferred_only_mode(req.enabled)
     return {"status": "success" if success else "error", "message": msg}
 
 @router.post("/api/clash/subscriptions/add")

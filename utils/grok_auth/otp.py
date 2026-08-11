@@ -15,8 +15,6 @@ _XAI_CODE_PATTERNS = (
         r"(?i)(?:code|otp|验证码|verification code|verify code|code is|your code)"
         r"\s*[:：]?\s*([A-Z0-9]{6,8})"
     ),
-    re.compile(r"(?i)\b[A-Z0-9]{6}\b"),
-    re.compile(r"(?i)\b[A-Z0-9]{8}\b"),
     re.compile(
         r"(?i)(?:code|otp|验证码|verification|verify|code is|your code)"
         r"[^A-Za-z0-9]{0,40}([A-Z0-9]{4,8})"

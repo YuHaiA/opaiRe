@@ -6,6 +6,7 @@ from typing import Optional
 import json
 from curl_cffi import requests
 from utils import config as cfg
+from utils import task_log_guard
 from utils.email_providers.mail_service import get_email_and_token, get_oai_code, mask_email,_extract_otp_code
 from utils.integrations.hero_sms import _try_verify_phone_via_hero_sms
 from utils.integrations.hero_sms import get_phone_for_signup as hs_get_phone, wait_code_for_signup as hs_wait_code, report_signup_result as hs_report
@@ -20,6 +21,26 @@ from .common import _extract_next_url, _parse_workspace_from_auth_cookie, _otp_v
 from .oauth import generate_oauth_url, submit_callback_url
 from .user_utils import _generate_password
 
+
+def _is_shared_batch_stagger_enabled(run_ctx: dict) -> bool:
+    return bool(isinstance(run_ctx, dict) and run_ctx.get("skip_proxy_net_check"))
+
+
+def _get_shared_batch_start_delay(run_ctx: dict, worker_index: Optional[int]) -> float:
+    if not _is_shared_batch_stagger_enabled(run_ctx) or not worker_index or worker_index <= 0:
+        return 0.0
+    scale = max(0.0, float(getattr(cfg, "REG_SHARED_BATCH_STAGGER_SCALE", 0.2)))
+    return min(0.35, worker_index * 0.012) * scale
+
+
+def _get_passwordless_send_delay(run_ctx: dict, worker_index: Optional[int]) -> float:
+    if not _is_shared_batch_stagger_enabled(run_ctx) or not worker_index or worker_index <= 0:
+        return 0.0
+    if str(getattr(cfg, "EMAIL_API_MODE", "") or "").strip().lower() != "openai_cpa":
+        return 0.0
+    scale = max(0.0, float(getattr(cfg, "REG_PASSWORDLESS_SEND_STAGGER_SCALE", 0.2)))
+    return min(0.25, worker_index * 0.01) * scale
+
 def run(
     proxy: Optional[str],
     run_ctx: dict = None,
@@ -27,6 +48,9 @@ def run(
     batch_id: Optional[int] = None,
     worker_index: Optional[int] = None,
 ) -> tuple:
+    if run_ctx is None:
+        run_ctx = {}
+    task_log_guard.raise_if_current_batch_aborted()
     processed_mails: set = set()
     proxy = cfg.format_docker_url(proxy)
     if proxy and proxy.startswith("socks5://"):
@@ -50,7 +74,8 @@ def run(
         is_onephone = False
         target_continue_url = ""
 
-        if not _skip_net_check():
+        skip_worker_net_check = bool(run_ctx.get("skip_proxy_net_check"))
+        if not _skip_net_check() and not skip_worker_net_check:
             try:
                 start = time.time()
                 res = s_reg.get(
@@ -63,7 +88,10 @@ def run(
                     raise RuntimeError(f"当前{proxies}代理所在地不支持 OpenAI ({loc})")
                 print(f"[{cfg.ts()}] [INFO] 节点测活成功！地区: {loc} | 延迟: {elapsed:.2f}s")
             except Exception as e:
-                print(f"[{cfg.ts()}] [ERROR] 代理网络检查失败: {e}")
+                safe_error = re.sub(r"(https?://|socks5h?://)([^/@\s]+)@", r"\1***@", str(e or ""))
+                run_ctx["proxy_network_failed"] = True
+                run_ctx["proxy_network_failure_reason"] = safe_error
+                print(f"[{cfg.ts()}] [ERROR] 代理网络检查失败: {safe_error}")
                 return None, None
         try:
             s_reg.close()
@@ -71,6 +99,10 @@ def run(
             pass
         del s_reg
         s_reg = None
+
+        shared_batch_start_delay = _get_shared_batch_start_delay(run_ctx, worker_index)
+        if shared_batch_start_delay > 0:
+            task_log_guard.sleep_with_batch_abort(shared_batch_start_delay)
 
         email, email_jwt = get_email_and_token(
             proxies,
@@ -373,6 +405,9 @@ def run(
                                     except Exception as e:
                                         print(f"[{cfg.ts()}] [WARNING] LuckMail 可用性检测异常(忽略并继续): {e}")
 
+                                passwordless_send_delay = _get_passwordless_send_delay(run_ctx, worker_index)
+                                if passwordless_send_delay > 0:
+                                    task_log_guard.sleep_with_batch_abort(passwordless_send_delay)
                                 print(f"[{cfg.ts()}] [INFO] （{masked_login}）无密码通道注册发信...")
                                 sentinel_login_resp = _post_with_retry(
                                     s_reg,

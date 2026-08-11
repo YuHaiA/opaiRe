@@ -56,6 +56,14 @@ admin_auth: ""
 openai_cpa:
   webhook_secret: "wenfxl_secret_key"
   use_original_password_flow: false
+  # 收码路径: remote_bridge | local_webhook | dual
+  receive_mode: remote_bridge
+  # 兼容旧字段；remote_bridge/dual 时为 true
+  bridge_enabled: true
+  # 公网中转（Server2 示例）
+  bridge_base_url: "https://tupai.cyou"
+  # 可空：默认回退 webhook_secret
+  bridge_token: ""
 
 # [模式 "imap" 专属配置] (CF Catch-all 转发接收端)
 imap:
@@ -157,6 +165,12 @@ reg_threads: 10
 
 # Clash 节点智能轮换（本地使用clash软件）
 clash_proxy_pool:
+  # 运行模式（可空=自动识别）:
+  # - windows_single_core: 本机桌面「mihomo共享代理」外部单核；只读写控制器/切节点，不启停外部进程
+  # - local_gui: 本机 Clash Verge 等 GUI 客户端
+  # - linux_single_core: Linux 服务器单核心（保留）
+  # - docker_pool: 服务器 Docker 多实例集群（保留）
+  runtime_mode: ""
   # 【开关】是否在每次注册前自动通过 Clash 切换节点
   enable: false
   # 【核心开关】true=服务器10容器独立推算模式；false=本地单机/单容器模式
@@ -200,6 +214,12 @@ raw_proxy_pool:
   # 独立于 Clash 的批量代理池；启用后优先使用这里的代理列表
   # 支持 HTTP / HTTPS / SOCKS5 显式协议；未写协议时默认按 socks5h 解析
   enable: false
+  success_pool_enabled: false
+  success_proxy_list: []
+  auto_evict_failed: true
+  auto_evict_max_per_window: 5
+  auto_evict_window_seconds: 60
+  auto_evict_min_remaining: 1
   proxy_list:
     # 支持以下格式：
     # - http://user:pass@host:8080

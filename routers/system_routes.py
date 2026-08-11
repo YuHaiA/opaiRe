@@ -23,6 +23,7 @@ from global_state import VALID_TOKENS, CLUSTER_NODES, NODE_COMMANDS, cluster_loc
 from utils import core_engine, db_manager
 from utils.email_providers import mail_service
 from utils.config import reload_all_configs
+from utils.config_save_guard import merge_runtime_owned_clash_state
 from utils.integrations.tg_notifier import send_tg_msg_async
 from utils.memory_predictor import build_memory_report
 from utils.system_maintenance import get_cleanup_status
@@ -41,15 +42,18 @@ class DummyArgs:
 
 class LoginData(BaseModel): password: str
 class DomainRuntimeActionReq(BaseModel): domain: str
+class MailDomainDeleteReq(BaseModel):
+    domains: str
+    delete_cf: bool = True
 class ClusterSyncTaskCreateReq(BaseModel):
     node_name: str
     secret: str
     task_id: str
-    # file_path: str
-    # file_size: int = 0
+    file_path: Optional[str] = None
+    file_size: int = 0
     total_count: int = 0
-    accounts_data: List[Dict[str, Any]]
-    # file_sha256: str = ""
+    file_sha256: str = ""
+    accounts_data: Optional[List[Dict[str, Any]]] = None
 class ClusterUploadAccountsReq(BaseModel):
     node_name: str
     secret: str
@@ -222,6 +226,21 @@ def _normalize_mail_domain_items(raw_value: Any) -> list[str]:
         if text and text not in seen:
             seen.add(text)
             domains.append(text)
+    return domains
+
+
+def _format_mail_domain_items_csv(items: list[str]) -> str:
+    return ",".join(_normalize_mail_domain_items(",".join(items or [])))
+
+
+def _normalize_mail_domain_action_items(raw_value: Any) -> list[str]:
+    seen = set()
+    domains = []
+    for part in re.split(r"[\s,，]+", str(raw_value or "")):
+        value = str(part or "").strip().lower().strip(".")
+        if value and value not in seen:
+            seen.add(value)
+            domains.append(value)
     return domains
 
 
@@ -879,10 +898,67 @@ async def clear_mail_domain_runtime_domain_cooldown(req: DomainRuntimeActionReq,
     return {"status": "success", "message": f"已清除 {item['domain']} 的冷却", "item": item}
 
 
+@router.post("/api/config/mail_domains/delete")
+async def delete_mail_domains(req: MailDomainDeleteReq, token: str = Depends(verify_token)):
+    target_domains = _normalize_mail_domain_action_items(req.domains)
+    if not target_domains:
+        return {"status": "error", "message": "没有找到有效的待删除域名"}
+
+    current_config = getattr(core_engine.cfg, "_c", {}).copy()
+    current_domains = _normalize_mail_domain_items(current_config.get("mail_domains", ""))
+    target_set = set(target_domains)
+    remaining = [domain for domain in current_domains if domain not in target_set]
+    current_config["mail_domains"] = _format_mail_domain_items_csv(remaining)
+    current_config["disabled_mail_domains"] = [
+        domain for domain in _normalize_mail_domain_items(",".join(current_config.get("disabled_mail_domains", []) or []))
+        if domain not in target_set
+    ]
+    if not remaining:
+        current_config["enable_mail_domain_grouping"] = False
+        current_config["mail_domain_group_count"] = 1
+        current_config["mail_domain_groups"] = []
+    else:
+        filtered_groups = []
+        for raw_group in current_config.get("mail_domain_groups", []) or []:
+            kept = [domain for domain in _normalize_mail_domain_items(raw_group) if domain in set(remaining)]
+            if kept:
+                filtered_groups.append(_format_mail_domain_items_csv(kept))
+        current_config["mail_domain_groups"] = filtered_groups
+        current_config["mail_domain_group_count"] = max(1, min(int(current_config.get("mail_domain_group_count", 2) or 2), len(remaining), 10))
+
+    grouping_error = _normalize_mail_domain_grouping_payload(current_config)
+    if grouping_error:
+        current_config["enable_mail_domain_grouping"] = False
+        current_config["mail_domain_group_count"] = 1
+        current_config["mail_domain_groups"] = []
+    reload_all_configs(new_config_dict=current_config)
+    mail_service.sync_mail_domain_runtime_state_with_config()
+
+    cf_result = None
+    if req.delete_cf and current_config.get("cf_api_email") and current_config.get("cf_api_key"):
+        from routers import service_routes
+        cf_result = await service_routes.cloudflare_delete_zones(
+            service_routes.CFZoneBaseReq(
+                domains=_format_mail_domain_items_csv(target_domains),
+                api_email=str(current_config.get("cf_api_email") or ""),
+                api_key=str(current_config.get("cf_api_key") or ""),
+            ), token=token
+        )
+    return {
+        "status": "success",
+        "message": f"已从发信域名池删除 {'、'.join(target_domains)}",
+        "removed_domains": [domain for domain in current_domains if domain in target_set],
+        "config": {"mail_domains": current_config.get("mail_domains", ""), "disabled_mail_domains": current_config.get("disabled_mail_domains", [])},
+        "cf_result": cf_result,
+    }
+
+
 @router.post("/api/config")
 async def save_config(new_config: dict, token: str = Depends(verify_token)):
     try:
         current_config = getattr(core_engine.cfg, '_c', {}).copy()
+        if not isinstance(new_config, dict):
+            return {"status": "error", "message": "配置格式无效"}
         if isinstance(new_config.get("sub2api_mode"), dict):
             new_config["sub2api_mode"].pop("min_remaining_weekly_percent", None)
         new_config["local_microsoft"] = _sanitize_local_microsoft_config(new_config.get("local_microsoft"))
@@ -890,11 +966,6 @@ async def save_config(new_config: dict, token: str = Depends(verify_token)):
             new_config["disabled_mail_domains"] = []
         if not isinstance(new_config.get("mail_domain_failure_types"), list):
             new_config["mail_domain_failure_types"] = ["discarded_email"]
-        new_config["mail_domain_failure_types"] = list(dict.fromkeys(
-            str(item or "").strip().lower()
-            for item in new_config.get("mail_domain_failure_types", [])
-            if str(item or "").strip()
-        )) or ["discarded_email"]
         def normalize_bool(value):
             if isinstance(value, bool):
                 return value
@@ -903,6 +974,38 @@ async def save_config(new_config: dict, token: str = Depends(verify_token)):
             if isinstance(value, (int, float)):
                 return value != 0
             return False
+        auth_fingerprint = new_config.get("auth_fingerprint")
+        if not isinstance(auth_fingerprint, dict):
+            auth_fingerprint = {}
+        fingerprint_mode = str(auth_fingerprint.get("mode", "compat") or "compat").strip().lower()
+        auth_fingerprint["mode"] = fingerprint_mode if fingerprint_mode in {"compat", "upstream"} else "compat"
+        new_config["auth_fingerprint"] = auth_fingerprint
+        raw_proxy_conf = new_config.get("raw_proxy_pool")
+        if not isinstance(raw_proxy_conf, dict):
+            raw_proxy_conf = {}
+        raw_proxy_conf["enable"] = normalize_bool(raw_proxy_conf.get("enable", False))
+        raw_proxy_conf["success_pool_enabled"] = normalize_bool(raw_proxy_conf.get("success_pool_enabled", False))
+        if not isinstance(raw_proxy_conf.get("proxy_list"), list):
+            raw_proxy_conf["proxy_list"] = []
+        if not isinstance(raw_proxy_conf.get("success_proxy_list"), list):
+            raw_proxy_conf["success_proxy_list"] = []
+        if raw_proxy_conf["enable"] and raw_proxy_conf["success_pool_enabled"] and not core_engine.cfg.normalize_raw_proxy_list(raw_proxy_conf["success_proxy_list"]):
+            return {"status": "error", "message": "成功代理池为空或没有有效代理，请先完成测试并设为成功池。"}
+        new_config["raw_proxy_pool"] = raw_proxy_conf
+        ocpa_conf = new_config.get("openai_cpa")
+        if not isinstance(ocpa_conf, dict):
+            ocpa_conf = {}
+        receive_mode = core_engine.cfg.normalize_openai_cpa_receive_mode(
+            ocpa_conf.get("receive_mode"), bridge_enabled=normalize_bool(ocpa_conf.get("bridge_enabled", False))
+        )
+        ocpa_conf["receive_mode"] = receive_mode
+        ocpa_conf["bridge_enabled"] = core_engine.cfg.openai_cpa_remote_bridge_enabled(receive_mode)
+        new_config["openai_cpa"] = ocpa_conf
+        new_config["mail_domain_failure_types"] = list(dict.fromkeys(
+            str(item or "").strip().lower()
+            for item in new_config.get("mail_domain_failure_types", [])
+            if str(item or "").strip()
+        )) or ["discarded_email"]
         new_config["mail_domain_pinpoint_burst_mode"] = normalize_bool(new_config.get("mail_domain_pinpoint_burst_mode", False))
         new_config["mail_domain_prefer_low_failure_mode"] = normalize_bool(new_config.get("mail_domain_prefer_low_failure_mode", False))
         if new_config["mail_domain_pinpoint_burst_mode"] and new_config["mail_domain_prefer_low_failure_mode"]:
@@ -910,6 +1013,7 @@ async def save_config(new_config: dict, token: str = Depends(verify_token)):
         grouping_error = _normalize_mail_domain_grouping_payload(new_config)
         if grouping_error:
             return {"status": "error", "message": grouping_error}
+        new_config = merge_runtime_owned_clash_state(current_config, new_config)
         reload_all_configs(new_config_dict=new_config)
         mail_service.sync_mail_domain_runtime_state_with_config()
         extra_messages = []
@@ -1038,29 +1142,47 @@ def create_cluster_sync_task(req: ClusterSyncTaskCreateReq):
     valid_secret, secret_message = _validate_cluster_secret(req.secret)
     if not valid_secret:
         return {"status": "error", "message": secret_message}
-    shared_dir_str = str(_resolve_cluster_sync_shared_dir())
-    master_local_dir = os.path.join(shared_dir_str, req.node_name)
-    os.makedirs(master_local_dir, exist_ok=True)
-
-    master_local_file = os.path.join(master_local_dir, f"{req.task_id}.json")
-
-    try:
-        with open(master_local_file, 'w', encoding='utf-8') as handle:
-            for acc in req.accounts_data:
-                handle.write(json.dumps(acc, ensure_ascii=False) + "\n")
-        actual_file_size = os.path.getsize(master_local_file)
-    except Exception as e:
-        return {"status": "error", "message": f"主控转存接收到的数据失败: {str(e)}"}
+    if req.accounts_data is not None:
+        safe_node_name = re.sub(r"[^A-Za-z0-9._-]+", "_", str(req.node_name or "").strip()).strip("._")
+        safe_task_id = re.sub(r"[^A-Za-z0-9._-]+", "_", str(req.task_id or "").strip()).strip("._")
+        if not safe_node_name or not safe_task_id:
+            return {"status": "error", "message": "节点名称或任务 ID 非法"}
+        master_local_dir = _resolve_cluster_sync_shared_dir() / safe_node_name
+        master_local_dir.mkdir(parents=True, exist_ok=True)
+        master_local_file = master_local_dir / f"{safe_task_id}.jsonl"
+        if not _is_cluster_sync_path_allowed(str(master_local_file)):
+            return {"status": "error", "message": "同步文件路径不在共享目录内"}
+        try:
+            with master_local_file.open('w', encoding='utf-8') as handle:
+                for account in req.accounts_data:
+                    handle.write(json.dumps(account, ensure_ascii=False) + "\n")
+            actual_file_size = master_local_file.stat().st_size
+        except Exception as e:
+            return {"status": "error", "message": f"主控转存接收到的数据失败: {str(e)}"}
+        target_path = master_local_file.resolve()
+        stored_file_size = actual_file_size
+        stored_sha256 = ""
+    else:
+        verified, verify_message, target_path = _verify_cluster_sync_file(
+            req.file_path or "",
+            expected_size=req.file_size,
+            expected_sha256=req.file_sha256,
+            expected_total_count=req.total_count,
+        )
+        if not verified or target_path is None:
+            return {"status": "error", "message": verify_message or "同步文件校验失败"}
+        stored_file_size = max(0, int(req.file_size or 0))
+        stored_sha256 = str(req.file_sha256 or '').strip().lower()
 
     ensure_cluster_sync_worker_started()
     if not db_manager.create_cluster_sync_task(
             task_id=req.task_id,
             node_name=req.node_name,
-            file_path=str(master_local_file),
-            file_size=actual_file_size,
+            file_path=str(target_path),
+            file_size=stored_file_size,
             total_count=max(0, int(req.total_count or 0)),
             max_retries=0,
-            file_sha256="",
+            file_sha256=stored_sha256,
     ):
         return {"status": "error", "message": "同步任务已存在"}
 
