@@ -2,6 +2,7 @@
 import importlib
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -57,11 +58,15 @@ def test_patch_and_update_windows_mode_does_not_apply_controller(monkeypatch, tm
     monkeypatch.setattr(cm, "MANUAL_CONFIG_PATH", str(tmp_path / "manual.yaml"))
     monkeypatch.setattr(cm, "BASE_PATH", str(tmp_path))
 
-    class DummyResp:
-        status_code = 200
-        text = "proxies: []\nproxy-groups: []\n"
-
-    monkeypatch.setattr(cm.cffi_requests, "get", lambda *a, **k: DummyResp())
+    monkeypatch.setattr(
+        cm,
+        "fetch_subscription_text",
+        lambda *a, **k: SimpleNamespace(
+            ok=True,
+            text="proxies: []\nproxy-groups: []\n",
+            message="",
+        ),
+    )
     applied = {"n": 0}
     monkeypatch.setattr(cm, "_apply_config_to_controller", lambda *a, **k: applied.__setitem__("n", applied["n"] + 1) or (True, "ok"))
     monkeypatch.setattr(cm, "_write_single_core_config", lambda raw: applied.__setitem__("n", applied["n"] + 10) or raw)

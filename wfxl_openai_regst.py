@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 import json
 import time
@@ -247,6 +247,15 @@ app.add_middleware(
 db_manager.init_db()
 
 app.include_router(api_routes.router)
+
+# 可选插件加载（存在 plugin/<name>/manifest.json 才挂载）
+try:
+    from utils.plugin_loader import register_all as _register_plugins
+    _loaded_plugins = _register_plugins(app)
+    if _loaded_plugins:
+        print(f"[{core_engine.ts()}] [plugins] loaded: " + ", ".join(_loaded_plugins))
+except Exception as _plugin_exc:
+    print("[plugins] skip: " + str(_plugin_exc))
 
 class DummyArgs:
     def __init__(self, proxy=None, once=False):

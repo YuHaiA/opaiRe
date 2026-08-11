@@ -13,6 +13,32 @@ from urllib.parse import urlparse
 SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com&return_to=%2F"
 POST_SIGNUP_URL = "https://grok.com/"
 
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        val = float(str(os.environ.get(name, "") or "").strip())
+        return val if val > 0 else default
+    except Exception:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        val = int(float(str(os.environ.get(name, "") or "").strip()))
+        return val if val > 0 else default
+    except Exception:
+        return default
+
+
+# 邮箱验证码等待参数（可用环境变量覆盖）
+# 默认: 30 次 x 5s = 最长 150s 等待验证码邮件
+CODE_FETCH_ATTEMPTS = _env_int("GROK_CODE_FETCH_ATTEMPTS", 30)
+CODE_FETCH_INTERVAL = _env_float("GROK_CODE_FETCH_INTERVAL", 5.0)
+# 验证码阶段允许在总 deadline 之外额外延长的秒数
+CODE_WAIT_GRACE = _env_float("GROK_CODE_WAIT_GRACE", 240.0)
+# 验证码输入页出现的等待轮数（每轮 1s）
+CODE_PAGE_ATTEMPTS = _env_int("GROK_CODE_PAGE_ATTEMPTS", 80)
+
 EMAIL_ENTRY_SELECTORS = [
     'button:has-text("Sign up with email")',
     'button:has-text("Sign up with Email")',
@@ -528,7 +554,7 @@ def _signup_on_page(
         code_sel = ", ".join(CODE_INPUT_SELECTORS)
         code_ready = False
         last_submit_retry = time.time()
-        for _ in range(80):
+        for _ in range(CODE_PAGE_ATTEMPTS):
             if time.time() > deadline:
                 break
             if page.query_selector(code_sel):
@@ -552,6 +578,10 @@ def _signup_on_page(
             code = ""
         if not code:
             return {"ok": False, "error": "邮箱验证码超时", "url": page.url}
+
+        # 验证码可能来得比较晚，把后续步骤的 deadline 往后顺延，
+        # 避免拿到码却因为总超时而无法完成提交。
+        deadline = max(deadline, time.time() + 120.0)
 
         clean_code = re.sub(r"[\s\-]+", "", code)
         try:
