@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import time
+from curl_cffi import requests
+import re
 from typing import Optional, Tuple
 
 from utils import config as cfg
@@ -173,7 +175,6 @@ def run(
             ).strip()
 
         def _blog(msg: str) -> None:
-            # browser_signup 内部已带邮箱；这里只做透传兜底
             _log(msg, email)
 
         headless_raw = str(os.environ.get("GROK_BROWSER_SIGNUP_HEADLESS", "1") or "1").strip().lower()
@@ -209,11 +210,23 @@ def run(
         session_cookies.setdefault("sso", sso)
         session_cookies.setdefault("sso-rw", sso)
         _log("SSO 提取成功", email)
+        bot_flag_dict = inspect_sso_account_state(session_cookies, proxy=proxy or "")
+        if bot_flag_dict["found"]:
+            bfs = bot_flag_dict.get('bot_flag_source')
+            iq_status = "账号智商正常" if bfs == 0 else f"账号已降智({bfs}) 可能需更换IP"
+            is_denied = bot_flag_dict.get('denied')
+            deny_status = "被拒(死号)" if is_denied else "通过"
+            risk_val = bot_flag_dict.get('risk')
+            risk_display = risk_val if risk_val is not None else "无"
+            _log(f"状态: {iq_status}，注册: {deny_status}，风险值: {risk_display}", email)
+            discard_on_downgrade = getattr(cfg, "DISCARD_ON_DOWNGRADE", False)
+            if is_denied or (bfs != 0 and discard_on_downgrade):
+                _log("⚠️ 触发风控拒绝或[降智丢弃]规则，账号已作废不入库，中止流程", email)
+                return None, None
+        else:
+            _log(f"账号状态检测失败: {bot_flag_dict['error']}", email)
 
-        # Grok Web is an optional attachment of the Grok2API warehouse. Whether
-        # this succeeds or fails, Build OAuth and the normal Build import continue.
         _import_grok_web_before_oauth(sso, email, run_ctx)
-
         try:
             oauth = complete_build_oauth(
                 email,
@@ -274,3 +287,100 @@ def run(
                 os.environ.pop("HTTPS_PROXY", None)
             else:
                 os.environ["HTTPS_PROXY"] = old_https
+
+
+def _parse_grok_account_state(html_text: str) -> dict:
+    raw = str(html_text or "")
+
+    result = {
+        "found": False,
+        "bot_flag_source": None,
+        "bot_flag_details": "",
+        "policy": "",
+        "risk": None,
+        "event": "",
+        "denied": False,
+        "error": ""
+    }
+
+    if "Just a moment" in raw or "cf-browser-verification" in raw or "cf-turnstile" in raw:
+        result["error"] = "被 CF 拦截"
+        return result
+    elif "Sign in to xAI" in raw or "sign in" in raw.lower():
+        result["error"] = "SSO 无效"
+        return result
+
+    normalized = raw.replace('\\"', '"')
+    source_match = re.search(r'botFlagSource"\s*:\s*(null|-?\d+|"[^"]*")', normalized)
+    details_match = re.search(r'botFlagDetails"\s*:\s*(?:null|"([^"]*)")', normalized)
+
+    if source_match and source_match.group(1) != "null":
+        val = source_match.group(1).strip('"')
+        try:
+            result["bot_flag_source"] = int(val)
+        except ValueError:
+            result["bot_flag_source"] = val
+
+    details_str = details_match.group(1) if details_match and details_match.group(1) else ""
+    result["bot_flag_details"] = details_str
+
+    detail_fields: dict[str, str] = {}
+    for item in details_str.split(","):
+        key, sep, value = item.partition("=")
+        if sep and key.strip():
+            detail_fields[key.strip().lower()] = value.strip()
+
+    try:
+        if detail_fields.get("risk"):
+            result["risk"] = float(detail_fields["risk"])
+    except (TypeError, ValueError):
+        pass
+
+    result["policy"] = detail_fields.get("policy", "").lower()
+    result["event"] = detail_fields.get("event", "")
+    result["denied"] = (result["policy"] == "deny" and result["event"] == "$registration")
+
+    result["found"] = bool(source_match or details_match)
+    if not result["found"]:
+        result["error"] = "未找到 botFlag 字段"
+
+    return result
+
+
+def inspect_sso_account_state(session_cookies: dict, proxy: str = "") -> dict:
+    url = "https://grok.com/"
+    proxies = {"http": proxy, "https": proxy} if proxy else {}
+
+    final_result = {
+        "status_code": 0,
+        "found": False,
+        "bot_flag_source": None,
+        "bot_flag_details": "",
+        "policy": "",
+        "risk": None,
+        "event": "",
+        "denied": False,
+        "error": ""
+    }
+
+    try:
+        response = requests.get(
+            url,
+            cookies=session_cookies,
+            proxies=proxies,
+            impersonate="chrome",
+            timeout=15
+        )
+
+        final_result["status_code"] = response.status_code
+        if response.status_code >= 400:
+            suffix = " (可能是 Cloudflare 限制)" if response.status_code in (403, 429, 503) else ""
+            final_result["error"] = f"请求失败 (HTTP {response.status_code}){suffix}"
+            return final_result
+        parsed_data = _parse_grok_account_state(response.text)
+        final_result.update(parsed_data)
+        return final_result
+
+    except Exception as e:
+        final_result["error"] = f"请求异常 ({str(e)})"
+        return final_result

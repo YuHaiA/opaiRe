@@ -107,7 +107,14 @@ def _enrich_nodes_with_providers(base_url: str, secret: str, nodes: list) -> lis
 
 
 
+def is_running_in_docker() -> bool:
+    if os.path.exists('/.dockerenv'):
+        return True
+
 def get_client():
+    if not is_running_in_docker():
+        return None
+
     try:
         return docker.from_env()
     except Exception as e:
