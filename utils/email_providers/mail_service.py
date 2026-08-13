@@ -1373,7 +1373,11 @@ def get_email_and_token(
     use_domain_runtime_control = is_mail_domain_runtime_control_enabled(mode)
 
     batch_preallocated = batch_id is not None and worker_index is not None
-    skip_domain_fallback = batch_preallocated and assigned_domain is None
+    skip_domain_fallback = (
+        batch_preallocated
+        and use_domain_runtime_control
+        and assigned_domain is None
+    )
 
     if cfg.ENABLE_SUB_DOMAINS:
         # sticky = getattr(_thread_data, 'sticky_domain', None)
