@@ -103,6 +103,8 @@
 
 ## 服务1 CPA 节点探测覆盖修复（2026-08-09）
 
+- 当前公网页面入口为 `https://kaikj.bond/`；SSH 使用 `ubuntu@18.118.93.106`（旧直连域名 `mycodexy.duckdns.org`），本机密钥为 `C:\Users\yu\Desktop\file\sub2.pem`。
+
 - 现象：28 路出口中 **18 路从未被探测过**，有数据的 10 路里最新的也已过期 126 分钟，中位数 19.5 小时，节点健康度基本处于盲区。
 - 根因一：`guard.go:1078` 的主动探测调度整段被 `if pol.Mode == "active" || pol.Mode == "hybrid"` 包住，而线上是 `mode=passive`，**整块是死代码**。因此原计划的「`active_interval_seconds` 3600 → 900」根本不会有任何效果，必须先切模式。少数几路有 active 数据，来自不受 mode 限制的隔离恢复路径 `guard.go:1074`。
 - 根因二：`soft_tps` / `hard_tps` 是 **反伪造上限**，不是速度下限。`classifyTPS`（`guard.go:236`）里 `tps >= hard` 判 hard、`tps >= soft` 判 soft，**吐字越快评级越差**，用途是识别伪造/重放响应。线上却被收紧成 `150/250`，落在正常输出区间内。

@@ -48,10 +48,11 @@ description: Durable project memory for opaiRe. Use this skill to recover stable
 
 - Local workspace: `C:\Users\admin\Desktop\opaiRe`.
 - Server 1:
-  - Host: `mycodexy.duckdns.org`.
+  - Public web domain: `https://kaikj.bond/`.
+  - SSH/source host: `18.118.93.106` (`mycodexy.duckdns.org` is the legacy direct hostname).
   - User: `ubuntu`.
   - Project path: `/home/ubuntu/opaiRe`.
-  - SSH key: `C:\Users\admin\Desktop\file\sub2.pem`.
+  - SSH key: `C:\Users\yu\Desktop\file\sub2.pem`.
 - Server 2:
   - Host: `mysuby.duckdns.org`.
   - User: `ec2-user`.
