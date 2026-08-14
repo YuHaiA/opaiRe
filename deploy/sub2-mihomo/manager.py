@@ -28,7 +28,11 @@ from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 import yaml
 
-from v2ray_convert import detect_and_parse_subscription, proxies_to_provider_yaml
+from v2ray_convert import (
+    detect_and_parse_subscription,
+    looks_like_http_proxy_uri,
+    proxies_to_provider_yaml,
+)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -461,9 +465,15 @@ def update_subscription(source: str | None = None) -> dict[str, Any]:
         source = SOURCE_FILE.read_text(encoding="utf-8").strip()
     source = (source or "").strip()
     if not source:
-        raise ManagerError("请先填写订阅 URL 或 V2Ray 分享链接")
+        raise ManagerError("请先填写订阅 URL、HTTP 节点或 V2Ray 分享链接")
 
-    raw = fetch_subscription(source) if source.startswith(("http://", "https://")) and "\n" not in source else source
+    raw = (
+        fetch_subscription(source)
+        if source.startswith(("http://", "https://"))
+        and "\n" not in source
+        and not looks_like_http_proxy_uri(source)
+        else source
+    )
     parsed = detect_and_parse_subscription(raw)
     proxies = parsed.get("proxies") or []
     if not proxies:

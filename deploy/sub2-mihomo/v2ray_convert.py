@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Convert v2ray/v2rayN share links and subscriptions into Clash Meta proxies."""
+"""Convert share links, HTTP proxies, and subscriptions into Clash Meta proxies."""
 
 from __future__ import annotations
 
@@ -411,9 +411,66 @@ def parse_share_link(line: str) -> dict[str, Any] | None:
     return None
 
 
+def parse_http_proxy(uri: str) -> dict[str, Any] | None:
+    """Convert an HTTP/HTTPS proxy URI to a Mihomo HTTP proxy mapping."""
+    text = (uri or "").strip()
+    try:
+        parsed = urlparse(text)
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            return None
+        port = parsed.port
+    except (TypeError, ValueError):
+        return None
+    if not port or port <= 0 or port > 65535:
+        return None
+
+    server = parsed.hostname
+    name = sanitize_proxy_name(
+        unquote(parsed.fragment) or f"http-{server}-{port}",
+        fallback=f"http-{server}-{port}",
+    )
+    proxy: dict[str, Any] = {
+        "name": name,
+        "type": "http",
+        "server": server,
+        "port": port,
+    }
+    if parsed.username is not None:
+        proxy["username"] = unquote(parsed.username)
+    if parsed.password is not None:
+        proxy["password"] = unquote(parsed.password)
+    if parsed.scheme.lower() == "https":
+        proxy["tls"] = True
+    return proxy
+
+
 def looks_like_share_link(text: str) -> bool:
     s = (text or "").strip().lower()
     return any(s.startswith(scheme) for scheme in _SHARE_SCHEMES)
+
+
+def looks_like_http_proxy_uri(text: str) -> bool:
+    """Return whether a single HTTP URL is clearly a proxy endpoint."""
+    s = (text or "").strip()
+    if "\n" in s or "\r" in s:
+        return False
+    try:
+        parsed = urlparse(s)
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            return False
+        port = parsed.port
+    except (TypeError, ValueError):
+        return False
+    if not port or port <= 0 or port > 65535:
+        return False
+    # Subscription URLs normally have a path/query. A proxy URI has an
+    # explicit port and either credentials/name or no resource path.
+    return bool(
+        parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+        or (parsed.path in {"", "/"} and not parsed.query)
+    )
 
 
 def looks_like_single_url(text: str) -> bool:
@@ -428,7 +485,7 @@ def looks_like_single_url(text: str) -> bool:
         p = urlparse(s)
     except Exception:
         return False
-    return p.scheme in {"http", "https"} and bool(p.netloc)
+    return p.scheme in {"http", "https"} and bool(p.netloc) and not looks_like_http_proxy_uri(s)
 
 
 def _unique_names(proxies: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -508,12 +565,27 @@ def parse_share_blob(text: str) -> list[dict[str, Any]]:
     return _unique_names(found)
 
 
+def parse_http_proxy_blob(text: str) -> tuple[list[dict[str, Any]], str]:
+    """Extract one HTTP proxy URI per line and return the remaining content."""
+    proxies: list[dict[str, Any]] = []
+    remaining: list[str] = []
+    for line in (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        stripped = line.strip()
+        if stripped and looks_like_http_proxy_uri(stripped):
+            proxy = parse_http_proxy(stripped)
+            if proxy:
+                proxies.append(proxy)
+                continue
+        remaining.append(line)
+    return _unique_names(proxies), "\n".join(remaining).strip()
+
+
 def detect_and_parse_subscription(text: str) -> dict[str, Any]:
     """Detect content kind and return Clash Meta proxies.
 
     Returns:
       {
-        kind: "clash_yaml" | "v2ray_links" | "empty" | "unknown",
+        kind: "clash_yaml" | "http_proxy_links" | "v2ray_links" | "mixed" | "empty" | "unknown",
         proxies: [...],
         count: int,
         sample: [names...],
@@ -536,23 +608,27 @@ def detect_and_parse_subscription(text: str) -> dict[str, Any]:
             pass
 
     for blob in candidates:
-        clash = try_parse_clash_yaml(blob)
-        if clash:
+        http_proxies, remainder = parse_http_proxy_blob(blob)
+        clash = try_parse_clash_yaml(remainder) if remainder else None
+        links = parse_share_blob(remainder) if remainder else []
+        other = clash or links
+        if http_proxies or other:
+            combined = _unique_names([*http_proxies, *(other or [])])
+            if clash and http_proxies:
+                kind = "mixed"
+            elif clash:
+                kind = "clash_yaml"
+            elif links and http_proxies:
+                kind = "mixed"
+            elif links:
+                kind = "v2ray_links"
+            else:
+                kind = "http_proxy_links"
             return {
-                "kind": "clash_yaml",
-                "proxies": clash,
-                "count": len(clash),
-                "sample": [p.get("name") for p in clash[:8]],
-            }
-
-    for blob in candidates:
-        links = parse_share_blob(blob)
-        if links:
-            return {
-                "kind": "v2ray_links",
-                "proxies": links,
-                "count": len(links),
-                "sample": [p.get("name") for p in links[:8]],
+                "kind": kind,
+                "proxies": combined,
+                "count": len(combined),
+                "sample": [p.get("name") for p in combined[:8]],
             }
 
     return {"kind": "unknown", "proxies": [], "count": 0, "sample": []}
