@@ -154,10 +154,6 @@ def load_egress_state() -> dict[str, Any]:
                 return value
         except Exception:
             pass
-        try:
-            update_subscription()
-        except Exception:
-            pass
     return {"cursor": 0, "last_rotated_at": "", "assignments": {}}
 
 
@@ -872,6 +868,7 @@ def reconcile_accounts() -> dict[str, Any]:
             slots[proxy_id].append(account)
             selected[account_id] = proxy_id
 
+        candidate_ids = {int(account["id"]) for account in candidates}
         changed_ids: list[int] = []
         managed_account_count = 0
         statements = ["BEGIN;"]
@@ -894,7 +891,7 @@ def reconcile_accounts() -> dict[str, Any]:
                 target_schedulable = False
                 standby = True
                 disabled = False
-            should_manage = already_managed or target_proxy is not None or account in candidates
+            should_manage = already_managed or target_proxy is not None or account_id in candidate_ids
             if not should_manage and account_id not in externally_disabled:
                 continue
             managed_account_count += 1
