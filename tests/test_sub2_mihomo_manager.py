@@ -41,6 +41,10 @@ class Sub2MihomoManagerTest(unittest.TestCase):
             {item["name"] for item in parsed["proxies"]},
             {"subscribed", "manual"},
         )
+        self.assertEqual(
+            parsed["node_sources"],
+            {"subscribed": "subscription", "manual": "http"},
+        )
 
     def test_direct_http_proxy_is_not_fetched_as_subscription(self):
         manager = load_manager()
@@ -50,6 +54,28 @@ class Sub2MihomoManagerTest(unittest.TestCase):
 
         self.assertEqual(parsed["kind"], "http_proxy_links")
         self.assertEqual(parsed["count"], 1)
+
+    def test_node_source_mode_filters_rotation_candidates(self):
+        manager = load_manager()
+        manager.provider_node_names = lambda: ["subscribed", "manual"]
+        manager.load_settings = lambda: manager.normalized_settings(
+            {"subscription_kind": "mixed", "node_source_mode": "http"}
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager.NODE_SOURCES_FILE = Path(temp_dir) / "node-sources.json"
+            manager.NODE_SOURCES_FILE.write_text(
+                '{"nodes":{"subscribed":"subscription","manual":"http"}}',
+                encoding="utf-8",
+            )
+            self.assertEqual(manager.eligible_provider_node_names(), ["manual"])
+
+    def test_invalid_node_source_mode_defaults_to_compatible(self):
+        manager = load_manager()
+        self.assertEqual(
+            manager.normalized_settings({"node_source_mode": "other"})["node_source_mode"],
+            "compatible",
+        )
 
     def test_fixed_egress_config_is_exactly_ten(self):
         manager = load_manager()
@@ -383,6 +409,7 @@ class Sub2MihomoManagerTest(unittest.TestCase):
 
         self.assertEqual(public["egress_count"], 10)
         self.assertEqual(public["max_accounts_per_egress"], 2)
+        self.assertEqual(public["node_source_mode"], "compatible")
         self.assertTrue(public["egress_auto_rotate_enabled"])
         self.assertNotIn("sub2api_deploy_dir", public)
         self.assertNotIn("sub2api_postgres_container", public)

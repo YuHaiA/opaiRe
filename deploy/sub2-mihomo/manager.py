@@ -54,6 +54,7 @@ PID_FILE = STATE_DIR / "mihomo.pid"
 MANAGER_PID_FILE = STATE_DIR / "manager.pid"
 DELAYS_FILE = STATE_DIR / "delays.json"
 EGRESS_STATE_FILE = STATE_DIR / "egress-pool.json"
+NODE_SOURCES_FILE = STATE_DIR / "node-sources.json"
 LOG_FILE = ROOT / "logs" / "mihomo.log"
 ERR_FILE = ROOT / "logs" / "mihomo.err.log"
 WEB_DIR = ROOT / "web"
@@ -75,6 +76,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "egress_count": 10,
     "egress_base_port": 7901,
     "egress_auto_rotate_enabled": True,
+    "node_source_mode": "compatible",
     "egress_rotate_minutes": 30,
     "egress_reuse_cooldown_minutes": 60,
     "max_accounts_per_egress": 2,
@@ -90,6 +92,7 @@ _HEALTH_LOCK = threading.Lock()
 _CORE_PROCESS: subprocess.Popen[Any] | None = None
 
 EGRESS_COUNT = 10
+NODE_SOURCE_MODES = {"subscription", "http", "compatible"}
 DEFAULT_MAX_ACCOUNTS_PER_EGRESS = 2
 MAX_ACCOUNTS_PER_EGRESS_LIMIT = 20
 NODE_TEST_TARGETS = (
@@ -120,6 +123,8 @@ def normalized_settings(value: dict[str, Any] | None = None) -> dict[str, Any]:
         settings[key] = min(max(number, minimum), maximum)
     settings["egress_pool_enabled"] = bool(settings.get("egress_pool_enabled", True))
     settings["egress_auto_rotate_enabled"] = bool(settings.get("egress_auto_rotate_enabled", True))
+    source_mode = str(settings.get("node_source_mode") or "compatible").strip().lower()
+    settings["node_source_mode"] = source_mode if source_mode in NODE_SOURCE_MODES else "compatible"
     return settings
 
 
@@ -471,29 +476,45 @@ def resolve_subscription_input(source: str) -> dict[str, Any]:
         else:
             inline_lines.append(line)
 
-    parsed_parts: list[dict[str, Any]] = []
+    parsed_parts: list[tuple[dict[str, Any], str | None]] = []
     inline = "\n".join(inline_lines).strip()
     if inline:
-        parsed_parts.append(detect_and_parse_subscription(inline))
+        parsed_parts.append((detect_and_parse_subscription(inline), None))
     for url in subscription_urls:
-        parsed_parts.append(detect_and_parse_subscription(fetch_subscription(url)))
+        parsed_parts.append((detect_and_parse_subscription(fetch_subscription(url)), "subscription"))
 
-    usable_parts = [part for part in parsed_parts if part.get("proxies")]
-    proxies = unique_proxy_names(
-        [proxy for part in usable_parts for proxy in (part.get("proxies") or [])]
-    )
+    usable_parts = [(part, forced_source) for part, forced_source in parsed_parts if part.get("proxies")]
+    entries: list[tuple[dict[str, Any], str]] = []
+    for part, forced_source in usable_parts:
+        kind = str(part.get("kind") or "")
+        for proxy in part.get("proxies") or []:
+            source_kind = forced_source
+            if source_kind is None:
+                if kind == "http_proxy_links":
+                    source_kind = "http"
+                elif kind == "mixed" and str(proxy.get("type") or "").lower() == "http":
+                    source_kind = "http"
+                else:
+                    source_kind = "subscription"
+            entries.append((proxy, source_kind))
+    proxies = unique_proxy_names([proxy for proxy, _ in entries])
     if not proxies:
-        kind = parsed_parts[0].get("kind") if len(parsed_parts) == 1 else "unknown"
+        kind = parsed_parts[0][0].get("kind") if len(parsed_parts) == 1 else "unknown"
         return {"kind": kind or "unknown", "proxies": [], "count": 0, "sample": []}
 
-    kind = usable_parts[0].get("kind") or "unknown"
+    kind = usable_parts[0][0].get("kind") or "unknown"
     if len(usable_parts) > 1:
         kind = "mixed"
+    node_sources = {
+        proxy["name"]: source_kind
+        for proxy, (_, source_kind) in zip(proxies, entries)
+    }
     return {
         "kind": kind,
         "proxies": proxies,
         "count": len(proxies),
         "sample": [proxy.get("name") for proxy in proxies[:8]],
+        "node_sources": node_sources,
     }
 
 
@@ -512,11 +533,20 @@ def update_subscription(source: str | None = None) -> dict[str, Any]:
 
     previous_provider = PROVIDER.read_bytes() if PROVIDER.exists() else None
     previous_source = SOURCE_FILE.read_text(encoding="utf-8") if SOURCE_FILE.exists() else ""
+    previous_node_sources = NODE_SOURCES_FILE.read_bytes() if NODE_SOURCES_FILE.exists() else None
     settings = load_settings()
     updated_settings = dict(settings)
     try:
         atomic_write(PROVIDER, proxies_to_provider_yaml(proxies))
         atomic_write(SOURCE_FILE, source + ("\n" if not source.endswith("\n") else ""))
+        atomic_write(
+            NODE_SOURCES_FILE,
+            json.dumps(
+                {"updated_at": utc_now(), "nodes": parsed.get("node_sources") or {}},
+                ensure_ascii=False,
+                indent=2,
+            ) + "\n",
+        )
         updated_settings.update(
             {
                 "subscription_kind": parsed.get("kind") or "unknown",
@@ -534,6 +564,10 @@ def update_subscription(source: str | None = None) -> dict[str, Any]:
         else:
             PROVIDER.write_bytes(previous_provider)
         atomic_write(SOURCE_FILE, previous_source)
+        if previous_node_sources is None:
+            NODE_SOURCES_FILE.unlink(missing_ok=True)
+        else:
+            NODE_SOURCES_FILE.write_bytes(previous_node_sources)
         save_settings(settings)
         sync_config(settings)
         raise
@@ -846,7 +880,7 @@ def load_delay_cache() -> dict[str, Any]:
 
 
 def cached_healthy_node_names(names: list[str] | None = None) -> list[str]:
-    names = names if names is not None else provider_node_names()
+    names = names if names is not None else eligible_provider_node_names()
     cache = load_delay_cache()
     rows = cache.get("rows") if isinstance(cache.get("rows"), dict) else {}
     healthy: list[str] = []
@@ -895,6 +929,73 @@ def provider_node_names() -> list[str]:
                 seen.add(name)
                 names.append(name)
     return names
+
+
+def node_source_map(names: list[str] | None = None) -> dict[str, str]:
+    names = names if names is not None else provider_node_names()
+    stored: dict[str, str] = {}
+    if NODE_SOURCES_FILE.exists():
+        try:
+            value = json.loads(NODE_SOURCES_FILE.read_text(encoding="utf-8"))
+            raw_nodes = value.get("nodes") if isinstance(value, dict) else {}
+            if isinstance(raw_nodes, dict):
+                stored = {
+                    str(name): str(source)
+                    for name, source in raw_nodes.items()
+                    if str(source) in {"subscription", "http"}
+                }
+        except Exception:
+            stored = {}
+
+    settings = load_settings()
+    subscription_kind = str(settings.get("subscription_kind") or "")
+    provider_types: dict[str, str] = {}
+    if subscription_kind == "mixed" and PROVIDER.exists():
+        try:
+            document = yaml.safe_load(PROVIDER.read_text(encoding="utf-8"))
+            proxies = document.get("proxies") if isinstance(document, dict) else []
+            provider_types = {
+                str(item.get("name") or ""): str(item.get("type") or "").lower()
+                for item in (proxies or [])
+                if isinstance(item, dict) and item.get("name")
+            }
+        except Exception:
+            provider_types = {}
+
+    result: dict[str, str] = {}
+    for name in names:
+        source = stored.get(name)
+        if source is None:
+            if subscription_kind == "http_proxy_links":
+                source = "http"
+            elif subscription_kind == "mixed" and provider_types.get(name) == "http":
+                source = "http"
+            else:
+                source = "subscription"
+        result[name] = source
+    return result
+
+
+def eligible_provider_node_names(
+    names: list[str] | None = None,
+    settings: dict[str, Any] | None = None,
+) -> list[str]:
+    names = names if names is not None else provider_node_names()
+    settings = settings or load_settings()
+    mode = str(settings.get("node_source_mode") or "compatible")
+    if mode == "compatible":
+        return list(names)
+    sources = node_source_map(names)
+    return [name for name in names if sources.get(name) == mode]
+
+
+def node_source_counts(names: list[str] | None = None) -> dict[str, int]:
+    names = names if names is not None else provider_node_names()
+    sources = node_source_map(names)
+    return {
+        "subscription": sum(1 for name in names if sources.get(name) == "subscription"),
+        "http": sum(1 for name in names if sources.get(name) == "http"),
+    }
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -1313,7 +1414,10 @@ def repair_unhealthy_egresses(healthy_names: list[str] | None = None) -> dict[st
 def rotation_healthy_node_names() -> list[str]:
     if not controller_online():
         raise ManagerError("请先启动 Mihomo 核心")
-    provider_names = provider_node_names()
+    provider_names = eligible_provider_node_names()
+    if not provider_names:
+        mode = load_settings()["node_source_mode"]
+        raise ManagerError(f"当前节点来源模式没有可用候选（模式: {mode}）")
     healthy_names = cached_healthy_node_names(provider_names)
     if len(healthy_names) < EGRESS_COUNT or node_test_due():
         test_nodes(repair=False)
@@ -1464,6 +1568,8 @@ def save_runtime_settings(payload: dict[str, Any]) -> dict[str, Any]:
             settings[key] = payload[key]
     if "egress_auto_rotate_enabled" in payload:
         settings["egress_auto_rotate_enabled"] = payload["egress_auto_rotate_enabled"] is True
+    if "node_source_mode" in payload:
+        settings["node_source_mode"] = payload["node_source_mode"]
     settings["egress_pool_enabled"] = True
     settings = normalized_settings(settings)
     save_settings(settings)
@@ -1482,6 +1588,7 @@ def public_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         "egress_count": EGRESS_COUNT,
         "egress_base_port": int(settings["egress_base_port"]),
         "egress_auto_rotate_enabled": bool(settings["egress_auto_rotate_enabled"]),
+        "node_source_mode": str(settings["node_source_mode"]),
         "egress_rotate_minutes": int(settings["egress_rotate_minutes"]),
         "egress_reuse_cooldown_minutes": int(settings["egress_reuse_cooldown_minutes"]),
         "max_accounts_per_egress": int(settings["max_accounts_per_egress"]),
@@ -1493,9 +1600,10 @@ def test_nodes(*, repair: bool = True) -> dict[str, Any]:
     if not controller_online():
         raise ManagerError("请先启动 Mihomo 核心")
     with _HEALTH_LOCK:
-        names = provider_node_names()
+        names = eligible_provider_node_names()
         if not names:
-            raise ManagerError("订阅中没有可测速节点")
+            mode = load_settings()["node_source_mode"]
+            raise ManagerError(f"当前节点来源模式没有可测速节点（模式: {mode}）")
         timeout_ms = 6000
         delay_maps: list[dict[str, Any]] = []
         for test_url in NODE_TEST_TARGETS:
@@ -1547,6 +1655,8 @@ def proxy_snapshot() -> dict[str, Any]:
     proxies = proxies if isinstance(proxies, dict) else {}
     group = proxies.get(PROXY_GROUP) if isinstance(proxies.get(PROXY_GROUP), dict) else {}
     names = group.get("all") if isinstance(group.get("all"), list) else []
+    provider_names = provider_node_names()
+    provider_sources = node_source_map(provider_names)
     delay_cache = load_delay_cache()
     cached_rows = delay_cache.get("rows") if isinstance(delay_cache.get("rows"), dict) else {}
     nodes: list[dict[str, Any]] = []
@@ -1569,6 +1679,7 @@ def proxy_snapshot() -> dict[str, Any]:
             {
                 "name": name,
                 "type": item.get("type") or "",
+                "source": provider_sources.get(name, "strategy"),
                 "delay": delay,
                 "alive": cached.get("ok") if cached is not None else None,
             }
@@ -1579,6 +1690,10 @@ def proxy_snapshot() -> dict[str, Any]:
         "nodes": nodes,
         "version": version.get("version") if isinstance(version, dict) else "",
         "tested_at": delay_cache.get("tested_at") or "",
+        "node_source_counts": {
+            "subscription": sum(1 for name in provider_names if provider_sources.get(name) == "subscription"),
+            "http": sum(1 for name in provider_names if provider_sources.get(name) == "http"),
+        },
     }
 
 
@@ -1657,6 +1772,7 @@ def status_payload() -> dict[str, Any]:
         "version": proxy["version"],
         "current": proxy["current"],
         "nodes": proxy["nodes"],
+        "node_source_counts": proxy.get("node_source_counts") or {"subscription": 0, "http": 0},
         "tested_at": proxy.get("tested_at") or "",
         "node_count": int(settings.get("node_count") or 0),
         "subscription_kind": settings.get("subscription_kind") or "",

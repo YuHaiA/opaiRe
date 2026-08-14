@@ -6,22 +6,13 @@ const state = {
   busy: false,
   timer: null,
   settingsLoaded: false,
-  sourceMode: "subscription",
+  nodeSourceMode: "compatible",
 };
 
-const sourceModes = {
-  subscription: {
-    hint: "每行填写一个 Clash / Meta 订阅地址，也支持 v2rayN Base64 订阅。",
-    placeholder: "粘贴一个或多个订阅 URL",
-  },
-  http: {
-    hint: "每行填写一个 http:// 或 https:// 代理节点，可包含用户名、密码和 #节点名称。",
-    placeholder: "http://user:password@host:port#节点名称",
-  },
-  mixed: {
-    hint: "可同时粘贴订阅 URL 和多行 HTTP/HTTPS 节点，系统会合并到同一节点池。",
-    placeholder: "订阅 URL\nhttp://user:password@host:port#节点名称",
-  },
+const nodeSourceModes = {
+  subscription: "只使用订阅链接获取的节点",
+  http: "只使用直接导入的 HTTP/HTTPS 节点",
+  compatible: "合并订阅节点与 HTTP 节点",
 };
 
 function apiUrl(path) {
@@ -77,8 +68,9 @@ function renderNodes(status) {
   const query = state.filter.trim().toLowerCase();
   const nodes = (status.nodes || [])
     .filter((node) => {
+      if (node.source !== "strategy" && state.nodeSourceMode !== "compatible" && node.source !== state.nodeSourceMode) return false;
       if (!query) return true;
-      return `${node.name} ${node.type}`.toLowerCase().includes(query);
+      return `${node.name} ${node.type} ${node.source}`.toLowerCase().includes(query);
     })
     .sort((a, b) => {
       const aCurrent = a.name === status.current;
@@ -102,26 +94,28 @@ function renderNodes(status) {
   $("node-list").innerHTML = nodes.map((node) => {
     const current = node.name === status.current;
     const delay = node.delay ? `${node.delay} ms` : node.alive === false ? "不可用" : "未测";
+    const sourceLabel = node.source === "http" ? "HTTP 池" : node.source === "subscription" ? "订阅池" : (node.type || "策略");
     return `
       <div class="node-row node-item" role="row">
         <span class="node-name" title="${escapeHtml(node.name)}">${escapeHtml(node.name)}</span>
-        <span class="node-type">${escapeHtml(node.type || "proxy")}</span>
+        <span class="node-type">${escapeHtml(sourceLabel)}</span>
         <span class="delay ${node.alive === false ? "dead" : delayClass(node.delay)}">${delay}</span>
         <button class="select-node ${current ? "current" : ""}" data-node="${escapeHtml(node.name)}">${current ? "当前" : "切换"}</button>
       </div>`;
   }).join("");
 }
 
-function setSourceMode(mode) {
-  const config = sourceModes[mode] || sourceModes.subscription;
-  state.sourceMode = sourceModes[mode] ? mode : "subscription";
-  document.querySelectorAll("[data-source-mode]").forEach((button) => {
-    const active = button.dataset.sourceMode === state.sourceMode;
+function setNodeSourceMode(mode, counts = state.status?.node_source_counts || {}) {
+  state.nodeSourceMode = nodeSourceModes[mode] ? mode : "compatible";
+  document.querySelectorAll("[data-node-source-mode]").forEach((button) => {
+    const active = button.dataset.nodeSourceMode === state.nodeSourceMode;
     button.classList.toggle("active", active);
-    button.setAttribute("aria-selected", String(active));
+    button.setAttribute("aria-checked", String(active));
   });
-  $("source-mode-hint").textContent = config.hint;
-  $("subscription-source").placeholder = config.placeholder;
+  const subscriptionCount = Number(counts.subscription || 0);
+  const httpCount = Number(counts.http || 0);
+  $("node-source-mode-hint").textContent = `${nodeSourceModes[state.nodeSourceMode]} · 订阅 ${subscriptionCount} / HTTP ${httpCount}`;
+  if (state.status) renderNodes(state.status);
 }
 
 function renderEgresses(status) {
@@ -175,7 +169,10 @@ function render(status) {
     $("egress-reuse-cooldown-minutes").value = settings.egress_reuse_cooldown_minutes ?? 60;
     $("max-accounts-per-egress").value = settings.max_accounts_per_egress ?? 2;
     $("account-reconcile-minutes").value = settings.account_reconcile_minutes ?? 1;
+    setNodeSourceMode(settings.node_source_mode || "compatible", status.node_source_counts);
     state.settingsLoaded = true;
+  } else {
+    setNodeSourceMode(state.nodeSourceMode, status.node_source_counts);
   }
   const capacity = Number(settings.max_accounts_per_egress || 2);
   $("online-slot-count").textContent = `${Number(settings.egress_count || 10) * capacity} 在线槽位`;
@@ -223,20 +220,21 @@ $("test-button").addEventListener("click", async () => {
 });
 $("reload-button").addEventListener("click", () => action("/api/reload", {}, "配置已重载"));
 $("update-button").addEventListener("click", () => action("/api/update", {}, "订阅已更新"));
-document.querySelectorAll("[data-source-mode]").forEach((button) => {
-  button.addEventListener("click", () => setSourceMode(button.dataset.sourceMode));
+document.querySelectorAll("[data-node-source-mode]").forEach((button) => {
+  button.addEventListener("click", () => setNodeSourceMode(button.dataset.nodeSourceMode));
 });
 $("settings-save-button").addEventListener("click", async () => {
   const body = {
     auto_update_minutes: Number($("auto-update-minutes").value || 0),
     node_test_minutes: Number($("node-test-minutes").value || 0),
     egress_auto_rotate_enabled: $("egress-auto-rotate-enabled").checked,
+    node_source_mode: state.nodeSourceMode,
     egress_rotate_minutes: Number($("egress-rotate-minutes").value || 0),
     egress_reuse_cooldown_minutes: Number($("egress-reuse-cooldown-minutes").value || 0),
     max_accounts_per_egress: Number($("max-accounts-per-egress").value || 2),
     account_reconcile_minutes: Number($("account-reconcile-minutes").value || 0),
   };
-  const result = await action("/api/settings", body, "自动切换与账号容量已保存");
+  const result = await action("/api/settings", body, "设置已保存，节点来源模式将在下次轮换生效");
   if (result) state.settingsLoaded = false;
 });
 $("rotate-button").addEventListener("click", () => action("/api/egress/rotate", {}, "10 个固定出口已轮换节点"));

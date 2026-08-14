@@ -66,6 +66,17 @@
         </div>
       </div>
       <p class="muted">出口固定为 7901–7910，不新增端口。切换只使用双目标测试通过且公网 IP 不重复的节点，并避开冷却期内刚使用过的节点与 IP；端口及账号绑定保持不变。</p>
+      <div class="node-source-mode-setting">
+        <div>
+          <strong>轮换节点来源</strong>
+          <small id="node-source-mode-hint">兼容模式会合并订阅节点与 HTTP 节点。</small>
+        </div>
+        <div class="mode-segment" role="radiogroup" aria-label="轮换节点来源">
+          <button class="mode-segment-button" type="button" role="radio" aria-checked="false" data-node-source-mode="subscription">订阅节点</button>
+          <button class="mode-segment-button" type="button" role="radio" aria-checked="false" data-node-source-mode="http">HTTP 节点</button>
+          <button class="mode-segment-button active" type="button" role="radio" aria-checked="true" data-node-source-mode="compatible">兼容模式</button>
+        </div>
+      </div>
       <div class="settings-grid">
         <label><span>订阅自动更新</span><input id="auto-update-minutes" type="number" min="0" max="10080" step="1"><small>分钟，0 为关闭</small></label>
         <label><span>节点自动测活</span><input id="node-test-minutes" type="number" min="0" max="1440" step="1"><small>分钟，失败立即换节点</small></label>
@@ -99,13 +110,7 @@
         </div>
       </div>
       <p class="muted">支持 Clash / Meta 订阅、v2rayN Base64、HTTP/HTTPS 节点，以及它们的混合内容。现有订阅不会在页面中明文回显。</p>
-      <div class="source-mode" role="tablist" aria-label="节点来源模式">
-        <button class="source-mode-button active" type="button" role="tab" aria-selected="true" data-source-mode="subscription">订阅链接</button>
-        <button class="source-mode-button" type="button" role="tab" aria-selected="false" data-source-mode="http">HTTP 节点</button>
-        <button class="source-mode-button" type="button" role="tab" aria-selected="false" data-source-mode="mixed">混合导入</button>
-      </div>
-      <p class="source-mode-hint" id="source-mode-hint">每行填写一个 Clash / Meta 订阅地址，也支持 v2rayN Base64 订阅。</p>
-      <textarea id="subscription-source" spellcheck="false" placeholder="粘贴一个或多个订阅 URL"></textarea>
+      <textarea id="subscription-source" spellcheck="false" placeholder="粘贴订阅 URL 和/或多行 http:// / https:// 节点"></textarea>
       <div class="subscription-footer">
         <p id="source-summary">尚未配置订阅</p>
         <div class="actions compact">

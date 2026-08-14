@@ -136,11 +136,14 @@ code { color: #b9f5e9; font-family: "Cascadia Code", "SFMono-Regular", Consolas,
 .subscription-meta { display: flex; gap: 16px; align-items: baseline; color: var(--muted); font-size: 13px; }
 .subscription-meta strong { color: var(--text); font-size: 20px; }
 .muted { max-width: 780px; margin-bottom: 20px; color: var(--muted); font-size: 14px; }
-.source-mode { display: inline-flex; gap: 4px; margin: 0 0 12px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.025); }
-.source-mode-button { min-height: 34px; padding: 0 14px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: 13px; }
-.source-mode-button:hover { color: var(--text); background: rgba(255,255,255,.05); }
-.source-mode-button.active { color: #061018; background: var(--accent); font-weight: 700; }
-.source-mode-hint { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+.node-source-mode-setting { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 0 0 18px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.node-source-mode-setting > div:first-child { display: grid; gap: 4px; }
+.node-source-mode-setting strong { font-size: 13px; }
+.node-source-mode-setting small { color: var(--muted); font-size: 11px; }
+.mode-segment { display: inline-flex; flex-shrink: 0; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.025); }
+.mode-segment-button { min-height: 34px; padding: 0 14px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: 13px; }
+.mode-segment-button:hover { color: var(--text); background: rgba(255,255,255,.05); }
+.mode-segment-button.active { color: #061018; background: var(--accent); font-weight: 700; }
 
 textarea, input {
   color: var(--text);
@@ -237,6 +240,7 @@ footer p { margin: 0; }
   .actions.compact { justify-content: flex-start; }
   .node-heading { gap: 18px; }
   .settings-grid { grid-template-columns: 1fr 1fr; }
+  .node-source-mode-setting { align-items: flex-start; flex-direction: column; }
   .egress-row { grid-template-columns: 120px 64px minmax(140px, 1fr) 64px; }
   .egress-row > :nth-child(4) { grid-column: 1 / 4; padding-bottom: 6px; }
   .egress-row > :nth-child(5) { grid-column: 4; grid-row: 2; }

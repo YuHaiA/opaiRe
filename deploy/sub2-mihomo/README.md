@@ -39,6 +39,7 @@ bash install-panel.sh
 - Nodes are tested against the Grok and OpenAI quality targets on a configurable schedule. Failed active nodes are replaced immediately.
 - The manager probes the real public IP through each fixed port and keeps all 10 active exit IPs unique, even when different subscription node names share one upstream IP.
 - Manual switching, scheduled rotation, and health repair skip recently used nodes and public IPs for the configurable reuse cooldown; account proxy bindings remain stable.
+- Rotation source mode can use subscription nodes only, directly imported HTTP/HTTPS nodes only, or both pools in compatible mode.
 - Scheduled rotation can be enabled or disabled independently from its interval.
 - The account capacity per egress is configurable from 1 to 20 and is applied immediately by the account reconciler.
 - Remaining managed Grok accounts are marked as standby and are promoted when an online account becomes unavailable.
