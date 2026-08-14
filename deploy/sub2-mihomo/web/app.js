@@ -140,6 +140,7 @@ function render(status) {
   const settings = status.settings || {};
   if (!state.settingsLoaded) {
     $("auto-update-minutes").value = settings.auto_update_minutes ?? 60;
+    $("node-test-minutes").value = settings.node_test_minutes ?? 5;
     $("egress-rotate-minutes").value = settings.egress_rotate_minutes ?? 30;
     $("account-reconcile-minutes").value = settings.account_reconcile_minutes ?? 1;
     state.settingsLoaded = true;
@@ -177,7 +178,8 @@ $("test-button").addEventListener("click", async () => {
   setBusy(true);
   try {
     const result = await api("/api/test", { method: "POST", body: "{}" });
-    toast(`测活完成：可用 ${result.alive}/${result.total}，最低 ${result.best_delay || "—"}ms`);
+    const switched = Number(result.switched || 0);
+    toast(`测活完成：可用 ${result.alive}/${result.total}，自动替换 ${switched} 个出口，最低 ${result.best_delay || "—"}ms`);
     await refresh(false);
   } catch (error) {
     toast(error.message, true);
@@ -190,6 +192,7 @@ $("update-button").addEventListener("click", () => action("/api/update", {}, "�
 $("settings-save-button").addEventListener("click", async () => {
   const body = {
     auto_update_minutes: Number($("auto-update-minutes").value || 0),
+    node_test_minutes: Number($("node-test-minutes").value || 0),
     egress_rotate_minutes: Number($("egress-rotate-minutes").value || 0),
     account_reconcile_minutes: Number($("account-reconcile-minutes").value || 0),
   };

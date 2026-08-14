@@ -68,6 +68,7 @@
       <p class="muted">出口固定为 7901–7910，不新增端口。订阅更新后只刷新节点池；自动轮换在固定端口内换节点。每个出口最多绑定 2 个 Grok 账号。</p>
       <div class="settings-grid">
         <label><span>订阅自动更新</span><input id="auto-update-minutes" type="number" min="0" max="10080" step="1"><small>分钟，0 为关闭</small></label>
+        <label><span>节点自动测活</span><input id="node-test-minutes" type="number" min="0" max="1440" step="1"><small>分钟，失败立即换节点</small></label>
         <label><span>出口自动轮换</span><input id="egress-rotate-minutes" type="number" min="0" max="10080" step="1"><small>分钟，0 为关闭</small></label>
         <label><span>账号补位检查</span><input id="account-reconcile-minutes" type="number" min="0" max="1440" step="1"><small>分钟，建议 1</small></label>
         <label><span>固定规则</span><input value="10 出口 × 2 账号" disabled><small>不会自动扩容</small></label>

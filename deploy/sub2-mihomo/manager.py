@@ -63,6 +63,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "node_count": 0,
     "updated_at": "",
     "auto_update_minutes": 60,
+    "node_test_minutes": 5,
     "egress_pool_enabled": True,
     "egress_count": 10,
     "egress_base_port": 7901,
@@ -76,6 +77,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 
 _CORE_LOCK = threading.RLock()
 _POOL_LOCK = threading.RLock()
+_HEALTH_LOCK = threading.Lock()
 _CORE_PROCESS: subprocess.Popen[Any] | None = None
 
 EGRESS_COUNT = 10
@@ -90,6 +92,7 @@ def normalized_settings(value: dict[str, Any] | None = None) -> dict[str, Any]:
     settings["max_accounts_per_egress"] = MAX_ACCOUNTS_PER_EGRESS
     for key, default, minimum, maximum in (
         ("auto_update_minutes", 60, 0, 10080),
+        ("node_test_minutes", 5, 0, 1440),
         ("egress_base_port", 7901, 1024, 65526),
         ("egress_rotate_minutes", 30, 0, 10080),
         ("account_reconcile_minutes", 1, 0, 1440),
@@ -689,6 +692,40 @@ def load_delay_cache() -> dict[str, Any]:
     return value if isinstance(value, dict) else {"tested_at": "", "rows": {}}
 
 
+def cached_healthy_node_names(names: list[str] | None = None) -> list[str]:
+    names = names if names is not None else provider_node_names()
+    cache = load_delay_cache()
+    rows = cache.get("rows") if isinstance(cache.get("rows"), dict) else {}
+    healthy: list[str] = []
+    for name in names:
+        row = rows.get(name)
+        if not isinstance(row, dict) or row.get("ok") is not True:
+            continue
+        try:
+            delay = int(row.get("delay") or 0)
+        except (TypeError, ValueError):
+            delay = 0
+        if delay > 0:
+            healthy.append(name)
+    return healthy
+
+
+def node_test_due(settings: dict[str, Any] | None = None) -> bool:
+    settings = settings or load_settings()
+    minutes = int(settings.get("node_test_minutes") or 0)
+    if minutes <= 0:
+        return False
+    tested_at = str(load_delay_cache().get("tested_at") or "")
+    if not tested_at:
+        return True
+    try:
+        tested = datetime.fromisoformat(tested_at)
+        age = datetime.now(tested.tzinfo or timezone.utc) - tested
+        return age.total_seconds() >= minutes * 60
+    except Exception:
+        return True
+
+
 def provider_node_names() -> list[str]:
     data = controller_request("/providers/proxies", timeout=10)
     providers = data.get("providers") if isinstance(data, dict) else {}
@@ -951,35 +988,110 @@ def reconcile_accounts() -> dict[str, Any]:
         }
 
 
-def rotate_egresses() -> dict[str, Any]:
+def repair_unhealthy_egresses(healthy_names: list[str] | None = None) -> dict[str, Any]:
     with _POOL_LOCK:
-        if not controller_online():
-            raise ManagerError("请先启动 Mihomo 核心")
-        names = provider_node_names()
-        if len(names) < EGRESS_COUNT:
-            raise ManagerError(f"可用订阅节点不足 {EGRESS_COUNT} 个，当前仅 {len(names)} 个")
+        healthy_names = healthy_names if healthy_names is not None else cached_healthy_node_names()
+        if len(healthy_names) < EGRESS_COUNT:
+            raise ManagerError(f"测速可用节点不足 {EGRESS_COUNT} 个，当前仅 {len(healthy_names)} 个")
+        healthy_set = set(healthy_names)
+        state = load_egress_state()
+        saved_assignments = state.get("assignments") if isinstance(state.get("assignments"), dict) else {}
+        live_assignments: dict[str, str] = {}
+        try:
+            response = controller_request("/proxies", timeout=10)
+            proxies = response.get("proxies") if isinstance(response, dict) else {}
+            proxies = proxies if isinstance(proxies, dict) else {}
+            for index in range(1, EGRESS_COUNT + 1):
+                group = egress_group_name(index)
+                detail = proxies.get(group) if isinstance(proxies.get(group), dict) else {}
+                live_assignments[group] = str(detail.get("now") or saved_assignments.get(group) or "")
+        except Exception:
+            live_assignments = {
+                egress_group_name(index): str(saved_assignments.get(egress_group_name(index)) or "")
+                for index in range(1, EGRESS_COUNT + 1)
+            }
+
+        try:
+            cursor = int(state.get("cursor") or 0) % len(healthy_names)
+        except (TypeError, ValueError):
+            cursor = random.randrange(len(healthy_names))
+        retained: dict[str, str] = {}
+        reserved: set[str] = set()
+        for index in range(1, EGRESS_COUNT + 1):
+            group = egress_group_name(index)
+            current = live_assignments.get(group) or ""
+            if current in healthy_set and current not in reserved:
+                retained[group] = current
+                reserved.add(current)
+        assignments: dict[str, str] = {}
+        switched = 0
+        for index in range(1, EGRESS_COUNT + 1):
+            group = egress_group_name(index)
+            if group in retained:
+                assignments[group] = retained[group]
+                continue
+            replacement = next(
+                (
+                    healthy_names[(cursor + offset) % len(healthy_names)]
+                    for offset in range(len(healthy_names))
+                    if healthy_names[(cursor + offset) % len(healthy_names)] not in reserved
+                ),
+                "",
+            )
+            if not replacement:
+                raise ManagerError("没有足够的不重复健康节点用于修复固定出口")
+            select_proxy(replacement, group)
+            assignments[group] = replacement
+            reserved.add(replacement)
+            cursor = (healthy_names.index(replacement) + 1) % len(healthy_names)
+            switched += 1
+        state["cursor"] = cursor
+        state["assignments"] = assignments
+        state["last_health_repaired_at"] = utc_now()
+        state["last_health_switched"] = switched
+        save_egress_state(state)
+        return {"ok": True, "count": EGRESS_COUNT, "switched": switched, "assignments": assignments}
+
+
+def rotate_egresses() -> dict[str, Any]:
+    if not controller_online():
+        raise ManagerError("请先启动 Mihomo 核心")
+    provider_names = provider_node_names()
+    healthy_names = cached_healthy_node_names(provider_names)
+    if len(healthy_names) < EGRESS_COUNT or node_test_due():
+        test_nodes(repair=False)
+        healthy_names = cached_healthy_node_names(provider_names)
+    if len(healthy_names) < EGRESS_COUNT:
+        raise ManagerError(f"测速可用节点不足 {EGRESS_COUNT} 个，当前仅 {len(healthy_names)} 个")
+    with _POOL_LOCK:
         state = load_egress_state()
         try:
-            cursor = int(state.get("cursor") or 0) % len(names)
+            cursor = int(state.get("cursor") or 0) % len(healthy_names)
         except (TypeError, ValueError):
-            cursor = random.randrange(len(names))
+            cursor = random.randrange(len(healthy_names))
         assignments: dict[str, str] = {}
         for offset in range(EGRESS_COUNT):
             index = offset + 1
-            node = names[(cursor + offset) % len(names)]
+            node = healthy_names[(cursor + offset) % len(healthy_names)]
             group = egress_group_name(index)
             select_proxy(node, group)
             assignments[group] = node
-        state["cursor"] = (cursor + EGRESS_COUNT) % len(names)
+        state["cursor"] = (cursor + EGRESS_COUNT) % len(healthy_names)
         state["assignments"] = assignments
         state["last_rotated_at"] = utc_now()
         save_egress_state(state)
-        return {"ok": True, "count": EGRESS_COUNT, "last_rotated_at": state["last_rotated_at"], "assignments": assignments}
+        return {
+            "ok": True,
+            "count": EGRESS_COUNT,
+            "healthy_nodes": len(healthy_names),
+            "last_rotated_at": state["last_rotated_at"],
+            "assignments": assignments,
+        }
 
 
 def save_runtime_settings(payload: dict[str, Any]) -> dict[str, Any]:
     settings = load_settings()
-    for key in ("auto_update_minutes", "egress_rotate_minutes", "account_reconcile_minutes"):
+    for key in ("auto_update_minutes", "node_test_minutes", "egress_rotate_minutes", "account_reconcile_minutes"):
         if key in payload:
             settings[key] = payload[key]
     settings["egress_pool_enabled"] = True
@@ -997,6 +1109,7 @@ def public_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     settings = settings or load_settings()
     return {
         "auto_update_minutes": int(settings["auto_update_minutes"]),
+        "node_test_minutes": int(settings["node_test_minutes"]),
         "egress_pool_enabled": True,
         "egress_count": EGRESS_COUNT,
         "egress_base_port": int(settings["egress_base_port"]),
@@ -1006,37 +1119,38 @@ def public_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     }
 
 
-def test_nodes() -> dict[str, Any]:
+def test_nodes(*, repair: bool = True) -> dict[str, Any]:
     if not controller_online():
         raise ManagerError("请先启动 Mihomo 核心")
-    names = provider_node_names()
-    if not names:
-        raise ManagerError("订阅中没有可测速节点")
-    test_url = "https://accounts.x.ai/sign-up"
-    timeout_ms = 6000
-    query = urlencode({"url": test_url, "timeout": timeout_ms})
-    data = controller_request(
-        f"/group/{quote(PROXY_GROUP, safe='')}/delay?{query}",
-        timeout=max(45.0, timeout_ms / 1000.0 + 30.0),
-    )
-    delays = data if isinstance(data, dict) else {}
-    rows: dict[str, dict[str, Any]] = {}
-    alive_delays: list[int] = []
-    for name in names:
-        try:
-            delay = int(delays.get(name) or 0)
-        except (TypeError, ValueError):
-            delay = 0
-        ok = delay > 0
-        rows[name] = {"ok": ok, "delay": delay if ok else 0}
-        if ok:
-            alive_delays.append(delay)
-    tested_at = utc_now()
-    atomic_write(
-        DELAYS_FILE,
-        json.dumps({"tested_at": tested_at, "rows": rows}, ensure_ascii=False, indent=2) + "\n",
-    )
-    return {
+    with _HEALTH_LOCK:
+        names = provider_node_names()
+        if not names:
+            raise ManagerError("订阅中没有可测速节点")
+        test_url = "https://accounts.x.ai/sign-up"
+        timeout_ms = 6000
+        query = urlencode({"url": test_url, "timeout": timeout_ms})
+        data = controller_request(
+            f"/group/{quote(PROXY_GROUP, safe='')}/delay?{query}",
+            timeout=max(45.0, timeout_ms / 1000.0 + 30.0),
+        )
+        delays = data if isinstance(data, dict) else {}
+        rows: dict[str, dict[str, Any]] = {}
+        alive_delays: list[int] = []
+        for name in names:
+            try:
+                delay = int(delays.get(name) or 0)
+            except (TypeError, ValueError):
+                delay = 0
+            ok = delay > 0
+            rows[name] = {"ok": ok, "delay": delay if ok else 0}
+            if ok:
+                alive_delays.append(delay)
+        tested_at = utc_now()
+        atomic_write(
+            DELAYS_FILE,
+            json.dumps({"tested_at": tested_at, "rows": rows}, ensure_ascii=False, indent=2) + "\n",
+        )
+    result = {
         "ok": True,
         "total": len(names),
         "alive": len(alive_delays),
@@ -1044,6 +1158,10 @@ def test_nodes() -> dict[str, Any]:
         "best_delay": min(alive_delays) if alive_delays else 0,
         "tested_at": tested_at,
     }
+    if repair and len(alive_delays) >= EGRESS_COUNT:
+        repaired = repair_unhealthy_egresses([name for name in names if rows[name]["ok"]])
+        result["switched"] = int(repaired["switched"])
+    return result
 
 
 def proxy_snapshot() -> dict[str, Any]:
@@ -1336,6 +1454,17 @@ def egress_rotate_loop(stop_event: threading.Event) -> None:
             pass
 
 
+def node_health_loop(stop_event: threading.Event) -> None:
+    while not stop_event.wait(30):
+        settings = load_settings()
+        if not controller_online() or not node_test_due(settings):
+            continue
+        try:
+            test_nodes(repair=True)
+        except Exception:
+            pass
+
+
 def account_reconcile_loop(stop_event: threading.Event) -> None:
     while not stop_event.wait(30):
         settings = load_settings()
@@ -1388,9 +1517,11 @@ def serve(*, autostart: bool = False, open_browser: bool = False) -> int:
     atexit.register(lambda: MANAGER_PID_FILE.unlink(missing_ok=True))
     stop_event = threading.Event()
     updater = threading.Thread(target=auto_update_loop, args=(stop_event,), name="subscription-auto-update", daemon=True)
+    health_checker = threading.Thread(target=node_health_loop, args=(stop_event,), name="node-auto-test", daemon=True)
     rotator = threading.Thread(target=egress_rotate_loop, args=(stop_event,), name="egress-auto-rotate", daemon=True)
     reconciler = threading.Thread(target=account_reconcile_loop, args=(stop_event,), name="account-pool-reconcile", daemon=True)
     updater.start()
+    health_checker.start()
     rotator.start()
     reconciler.start()
     web_url = f"http://{host}:{port}"

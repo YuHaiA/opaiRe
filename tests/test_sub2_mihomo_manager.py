@@ -33,6 +33,73 @@ class Sub2MihomoManagerTest(unittest.TestCase):
         )
         self.assertEqual(settings["egress_count"], 10)
         self.assertEqual(settings["max_accounts_per_egress"], 2)
+        self.assertEqual(settings["node_test_minutes"], 5)
+
+    def test_cached_healthy_nodes_exclude_failed_and_unknown(self):
+        manager = load_manager()
+        manager.load_delay_cache = lambda: {
+            "tested_at": "2026-08-14T00:00:00+00:00",
+            "rows": {
+                "alive": {"ok": True, "delay": 88},
+                "failed": {"ok": False, "delay": 0},
+            },
+        }
+
+        self.assertEqual(
+            manager.cached_healthy_node_names(["unknown", "failed", "alive"]),
+            ["alive"],
+        )
+
+    def test_rotate_egresses_uses_only_cached_healthy_nodes(self):
+        manager = load_manager()
+        healthy = [f"healthy-{index}" for index in range(12)]
+        selected = []
+        saved = {}
+        manager.controller_online = lambda: True
+        manager.provider_node_names = lambda: ["failed", *healthy]
+        manager.node_test_due = lambda settings=None: False
+        manager.load_delay_cache = lambda: {
+            "tested_at": "2026-08-14T00:00:00+00:00",
+            "rows": {
+                "failed": {"ok": False, "delay": 0},
+                **{name: {"ok": True, "delay": 100} for name in healthy},
+            },
+        }
+        manager.load_egress_state = lambda: {"cursor": 0, "assignments": {}}
+        manager.save_egress_state = lambda state: saved.update(state)
+        manager.select_proxy = lambda name, group: selected.append((group, name))
+
+        result = manager.rotate_egresses()
+
+        self.assertEqual(result["count"], 10)
+        self.assertEqual(result["healthy_nodes"], 12)
+        self.assertEqual(len(selected), 10)
+        self.assertNotIn("failed", [name for _, name in selected])
+        self.assertEqual(len(set(name for _, name in selected)), 10)
+        self.assertEqual(len(saved["assignments"]), 10)
+
+    def test_repair_egresses_only_switches_failed_assignments(self):
+        manager = load_manager()
+        healthy = [f"healthy-{index}" for index in range(12)]
+        live = {
+            manager.egress_group_name(index): healthy[index - 1]
+            for index in range(1, 11)
+        }
+        live[manager.egress_group_name(6)] = "failed"
+        selected = []
+        saved = {}
+        manager.load_egress_state = lambda: {"cursor": 0, "assignments": dict(live)}
+        manager.controller_request = lambda path, timeout=10: {
+            "proxies": {group: {"now": node} for group, node in live.items()}
+        }
+        manager.select_proxy = lambda name, group: selected.append((group, name))
+        manager.save_egress_state = lambda state: saved.update(state)
+
+        result = manager.repair_unhealthy_egresses(healthy)
+
+        self.assertEqual(result["switched"], 1)
+        self.assertEqual(selected[0][0], manager.egress_group_name(6))
+        self.assertEqual(len(set(saved["assignments"].values())), 10)
 
     def test_public_settings_do_not_expose_database_configuration(self):
         manager = load_manager()
