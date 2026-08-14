@@ -1126,7 +1126,7 @@ def test_nodes(*, repair: bool = True) -> dict[str, Any]:
         names = provider_node_names()
         if not names:
             raise ManagerError("订阅中没有可测速节点")
-        test_url = "https://accounts.x.ai/sign-up"
+        test_url = "https://api.x.ai/v1/models"
         timeout_ms = 6000
         query = urlencode({"url": test_url, "timeout": timeout_ms})
         data = controller_request(
