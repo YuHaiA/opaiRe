@@ -501,6 +501,11 @@ def _unique_names(proxies: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def unique_proxy_names(proxies: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return proxy mappings with Mihomo-safe names unique across sources."""
+    return _unique_names(proxies)
+
+
 def try_parse_clash_yaml(text: str) -> list[dict[str, Any]] | None:
     raw = (text or "").strip()
     if not raw:

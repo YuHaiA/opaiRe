@@ -27,7 +27,7 @@ bash install-panel.sh
 ## Use
 
 1. Open `https://tupai.cyou/mihomo/`
-2. Paste a Clash/Meta subscription URL, multi-line `http://` / `https://` proxy links, V2Ray share links, or a mixed list
+2. Paste one or more Clash/Meta subscription URLs, multi-line `http://` / `https://` proxy links, V2Ray share links, or mix these sources together
 3. Click **保存并导入** (or **更新现有订阅**)
 4. Pick node in the list if needed
 

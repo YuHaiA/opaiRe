@@ -30,8 +30,9 @@ import yaml
 
 from v2ray_convert import (
     detect_and_parse_subscription,
-    looks_like_http_proxy_uri,
+    looks_like_single_url,
     proxies_to_provider_yaml,
+    unique_proxy_names,
 )
 
 
@@ -459,6 +460,43 @@ def validate_config() -> str:
     return output.strip()
 
 
+def resolve_subscription_input(source: str) -> dict[str, Any]:
+    """Fetch subscription URL lines and merge them with inline proxy nodes."""
+    subscription_urls: list[str] = []
+    inline_lines: list[str] = []
+    for line in (source or "").replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        stripped = line.strip()
+        if stripped and looks_like_single_url(stripped):
+            subscription_urls.append(stripped)
+        else:
+            inline_lines.append(line)
+
+    parsed_parts: list[dict[str, Any]] = []
+    inline = "\n".join(inline_lines).strip()
+    if inline:
+        parsed_parts.append(detect_and_parse_subscription(inline))
+    for url in subscription_urls:
+        parsed_parts.append(detect_and_parse_subscription(fetch_subscription(url)))
+
+    usable_parts = [part for part in parsed_parts if part.get("proxies")]
+    proxies = unique_proxy_names(
+        [proxy for part in usable_parts for proxy in (part.get("proxies") or [])]
+    )
+    if not proxies:
+        kind = parsed_parts[0].get("kind") if len(parsed_parts) == 1 else "unknown"
+        return {"kind": kind or "unknown", "proxies": [], "count": 0, "sample": []}
+
+    kind = usable_parts[0].get("kind") or "unknown"
+    if len(usable_parts) > 1:
+        kind = "mixed"
+    return {
+        "kind": kind,
+        "proxies": proxies,
+        "count": len(proxies),
+        "sample": [proxy.get("name") for proxy in proxies[:8]],
+    }
+
+
 def update_subscription(source: str | None = None) -> dict[str, Any]:
     ensure_layout()
     if source is None:
@@ -467,14 +505,7 @@ def update_subscription(source: str | None = None) -> dict[str, Any]:
     if not source:
         raise ManagerError("请先填写订阅 URL、HTTP 节点或 V2Ray 分享链接")
 
-    raw = (
-        fetch_subscription(source)
-        if source.startswith(("http://", "https://"))
-        and "\n" not in source
-        and not looks_like_http_proxy_uri(source)
-        else source
-    )
-    parsed = detect_and_parse_subscription(raw)
+    parsed = resolve_subscription_input(source)
     proxies = parsed.get("proxies") or []
     if not proxies:
         raise ManagerError(f"未识别到可用节点（类型: {parsed.get('kind') or 'unknown'}）")

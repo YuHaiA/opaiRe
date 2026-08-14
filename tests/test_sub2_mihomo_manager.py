@@ -20,6 +20,37 @@ def load_manager():
 
 
 class Sub2MihomoManagerTest(unittest.TestCase):
+    def test_subscription_url_and_http_nodes_can_be_merged(self):
+        manager = load_manager()
+        manager.fetch_subscription = lambda url: (
+            "proxies:\n"
+            "  - name: subscribed\n"
+            "    type: http\n"
+            "    server: subscribed.example\n"
+            "    port: 3128\n"
+        )
+
+        parsed = manager.resolve_subscription_input(
+            "https://example.com/subscription.yaml\n"
+            "http://manual.example:8080#manual\n"
+        )
+
+        self.assertEqual(parsed["kind"], "mixed")
+        self.assertEqual(parsed["count"], 2)
+        self.assertEqual(
+            {item["name"] for item in parsed["proxies"]},
+            {"subscribed", "manual"},
+        )
+
+    def test_direct_http_proxy_is_not_fetched_as_subscription(self):
+        manager = load_manager()
+        manager.fetch_subscription = lambda url: self.fail("direct proxy must not be downloaded")
+
+        parsed = manager.resolve_subscription_input("http://proxy.example:8080#manual")
+
+        self.assertEqual(parsed["kind"], "http_proxy_links")
+        self.assertEqual(parsed["count"], 1)
+
     def test_fixed_egress_config_is_exactly_ten(self):
         manager = load_manager()
         manager.controller_secret = lambda: "test-secret"
