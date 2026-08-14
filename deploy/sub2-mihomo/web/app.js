@@ -6,6 +6,22 @@ const state = {
   busy: false,
   timer: null,
   settingsLoaded: false,
+  sourceMode: "subscription",
+};
+
+const sourceModes = {
+  subscription: {
+    hint: "每行填写一个 Clash / Meta 订阅地址，也支持 v2rayN Base64 订阅。",
+    placeholder: "粘贴一个或多个订阅 URL",
+  },
+  http: {
+    hint: "每行填写一个 http:// 或 https:// 代理节点，可包含用户名、密码和 #节点名称。",
+    placeholder: "http://user:password@host:port#节点名称",
+  },
+  mixed: {
+    hint: "可同时粘贴订阅 URL 和多行 HTTP/HTTPS 节点，系统会合并到同一节点池。",
+    placeholder: "订阅 URL\nhttp://user:password@host:port#节点名称",
+  },
 };
 
 function apiUrl(path) {
@@ -94,6 +110,18 @@ function renderNodes(status) {
         <button class="select-node ${current ? "current" : ""}" data-node="${escapeHtml(node.name)}">${current ? "当前" : "切换"}</button>
       </div>`;
   }).join("");
+}
+
+function setSourceMode(mode) {
+  const config = sourceModes[mode] || sourceModes.subscription;
+  state.sourceMode = sourceModes[mode] ? mode : "subscription";
+  document.querySelectorAll("[data-source-mode]").forEach((button) => {
+    const active = button.dataset.sourceMode === state.sourceMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  $("source-mode-hint").textContent = config.hint;
+  $("subscription-source").placeholder = config.placeholder;
 }
 
 function renderEgresses(status) {
@@ -195,6 +223,9 @@ $("test-button").addEventListener("click", async () => {
 });
 $("reload-button").addEventListener("click", () => action("/api/reload", {}, "配置已重载"));
 $("update-button").addEventListener("click", () => action("/api/update", {}, "订阅已更新"));
+document.querySelectorAll("[data-source-mode]").forEach((button) => {
+  button.addEventListener("click", () => setSourceMode(button.dataset.sourceMode));
+});
 $("settings-save-button").addEventListener("click", async () => {
   const body = {
     auto_update_minutes: Number($("auto-update-minutes").value || 0),
@@ -218,7 +249,7 @@ $("egress-list").addEventListener("click", (event) => {
 });
 $("save-button").addEventListener("click", async () => {
   const source = $("subscription-source").value.trim();
-  if (!source) return toast("请粘贴订阅 URL 或分享链接", true);
+  if (!source) return toast("请填写当前选择的节点来源", true);
   const result = await action("/api/subscription", { source }, "订阅已导入");
   if (result) $("subscription-source").value = "";
 });

@@ -99,7 +99,13 @@
         </div>
       </div>
       <p class="muted">支持 Clash / Meta 订阅、v2rayN Base64、HTTP/HTTPS 节点，以及它们的混合内容。现有订阅不会在页面中明文回显。</p>
-      <textarea id="subscription-source" spellcheck="false" placeholder="粘贴订阅 URL 和/或多行 http:// / https:// 节点"></textarea>
+      <div class="source-mode" role="tablist" aria-label="节点来源模式">
+        <button class="source-mode-button active" type="button" role="tab" aria-selected="true" data-source-mode="subscription">订阅链接</button>
+        <button class="source-mode-button" type="button" role="tab" aria-selected="false" data-source-mode="http">HTTP 节点</button>
+        <button class="source-mode-button" type="button" role="tab" aria-selected="false" data-source-mode="mixed">混合导入</button>
+      </div>
+      <p class="source-mode-hint" id="source-mode-hint">每行填写一个 Clash / Meta 订阅地址，也支持 v2rayN Base64 订阅。</p>
+      <textarea id="subscription-source" spellcheck="false" placeholder="粘贴一个或多个订阅 URL"></textarea>
       <div class="subscription-footer">
         <p id="source-summary">尚未配置订阅</p>
         <div class="actions compact">
