@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import atexit
 import gzip
+import ipaddress
 import json
 import os
 import random
@@ -16,13 +17,14 @@ import sys
 import threading
 import time
 import webbrowser
-from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 import yaml
 
@@ -69,6 +71,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "egress_base_port": 7901,
     "egress_auto_rotate_enabled": True,
     "egress_rotate_minutes": 30,
+    "egress_reuse_cooldown_minutes": 60,
     "max_accounts_per_egress": 2,
     "account_reconcile_minutes": 1,
     "sub2api_deploy_dir": "/home/ec2-user/sub2api-deploy",
@@ -88,6 +91,7 @@ NODE_TEST_TARGETS = (
     "https://api.x.ai/v1/models",
     "https://api.openai.com/v1/models",
 )
+EGRESS_IP_TEST_URL = "https://api.ipify.org?format=json"
 
 
 def normalized_settings(value: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -100,6 +104,7 @@ def normalized_settings(value: dict[str, Any] | None = None) -> dict[str, Any]:
         ("node_test_minutes", 5, 0, 1440),
         ("egress_base_port", 7901, 1024, 65526),
         ("egress_rotate_minutes", 30, 0, 10080),
+        ("egress_reuse_cooldown_minutes", 60, 0, 1440),
         ("max_accounts_per_egress", DEFAULT_MAX_ACCOUNTS_PER_EGRESS, 1, MAX_ACCOUNTS_PER_EGRESS_LIMIT),
         ("account_reconcile_minutes", 1, 0, 1440),
     ):
@@ -164,11 +169,74 @@ def load_egress_state() -> dict[str, Any]:
                 return value
         except Exception:
             pass
-    return {"cursor": 0, "last_rotated_at": "", "assignments": {}}
+    return {
+        "cursor": 0,
+        "last_rotated_at": "",
+        "assignments": {},
+        "exit_ips": {},
+        "node_last_used_at": {},
+        "ip_last_used_at": {},
+    }
 
 
 def save_egress_state(state: dict[str, Any]) -> None:
     atomic_write(EGRESS_STATE_FILE, json.dumps(state, ensure_ascii=False, indent=2) + "\n")
+
+
+def _state_map(state: dict[str, Any], key: str) -> dict[str, str]:
+    value = state.get(key)
+    if not isinstance(value, dict):
+        value = {}
+        state[key] = value
+    return value
+
+
+def _recent_history_values(
+    history: dict[str, str], cooldown_minutes: int, *, now: datetime | None = None
+) -> set[str]:
+    if cooldown_minutes <= 0:
+        return set()
+    now = now or datetime.now(timezone.utc).astimezone()
+    cutoff = now - timedelta(minutes=cooldown_minutes)
+    recent: set[str] = set()
+    for value, raw_timestamp in history.items():
+        try:
+            timestamp = datetime.fromisoformat(str(raw_timestamp))
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            if timestamp >= cutoff:
+                recent.add(str(value))
+        except (TypeError, ValueError):
+            continue
+    return recent
+
+
+def _record_egress_usage(
+    state: dict[str, Any], node: str, exit_ip: str, *, timestamp: str | None = None
+) -> None:
+    timestamp = timestamp or utc_now()
+    if node:
+        _state_map(state, "node_last_used_at")[node] = timestamp
+    if exit_ip:
+        _state_map(state, "ip_last_used_at")[exit_ip] = timestamp
+
+
+def _prune_egress_history(state: dict[str, Any], cooldown_minutes: int) -> None:
+    keep_minutes = max(cooldown_minutes * 2, 1440)
+    cutoff = datetime.now(timezone.utc).astimezone() - timedelta(minutes=keep_minutes)
+    for key in ("node_last_used_at", "ip_last_used_at"):
+        history = _state_map(state, key)
+        retained: dict[str, str] = {}
+        for value, raw_timestamp in history.items():
+            try:
+                timestamp = datetime.fromisoformat(str(raw_timestamp))
+                if timestamp.tzinfo is None:
+                    timestamp = timestamp.replace(tzinfo=timezone.utc)
+                if timestamp >= cutoff:
+                    retained[str(value)] = str(raw_timestamp)
+            except (TypeError, ValueError):
+                continue
+        state[key] = retained
 
 
 def controller_secret() -> str:
@@ -689,6 +757,43 @@ def select_proxy(name: str, group: str = "PROXY") -> dict[str, Any]:
     return {"ok": True, "group": group, "name": name}
 
 
+def probe_egress_ip(index: int, timeout: float = 8.0) -> str:
+    if index < 1 or index > EGRESS_COUNT:
+        raise ManagerError(f"出口编号必须在 1-{EGRESS_COUNT} 之间")
+    settings = load_settings()
+    port = int(settings["egress_base_port"]) + index - 1
+    proxy_url = f"http://127.0.0.1:{port}"
+    opener = build_opener(ProxyHandler({"http": proxy_url, "https": proxy_url}))
+    request = Request(EGRESS_IP_TEST_URL, headers={"User-Agent": "sub2-mihomo/1.0"})
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            payload = response.read(512).decode("utf-8", errors="replace").strip()
+        value = json.loads(payload)
+        exit_ip = str(value.get("ip") or "").strip() if isinstance(value, dict) else ""
+        parsed = ipaddress.ip_address(exit_ip)
+        if not parsed.is_global:
+            raise ValueError("not a public address")
+        return str(parsed)
+    except (HTTPError, URLError, OSError, ValueError, json.JSONDecodeError) as exc:
+        raise ManagerError(f"出口 {index:02d} 公网 IP 探测失败") from exc
+
+
+def probe_current_egress_ips() -> dict[str, str]:
+    results = {egress_group_name(index): "" for index in range(1, EGRESS_COUNT + 1)}
+    with ThreadPoolExecutor(max_workers=EGRESS_COUNT) as executor:
+        futures = {
+            executor.submit(probe_egress_ip, index): index
+            for index in range(1, EGRESS_COUNT + 1)
+        }
+        for future in as_completed(futures):
+            index = futures[future]
+            try:
+                results[egress_group_name(index)] = future.result()
+            except ManagerError:
+                pass
+    return results
+
+
 def load_delay_cache() -> dict[str, Any]:
     if not DELAYS_FILE.exists():
         return {"tested_at": "", "rows": {}}
@@ -1016,6 +1121,58 @@ def current_egress_assignments(state: dict[str, Any] | None = None) -> dict[str,
     return assignments
 
 
+def _select_unique_egress_candidate(
+    *,
+    index: int,
+    current: str,
+    current_ip: str,
+    healthy_names: list[str],
+    state: dict[str, Any],
+    reserved_nodes: set[str],
+    reserved_ips: set[str],
+    start: int,
+    cooldown_minutes: int,
+) -> tuple[str, str, int]:
+    group = egress_group_name(index)
+    recent_nodes = _recent_history_values(_state_map(state, "node_last_used_at"), cooldown_minutes)
+    recent_ips = _recent_history_values(_state_map(state, "ip_last_used_at"), cooldown_minutes)
+    if current:
+        recent_nodes.add(current)
+    if current_ip:
+        recent_ips.add(current_ip)
+
+    attempted = 0
+    for offset in range(len(healthy_names)):
+        candidate_index = (start + offset) % len(healthy_names)
+        candidate = healthy_names[candidate_index]
+        if candidate in reserved_nodes or candidate in recent_nodes:
+            continue
+        attempted += 1
+        select_proxy(candidate, group)
+        try:
+            exit_ip = probe_egress_ip(index)
+        except ManagerError:
+            continue
+        if exit_ip in reserved_ips or exit_ip in recent_ips:
+            continue
+        return candidate, exit_ip, (candidate_index + 1) % len(healthy_names)
+
+    if current:
+        select_proxy(current, group)
+    if attempted == 0:
+        raise ManagerError("没有未占用且不在冷却期的健康节点")
+    raise ManagerError("健康候选节点的公网 IP 均重复、处于冷却期或探测失败")
+
+
+def _restore_egress_assignments(assignments: dict[str, str]) -> None:
+    for group, node in assignments.items():
+        if node:
+            try:
+                select_proxy(node, group)
+            except Exception:
+                pass
+
+
 def repair_unhealthy_egresses(healthy_names: list[str] | None = None) -> dict[str, Any]:
     with _POOL_LOCK:
         healthy_names = healthy_names if healthy_names is not None else cached_healthy_node_names()
@@ -1024,47 +1181,92 @@ def repair_unhealthy_egresses(healthy_names: list[str] | None = None) -> dict[st
         healthy_set = set(healthy_names)
         state = load_egress_state()
         live_assignments = current_egress_assignments(state)
+        live_ips = probe_current_egress_ips()
+        if not any(live_ips.values()):
+            raise ManagerError("公网 IP 探测暂不可用，已保留当前固定出口")
+        settings = load_settings()
+        cooldown_minutes = int(settings["egress_reuse_cooldown_minutes"])
 
         try:
             cursor = int(state.get("cursor") or 0) % len(healthy_names)
         except (TypeError, ValueError):
             cursor = random.randrange(len(healthy_names))
-        retained: dict[str, str] = {}
-        reserved: set[str] = set()
+        retained: dict[str, tuple[str, str]] = {}
+        reserved_nodes: set[str] = set()
+        reserved_ips: set[str] = set()
         for index in range(1, EGRESS_COUNT + 1):
             group = egress_group_name(index)
             current = live_assignments.get(group) or ""
-            if current in healthy_set and current not in reserved:
-                retained[group] = current
-                reserved.add(current)
-        assignments: dict[str, str] = {}
-        switched = 0
-        for index in range(1, EGRESS_COUNT + 1):
-            group = egress_group_name(index)
-            if group in retained:
-                assignments[group] = retained[group]
-                continue
-            replacement = next(
-                (
-                    healthy_names[(cursor + offset) % len(healthy_names)]
-                    for offset in range(len(healthy_names))
-                    if healthy_names[(cursor + offset) % len(healthy_names)] not in reserved
-                ),
-                "",
+            exit_ip = live_ips.get(group) or ""
+            if (
+                current in healthy_set
+                and current not in reserved_nodes
+                and exit_ip
+                and exit_ip not in reserved_ips
+            ):
+                retained[group] = (current, exit_ip)
+                reserved_nodes.add(current)
+                reserved_ips.add(exit_ip)
+
+        changed_groups = [
+            egress_group_name(index)
+            for index in range(1, EGRESS_COUNT + 1)
+            if egress_group_name(index) not in retained
+        ]
+        timestamp = utc_now()
+        for group in changed_groups:
+            _record_egress_usage(
+                state,
+                live_assignments.get(group) or "",
+                live_ips.get(group) or "",
+                timestamp=timestamp,
             )
-            if not replacement:
-                raise ManagerError("没有足够的不重复健康节点用于修复固定出口")
-            select_proxy(replacement, group)
-            assignments[group] = replacement
-            reserved.add(replacement)
-            cursor = (healthy_names.index(replacement) + 1) % len(healthy_names)
-            switched += 1
+
+        assignments: dict[str, str] = {}
+        exit_ips: dict[str, str] = {}
+        switched = 0
+        try:
+            for index in range(1, EGRESS_COUNT + 1):
+                group = egress_group_name(index)
+                if group in retained:
+                    node, exit_ip = retained[group]
+                    assignments[group] = node
+                    exit_ips[group] = exit_ip
+                    continue
+                replacement, exit_ip, cursor = _select_unique_egress_candidate(
+                    index=index,
+                    current=live_assignments.get(group) or "",
+                    current_ip=live_ips.get(group) or "",
+                    healthy_names=healthy_names,
+                    state=state,
+                    reserved_nodes=reserved_nodes,
+                    reserved_ips=reserved_ips,
+                    start=cursor,
+                    cooldown_minutes=cooldown_minutes,
+                )
+                assignments[group] = replacement
+                exit_ips[group] = exit_ip
+                reserved_nodes.add(replacement)
+                reserved_ips.add(exit_ip)
+                _record_egress_usage(state, replacement, exit_ip, timestamp=timestamp)
+                switched += 1
+        except Exception:
+            _restore_egress_assignments(live_assignments)
+            raise
         state["cursor"] = cursor
         state["assignments"] = assignments
+        state["exit_ips"] = exit_ips
         state["last_health_repaired_at"] = utc_now()
         state["last_health_switched"] = switched
+        _prune_egress_history(state, cooldown_minutes)
         save_egress_state(state)
-        return {"ok": True, "count": EGRESS_COUNT, "switched": switched, "assignments": assignments}
+        return {
+            "ok": True,
+            "count": EGRESS_COUNT,
+            "switched": switched,
+            "unique_exit_ips": len(set(exit_ips.values())),
+            "assignments": assignments,
+        }
 
 
 def rotation_healthy_node_names() -> list[str]:
@@ -1087,9 +1289,20 @@ def rotate_egress(index: int) -> dict[str, Any]:
     with _POOL_LOCK:
         state = load_egress_state()
         assignments = current_egress_assignments(state)
+        live_ips = probe_current_egress_ips()
         group = egress_group_name(index)
         current = assignments.get(group) or ""
+        current_ip = live_ips.get(group) or ""
+        other_ips = [
+            live_ips.get(egress_group_name(other)) or ""
+            for other in range(1, EGRESS_COUNT + 1)
+            if other != index
+        ]
+        if not all(other_ips) or len(set(other_ips)) != EGRESS_COUNT - 1:
+            raise ManagerError("其他固定出口的公网 IP 无法确认唯一，请先执行目标站测活自动修复")
         occupied = {node for name, node in assignments.items() if name != group and node}
+        occupied_ips = set(other_ips)
+        cooldown_minutes = int(load_settings()["egress_reuse_cooldown_minutes"])
         try:
             start = (healthy_names.index(current) + 1) % len(healthy_names)
         except ValueError:
@@ -1097,22 +1310,27 @@ def rotate_egress(index: int) -> dict[str, Any]:
                 start = int(state.get("cursor") or 0) % len(healthy_names)
             except (TypeError, ValueError):
                 start = 0
-        replacement = next(
-            (
-                healthy_names[(start + offset) % len(healthy_names)]
-                for offset in range(len(healthy_names))
-                if healthy_names[(start + offset) % len(healthy_names)] != current
-                and healthy_names[(start + offset) % len(healthy_names)] not in occupied
-            ),
-            "",
+        timestamp = utc_now()
+        _record_egress_usage(state, current, current_ip, timestamp=timestamp)
+        replacement, exit_ip, cursor = _select_unique_egress_candidate(
+            index=index,
+            current=current,
+            current_ip=current_ip,
+            healthy_names=healthy_names,
+            state=state,
+            reserved_nodes=occupied,
+            reserved_ips=occupied_ips,
+            start=start,
+            cooldown_minutes=cooldown_minutes,
         )
-        if not replacement:
-            raise ManagerError("没有可切换的空闲健康节点")
-        select_proxy(replacement, group)
         assignments[group] = replacement
+        live_ips[group] = exit_ip
+        _record_egress_usage(state, replacement, exit_ip, timestamp=timestamp)
         state["assignments"] = assignments
-        state["cursor"] = (healthy_names.index(replacement) + 1) % len(healthy_names)
-        state["last_manual_switched_at"] = utc_now()
+        state["exit_ips"] = live_ips
+        state["cursor"] = cursor
+        state["last_manual_switched_at"] = timestamp
+        _prune_egress_history(state, cooldown_minutes)
         save_egress_state(state)
         return {
             "ok": True,
@@ -1122,6 +1340,7 @@ def rotate_egress(index: int) -> dict[str, Any]:
             "previous": current,
             "node": replacement,
             "healthy_nodes": len(healthy_names),
+            "unique_exit_ips": len(set(live_ips.values())),
         }
 
 
@@ -1129,25 +1348,61 @@ def rotate_egresses() -> dict[str, Any]:
     healthy_names = rotation_healthy_node_names()
     with _POOL_LOCK:
         state = load_egress_state()
+        live_assignments = current_egress_assignments(state)
+        live_ips = probe_current_egress_ips()
+        if any(live_assignments.values()) and not any(live_ips.values()):
+            raise ManagerError("公网 IP 探测暂不可用，已取消本次轮换")
+        cooldown_minutes = int(load_settings()["egress_reuse_cooldown_minutes"])
         try:
             cursor = int(state.get("cursor") or 0) % len(healthy_names)
         except (TypeError, ValueError):
             cursor = random.randrange(len(healthy_names))
-        assignments: dict[str, str] = {}
-        for offset in range(EGRESS_COUNT):
-            index = offset + 1
-            node = healthy_names[(cursor + offset) % len(healthy_names)]
+        timestamp = utc_now()
+        for index in range(1, EGRESS_COUNT + 1):
             group = egress_group_name(index)
-            select_proxy(node, group)
-            assignments[group] = node
-        state["cursor"] = (cursor + EGRESS_COUNT) % len(healthy_names)
+            _record_egress_usage(
+                state,
+                live_assignments.get(group) or "",
+                live_ips.get(group) or "",
+                timestamp=timestamp,
+            )
+        assignments: dict[str, str] = {}
+        exit_ips: dict[str, str] = {}
+        reserved_nodes: set[str] = set()
+        reserved_ips: set[str] = set()
+        try:
+            for index in range(1, EGRESS_COUNT + 1):
+                group = egress_group_name(index)
+                replacement, exit_ip, cursor = _select_unique_egress_candidate(
+                    index=index,
+                    current=live_assignments.get(group) or "",
+                    current_ip=live_ips.get(group) or "",
+                    healthy_names=healthy_names,
+                    state=state,
+                    reserved_nodes=reserved_nodes,
+                    reserved_ips=reserved_ips,
+                    start=cursor,
+                    cooldown_minutes=cooldown_minutes,
+                )
+                assignments[group] = replacement
+                exit_ips[group] = exit_ip
+                reserved_nodes.add(replacement)
+                reserved_ips.add(exit_ip)
+                _record_egress_usage(state, replacement, exit_ip, timestamp=timestamp)
+        except Exception:
+            _restore_egress_assignments(live_assignments)
+            raise
+        state["cursor"] = cursor
         state["assignments"] = assignments
-        state["last_rotated_at"] = utc_now()
+        state["exit_ips"] = exit_ips
+        state["last_rotated_at"] = timestamp
+        _prune_egress_history(state, cooldown_minutes)
         save_egress_state(state)
         return {
             "ok": True,
             "count": EGRESS_COUNT,
             "healthy_nodes": len(healthy_names),
+            "unique_exit_ips": len(set(exit_ips.values())),
             "last_rotated_at": state["last_rotated_at"],
             "assignments": assignments,
         }
@@ -1160,6 +1415,7 @@ def save_runtime_settings(payload: dict[str, Any]) -> dict[str, Any]:
         "auto_update_minutes",
         "node_test_minutes",
         "egress_rotate_minutes",
+        "egress_reuse_cooldown_minutes",
         "max_accounts_per_egress",
         "account_reconcile_minutes",
     ):
@@ -1186,6 +1442,7 @@ def public_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         "egress_base_port": int(settings["egress_base_port"]),
         "egress_auto_rotate_enabled": bool(settings["egress_auto_rotate_enabled"]),
         "egress_rotate_minutes": int(settings["egress_rotate_minutes"]),
+        "egress_reuse_cooldown_minutes": int(settings["egress_reuse_cooldown_minutes"]),
         "max_accounts_per_egress": int(settings["max_accounts_per_egress"]),
         "account_reconcile_minutes": int(settings["account_reconcile_minutes"]),
     }

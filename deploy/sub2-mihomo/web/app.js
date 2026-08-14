@@ -109,7 +109,7 @@ function renderEgresses(status) {
       <code>${escapeHtml(row.port)}</code>
       <span class="egress-node" title="${escapeHtml(row.node || "")}">${escapeHtml(row.node || "未选择")}</span>
       <span><b>${row.account_count || 0}/${row.capacity || 2}</b><small>${escapeHtml(accounts)}</small></span>
-      <button class="egress-switch" data-egress-index="${row.index}" title="切换到下一个未占用的健康节点">换节点</button>
+      <button class="egress-switch" data-egress-index="${row.index}" title="切换到公网 IP 不重复且不在冷却期的健康节点">换节点</button>
     </div>`;
   }).join("");
   $("standby-count").textContent = `${status.standby_accounts || 0} 个候补`;
@@ -144,6 +144,7 @@ function render(status) {
     $("node-test-minutes").value = settings.node_test_minutes ?? 5;
     $("egress-auto-rotate-enabled").checked = settings.egress_auto_rotate_enabled !== false;
     $("egress-rotate-minutes").value = settings.egress_rotate_minutes ?? 30;
+    $("egress-reuse-cooldown-minutes").value = settings.egress_reuse_cooldown_minutes ?? 60;
     $("max-accounts-per-egress").value = settings.max_accounts_per_egress ?? 2;
     $("account-reconcile-minutes").value = settings.account_reconcile_minutes ?? 1;
     state.settingsLoaded = true;
@@ -200,6 +201,7 @@ $("settings-save-button").addEventListener("click", async () => {
     node_test_minutes: Number($("node-test-minutes").value || 0),
     egress_auto_rotate_enabled: $("egress-auto-rotate-enabled").checked,
     egress_rotate_minutes: Number($("egress-rotate-minutes").value || 0),
+    egress_reuse_cooldown_minutes: Number($("egress-reuse-cooldown-minutes").value || 0),
     max_accounts_per_egress: Number($("max-accounts-per-egress").value || 2),
     account_reconcile_minutes: Number($("account-reconcile-minutes").value || 0),
   };

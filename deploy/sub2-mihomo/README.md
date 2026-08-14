@@ -37,7 +37,8 @@ bash install-panel.sh
 - Each fixed port owns an independent `EGRESS-01` through `EGRESS-10` select group.
 - Subscription refresh updates the available node pool and preserves the fixed ports.
 - Nodes are tested against the Grok and OpenAI quality targets on a configurable schedule. Failed active nodes are replaced immediately.
-- Manual per-egress switching and scheduled rotation only select recently tested healthy nodes behind ports 7901-7910; account proxy bindings remain stable.
+- The manager probes the real public IP through each fixed port and keeps all 10 active exit IPs unique, even when different subscription node names share one upstream IP.
+- Manual switching, scheduled rotation, and health repair skip recently used nodes and public IPs for the configurable reuse cooldown; account proxy bindings remain stable.
 - Scheduled rotation can be enabled or disabled independently from its interval.
 - The account capacity per egress is configurable from 1 to 20 and is applied immediately by the account reconciler.
 - Remaining managed Grok accounts are marked as standby and are promoted when an online account becomes unavailable.
