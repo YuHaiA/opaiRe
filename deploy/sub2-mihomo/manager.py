@@ -82,6 +82,10 @@ _CORE_PROCESS: subprocess.Popen[Any] | None = None
 
 EGRESS_COUNT = 10
 MAX_ACCOUNTS_PER_EGRESS = 2
+NODE_TEST_TARGETS = (
+    "https://api.x.ai/v1/models",
+    "https://api.openai.com/v1/models",
+)
 
 
 def normalized_settings(value: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1126,22 +1130,26 @@ def test_nodes(*, repair: bool = True) -> dict[str, Any]:
         names = provider_node_names()
         if not names:
             raise ManagerError("订阅中没有可测速节点")
-        test_url = "https://api.x.ai/v1/models"
         timeout_ms = 6000
-        query = urlencode({"url": test_url, "timeout": timeout_ms})
-        data = controller_request(
-            f"/group/{quote(PROXY_GROUP, safe='')}/delay?{query}",
-            timeout=max(45.0, timeout_ms / 1000.0 + 30.0),
-        )
-        delays = data if isinstance(data, dict) else {}
+        delay_maps: list[dict[str, Any]] = []
+        for test_url in NODE_TEST_TARGETS:
+            query = urlencode({"url": test_url, "timeout": timeout_ms})
+            data = controller_request(
+                f"/group/{quote(PROXY_GROUP, safe='')}/delay?{query}",
+                timeout=max(45.0, timeout_ms / 1000.0 + 30.0),
+            )
+            delay_maps.append(data if isinstance(data, dict) else {})
         rows: dict[str, dict[str, Any]] = {}
         alive_delays: list[int] = []
         for name in names:
-            try:
-                delay = int(delays.get(name) or 0)
-            except (TypeError, ValueError):
-                delay = 0
-            ok = delay > 0
+            delays: list[int] = []
+            for delay_map in delay_maps:
+                try:
+                    delays.append(int(delay_map.get(name) or 0))
+                except (TypeError, ValueError):
+                    delays.append(0)
+            ok = bool(delays) and all(delay > 0 for delay in delays)
+            delay = max(delays, default=0) if ok else 0
             rows[name] = {"ok": ok, "delay": delay if ok else 0}
             if ok:
                 alive_delays.append(delay)

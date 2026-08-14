@@ -36,7 +36,7 @@ bash install-panel.sh
 - The pool is always exactly 10 egresses. It never creates an 11th port or Mihomo process.
 - Each fixed port owns an independent `EGRESS-01` through `EGRESS-10` select group.
 - Subscription refresh updates the available node pool and preserves the fixed ports.
-- Nodes are tested against the Grok target on a configurable schedule. Failed active nodes are replaced immediately.
+- Nodes are tested against the Grok and OpenAI quality targets on a configurable schedule. Failed active nodes are replaced immediately.
 - Rotation only selects recently tested healthy nodes behind ports 7901-7910; account proxy bindings remain stable.
 - The account reconciler keeps at most 2 schedulable Grok accounts per egress (20 online slots total).
 - Remaining managed Grok accounts are marked as standby and are promoted when an online account becomes unavailable.

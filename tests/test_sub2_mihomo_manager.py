@@ -1,6 +1,7 @@
 import importlib.util
 import sys
 from pathlib import Path
+import tempfile
 import unittest
 
 
@@ -100,6 +101,28 @@ class Sub2MihomoManagerTest(unittest.TestCase):
         self.assertEqual(result["switched"], 1)
         self.assertEqual(selected[0][0], manager.egress_group_name(6))
         self.assertEqual(len(set(saved["assignments"].values())), 10)
+
+    def test_node_test_requires_grok_and_openai_targets(self):
+        manager = load_manager()
+        responses = iter(
+            [
+                {"both": 120, "grok-only": 100},
+                {"both": 180, "grok-only": 0},
+            ]
+        )
+        manager.controller_online = lambda: True
+        manager.provider_node_names = lambda: ["both", "grok-only"]
+        manager.controller_request = lambda *args, **kwargs: next(responses)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager.DELAYS_FILE = Path(temp_dir) / "delays.json"
+            result = manager.test_nodes(repair=False)
+            cache = manager.load_delay_cache()
+
+        self.assertEqual(result["alive"], 1)
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(cache["rows"]["both"], {"ok": True, "delay": 180})
+        self.assertEqual(cache["rows"]["grok-only"], {"ok": False, "delay": 0})
 
     def test_public_settings_do_not_expose_database_configuration(self):
         manager = load_manager()
