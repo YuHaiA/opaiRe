@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Optional CLI helper. Prefer the web panel at /mihomo/ for daily use."""
 import json
+import os
 import re
 import sys
 import urllib.request
 from pathlib import Path
 
-CFG = Path("/opt/sub2-mihomo/config.yaml")
+ROOT = Path(os.environ.get("MIHOMO_ROOT", Path(__file__).resolve().parent))
+CFG = ROOT / "config.yaml"
 PROVIDER_BLOCK = """proxy-providers:
   subscription:
     type: http
@@ -24,7 +26,7 @@ PROVIDER_BLOCK = """proxy-providers:
 def main():
     if len(sys.argv) < 2:
         print("usage: set_subscription.py SUB_URL", file=sys.stderr)
-        print("prefer web panel: https://tupai.cyou/mihomo/", file=sys.stderr)
+        print("prefer the configured Mihomo web panel", file=sys.stderr)
         return 2
     url = sys.argv[1].strip()
     text = CFG.read_text(encoding="utf-8")

@@ -40,6 +40,9 @@ ROOT = Path(__file__).resolve().parent
 BIN = ROOT / "bin" / ("mihomo.exe" if os.name == "nt" else "mihomo")
 SERVICE_NAME = os.environ.get("MIHOMO_SERVICE", "sub2-mihomo")
 PUBLIC_BASE = os.environ.get("MIHOMO_PUBLIC_BASE", "https://tupai.cyou/mihomo").rstrip("/")
+SUB2API_DOCKER_HOST = os.environ.get("SUB2API_DOCKER_HOST", "172.20.0.1").strip() or "172.20.0.1"
+SUB2API_DEPLOY_DIR = os.environ.get("SUB2API_DEPLOY_DIR", "/home/ec2-user/sub2api-deploy").strip()
+SUB2API_POSTGRES_CONTAINER = os.environ.get("SUB2API_POSTGRES_CONTAINER", "sub2api-postgres").strip() or "sub2api-postgres"
 MANAGED_BY_SYSTEMD = os.environ.get("MIHOMO_SYSTEMD", "1" if os.name != "nt" else "0") == "1"
 PRESERVE_CONFIG = os.environ.get("MIHOMO_PRESERVE_CONFIG", "0") == "1"
 PROXY_GROUP = os.environ.get("MIHOMO_PROXY_GROUP", "PROXY").strip() or "PROXY"
@@ -81,8 +84,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "egress_reuse_cooldown_minutes": 60,
     "max_accounts_per_egress": 2,
     "account_reconcile_minutes": 1,
-    "sub2api_deploy_dir": "/home/ec2-user/sub2api-deploy",
-    "sub2api_postgres_container": "sub2api-postgres",
+    "sub2api_deploy_dir": SUB2API_DEPLOY_DIR,
+    "sub2api_postgres_container": SUB2API_POSTGRES_CONTAINER,
+    "sub2api_docker_host": SUB2API_DOCKER_HOST,
     "public_base": "https://tupai.cyou/mihomo",
 }
 
@@ -397,6 +401,9 @@ def ensure_layout() -> dict[str, Any]:
     settings = load_settings()
     if PUBLIC_BASE:
         settings["public_base"] = PUBLIC_BASE
+    settings["sub2api_docker_host"] = SUB2API_DOCKER_HOST
+    settings["sub2api_deploy_dir"] = SUB2API_DEPLOY_DIR
+    settings["sub2api_postgres_container"] = SUB2API_POSTGRES_CONTAINER
     if not PROVIDER.exists():
         atomic_write(PROVIDER, "proxies: []\n")
     sync_config(settings)
@@ -1062,17 +1069,18 @@ def sub2api_json_rows(query: str) -> list[dict[str, Any]]:
 def ensure_sub2api_egress_proxies() -> list[dict[str, Any]]:
     settings = load_settings()
     base_port = int(settings["egress_base_port"])
+    docker_host = str(settings.get("sub2api_docker_host") or SUB2API_DOCKER_HOST).replace("'", "''")
     statements = ["BEGIN;"]
     for index in range(1, EGRESS_COUNT + 1):
         name = egress_proxy_name(index)
         port = base_port + index - 1
         statements.append(
             "INSERT INTO proxies (name, protocol, host, port, status, fallback_mode) "
-            f"SELECT '{name}', 'http', '172.20.0.1', {port}, 'active', 'none' "
+            f"SELECT '{name}', 'http', '{docker_host}', {port}, 'active', 'none' "
             f"WHERE NOT EXISTS (SELECT 1 FROM proxies WHERE name='{name}' AND deleted_at IS NULL);"
         )
         statements.append(
-            f"UPDATE proxies SET protocol='http', host='172.20.0.1', port={port}, "
+            f"UPDATE proxies SET protocol='http', host='{docker_host}', port={port}, "
             f"status='active', fallback_mode='none', updated_at=now() WHERE name='{name}' AND deleted_at IS NULL;"
         )
     statements.append("COMMIT;")
@@ -1787,7 +1795,7 @@ def status_payload() -> dict[str, Any]:
         "mixed_port": mixed,
         "proxy_url": f"http://127.0.0.1:{mixed}",
         "socks_url": f"socks5://127.0.0.1:{mixed}",
-        "docker_proxy_url": f"http://172.20.0.1:{mixed}",
+        "docker_proxy_url": f"http://{settings.get('sub2api_docker_host') or SUB2API_DOCKER_HOST}:{mixed}",
         "controller": controller_base(settings),
         "dashboard_url": ((public_base + "/ui/") if public_base else (controller_base(settings) + "/ui/")) if DASHBOARD_ENABLED else "",
         "web_url": public_base + "/" if public_base else f"http://{settings['web_host']}:{int(settings['web_port'])}",

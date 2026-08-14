@@ -5,13 +5,16 @@ Wants=network-online.target sub2-mihomo.service
 
 [Service]
 Type=simple
-User=ec2-user
-Group=ec2-user
-WorkingDirectory=/opt/sub2-mihomo
+User=__MIHOMO_USER__
+Group=__MIHOMO_GROUP__
+WorkingDirectory=__MIHOMO_ROOT__
 Environment=MIHOMO_SYSTEMD=1
 Environment=MIHOMO_SERVICE=sub2-mihomo
-Environment=MIHOMO_PUBLIC_BASE=https://tupai.cyou/mihomo
-ExecStart=/usr/bin/python3 /opt/sub2-mihomo/manager.py serve
+Environment="MIHOMO_PUBLIC_BASE=__MIHOMO_PUBLIC_BASE__"
+Environment="SUB2API_DOCKER_HOST=__SUB2API_DOCKER_HOST__"
+Environment="SUB2API_DEPLOY_DIR=__SUB2API_DEPLOY_DIR__"
+Environment="SUB2API_POSTGRES_CONTAINER=__SUB2API_POSTGRES_CONTAINER__"
+ExecStart=/usr/bin/python3 __MIHOMO_ROOT__/manager.py serve
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=65535

@@ -1,0 +1,65 @@
+# Safe bootstrap configuration. install.sh replaces the secret placeholder and
+# manager.py then maintains the full fixed-egress configuration.
+mixed-port: 7890
+socks-port: 7891
+allow-lan: true
+bind-address: "*"
+mode: rule
+log-level: warning
+ipv6: false
+find-process-mode: off
+unified-delay: true
+tcp-concurrent: true
+geo-auto-update: false
+
+external-controller: 127.0.0.1:9090
+secret: "__CONTROLLER_SECRET__"
+external-ui: ui
+
+profile:
+  store-selected: true
+  store-fake-ip: false
+
+proxy-providers:
+  subscription:
+    type: file
+    path: providers/subscription.yaml
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 600
+      lazy: true
+
+proxy-groups:
+  - name: STICKY
+    type: fallback
+    use: [subscription]
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    lazy: true
+  - name: AUTO-URLTEST
+    type: url-test
+    use: [subscription]
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+    lazy: true
+  - name: AUTO-BALANCE
+    type: load-balance
+    strategy: round-robin
+    use: [subscription]
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    lazy: true
+  - name: PROXY
+    type: select
+    use: [subscription]
+    proxies: [STICKY, AUTO-URLTEST, AUTO-BALANCE]
+
+rules:
+  - DOMAIN-SUFFIX,local,DIRECT
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - MATCH,PROXY

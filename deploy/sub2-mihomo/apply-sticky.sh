@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT=/opt/sub2-mihomo
+ROOT="${MIHOMO_ROOT:-/opt/sub2-mihomo}"
 cd "$ROOT"
-python3 - <<'PY'
+python3 - "$ROOT" <<'PY'
 import sys
-sys.path.insert(0, '/opt/sub2-mihomo')
+sys.path.insert(0, sys.argv[1])
 import manager
 settings = manager.ensure_layout()
 # force default selected group path to STICKY after rewrite

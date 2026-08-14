@@ -48,3 +48,12 @@ register - 副本.py
 ChatGPT_team.py
 agent.py
 domain_register/
+
+# Mihomo deployment runtime and secrets (templates remain tracked)
+deploy/sub2-mihomo/bin/
+deploy/sub2-mihomo/ui/
+deploy/sub2-mihomo/logs/
+deploy/sub2-mihomo/backups/
+deploy/sub2-mihomo/state/
+deploy/sub2-mihomo/providers/
+deploy/sub2-mihomo/CREDENTIALS.txt

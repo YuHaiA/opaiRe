@@ -1,7 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 URL=${1:-}
-CFG=/opt/sub2-mihomo/config.yaml
+ROOT="${MIHOMO_ROOT:-/opt/sub2-mihomo}"
+CFG="$ROOT/config.yaml"
 if [ -z "$URL" ]; then
   echo "usage: $0 <subscription-url>" >&2
   exit 1
@@ -19,9 +20,18 @@ if n != 1:
 cfg.write_text(text2, encoding="utf-8")
 print("updated subscription url")
 PY
-SECRET=$(python3 -c 'import re; from pathlib import Path; t=Path("/opt/sub2-mihomo/config.yaml").read_text(encoding="utf-8"); m=re.search(r"^secret:\s*\"([^\"]+)\"", t, re.M); print(m.group(1) if m else "")')
+SECRET=$(python3 - "$CFG" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+t = Path(sys.argv[1]).read_text(encoding="utf-8")
+m = re.search(r'^secret:\s*"([^"]+)"', t, re.M)
+print(m.group(1) if m else "")
+PY
+)
 if curl -fsS -m 3 -H "Authorization: Bearer ${SECRET}" http://127.0.0.1:9090/version >/dev/null 2>&1; then
-  curl -fsS -m 15 -X PUT "http://127.0.0.1:9090/configs?force=true" -H "Authorization: Bearer ${SECRET}" -H "Content-Type: application/json" -d "{\"path\":\"/opt/sub2-mihomo/config.yaml\"}" >/dev/null || sudo systemctl restart sub2-mihomo
+  curl -fsS -m 15 -X PUT "http://127.0.0.1:9090/configs?force=true" -H "Authorization: Bearer ${SECRET}" -H "Content-Type: application/json" -d "{\"path\":\"${CFG}\"}" >/dev/null || sudo systemctl restart sub2-mihomo
   curl -fsS -m 90 -X PUT "http://127.0.0.1:9090/providers/proxies/sub" -H "Authorization: Bearer ${SECRET}" >/dev/null || true
   echo reloaded
 else
