@@ -153,12 +153,21 @@ textarea { width: 100%; min-height: 130px; padding: 15px 16px; resize: vertical;
 .settings-grid label > span { font-size: 13px; font-weight: 700; }
 .settings-grid input { width: 100%; height: 40px; padding: 0 11px; }
 .settings-grid small, .egress-row small { display: block; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.switch { position: relative; display: inline-flex; width: 46px; height: 26px; align-items: center; }
+.settings-grid .switch input { position: absolute; width: 1px; height: 1px; padding: 0; opacity: 0; }
+.switch > span { width: 46px; height: 26px; border: 1px solid var(--line-strong); border-radius: 13px; background: rgba(255,255,255,.08); cursor: pointer; transition: background 180ms var(--ease), border-color 180ms var(--ease); }
+.switch > span::after { content: ""; display: block; width: 18px; height: 18px; margin: 3px; border-radius: 50%; background: var(--muted); transition: transform 180ms var(--ease), background 180ms var(--ease); }
+.switch input:checked + span { border-color: rgba(98, 230, 202, .7); background: rgba(98, 230, 202, .2); }
+.switch input:checked + span::after { transform: translateX(20px); background: var(--accent); }
+.switch input:focus-visible + span { box-shadow: 0 0 0 3px rgba(98, 230, 202, .12); }
 .pool-actions { margin: 18px 0 26px; }
 .egress-table { border-top: 1px solid var(--line-strong); }
-.egress-row { display: grid; grid-template-columns: 170px 80px minmax(240px, 1fr) minmax(190px, .7fr); gap: 16px; align-items: center; min-height: 58px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.egress-row { display: grid; grid-template-columns: 160px 72px minmax(220px, 1fr) minmax(180px, .7fr) 72px; gap: 16px; align-items: center; min-height: 58px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 .egress-header { min-height: 42px; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 .egress-node { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .egress-row b { color: var(--accent); font-variant-numeric: tabular-nums; }
+.egress-switch { padding: 7px 0; border: 0; background: transparent; color: var(--accent); cursor: pointer; text-align: left; }
+.egress-switch:hover { color: var(--text); }
 .pool-meta { margin: 14px 0 0; color: var(--muted); font-size: 12px; }
 .subscription-footer { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-top: 14px; }
 .subscription-footer p { margin: 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
@@ -223,9 +232,10 @@ footer p { margin: 0; }
   .actions.compact { justify-content: flex-start; }
   .node-heading { gap: 18px; }
   .settings-grid { grid-template-columns: 1fr 1fr; }
-  .egress-row { grid-template-columns: 120px 64px minmax(140px, 1fr); }
-  .egress-row > :nth-child(4) { grid-column: 1 / -1; padding-bottom: 6px; }
-  .egress-header > :nth-child(4) { display: none; }
+  .egress-row { grid-template-columns: 120px 64px minmax(140px, 1fr) 64px; }
+  .egress-row > :nth-child(4) { grid-column: 1 / 4; padding-bottom: 6px; }
+  .egress-row > :nth-child(5) { grid-column: 4; grid-row: 2; }
+  .egress-header > :nth-child(4), .egress-header > :nth-child(5) { display: none; }
   .search { width: 100%; }
   .search input { width: 100%; }
   .node-row { grid-template-columns: minmax(160px, 1fr) 72px 68px; }
@@ -236,8 +246,9 @@ footer p { margin: 0; }
 @media (max-width: 540px) {
   .settings-grid { grid-template-columns: 1fr; }
   .egress-row { grid-template-columns: 1fr auto; }
-  .egress-row > :nth-child(3), .egress-row > :nth-child(4) { grid-column: 1 / -1; }
-  .egress-header > :nth-child(3), .egress-header > :nth-child(4) { display: none; }
+  .egress-row > :nth-child(3), .egress-row > :nth-child(4), .egress-row > :nth-child(5) { grid-column: 1 / -1; }
+  .egress-row > :nth-child(5) { grid-row: auto; }
+  .egress-header > :nth-child(3), .egress-header > :nth-child(4), .egress-header > :nth-child(5) { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

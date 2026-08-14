@@ -67,6 +67,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "egress_pool_enabled": True,
     "egress_count": 10,
     "egress_base_port": 7901,
+    "egress_auto_rotate_enabled": True,
     "egress_rotate_minutes": 30,
     "max_accounts_per_egress": 2,
     "account_reconcile_minutes": 1,
@@ -81,7 +82,8 @@ _HEALTH_LOCK = threading.Lock()
 _CORE_PROCESS: subprocess.Popen[Any] | None = None
 
 EGRESS_COUNT = 10
-MAX_ACCOUNTS_PER_EGRESS = 2
+DEFAULT_MAX_ACCOUNTS_PER_EGRESS = 2
+MAX_ACCOUNTS_PER_EGRESS_LIMIT = 20
 NODE_TEST_TARGETS = (
     "https://api.x.ai/v1/models",
     "https://api.openai.com/v1/models",
@@ -93,12 +95,12 @@ def normalized_settings(value: dict[str, Any] | None = None) -> dict[str, Any]:
     if value:
         settings.update(value)
     settings["egress_count"] = EGRESS_COUNT
-    settings["max_accounts_per_egress"] = MAX_ACCOUNTS_PER_EGRESS
     for key, default, minimum, maximum in (
         ("auto_update_minutes", 60, 0, 10080),
         ("node_test_minutes", 5, 0, 1440),
         ("egress_base_port", 7901, 1024, 65526),
         ("egress_rotate_minutes", 30, 0, 10080),
+        ("max_accounts_per_egress", DEFAULT_MAX_ACCOUNTS_PER_EGRESS, 1, MAX_ACCOUNTS_PER_EGRESS_LIMIT),
         ("account_reconcile_minutes", 1, 0, 1440),
     ):
         try:
@@ -107,6 +109,7 @@ def normalized_settings(value: dict[str, Any] | None = None) -> dict[str, Any]:
             number = default
         settings[key] = min(max(number, minimum), maximum)
     settings["egress_pool_enabled"] = bool(settings.get("egress_pool_enabled", True))
+    settings["egress_auto_rotate_enabled"] = bool(settings.get("egress_auto_rotate_enabled", True))
     return settings
 
 
@@ -431,7 +434,7 @@ def update_subscription(source: str | None = None) -> dict[str, Any]:
         try:
             reload_core()
             if bool(updated_settings.get("egress_pool_enabled", True)):
-                rotate_egresses()
+                test_nodes(repair=True)
             reloaded = True
         except Exception:
             reloaded = False
@@ -862,8 +865,9 @@ def _account_healthy(account: dict[str, Any]) -> bool:
 
 
 def reconcile_accounts() -> dict[str, Any]:
-    """Keep exactly ten fixed egress rows and at most two schedulable Grok accounts on each."""
+    """Keep ten fixed egress rows and the configured schedulable Grok account capacity on each."""
     with _POOL_LOCK:
+        max_accounts_per_egress = int(load_settings()["max_accounts_per_egress"])
         proxies = ensure_sub2api_egress_proxies()
         if len(proxies) != EGRESS_COUNT:
             raise ManagerError(f"固定出口创建不完整: {len(proxies)}/{EGRESS_COUNT}")
@@ -890,7 +894,7 @@ def reconcile_accounts() -> dict[str, Any]:
             if managed and not standby and not bool(account.get("schedulable")):
                 externally_disabled.add(account_id)
                 continue
-            if healthy and bool(account.get("schedulable")) and proxy_id in slots and len(slots[proxy_id]) < MAX_ACCOUNTS_PER_EGRESS:
+            if healthy and bool(account.get("schedulable")) and proxy_id in slots and len(slots[proxy_id]) < max_accounts_per_egress:
                 slots[proxy_id].append(account)
                 selected[account_id] = proxy_id
                 continue
@@ -899,7 +903,7 @@ def reconcile_accounts() -> dict[str, Any]:
 
         candidate_index = 0
         while candidate_index < len(candidates):
-            available = [proxy_id for proxy_id, bound in slots.items() if len(bound) < MAX_ACCOUNTS_PER_EGRESS]
+            available = [proxy_id for proxy_id, bound in slots.items() if len(bound) < max_accounts_per_egress]
             if not available:
                 break
             proxy_id = min(available, key=lambda value: (len(slots[value]), proxy_by_id[value]["name"]))
@@ -992,6 +996,26 @@ def reconcile_accounts() -> dict[str, Any]:
         }
 
 
+def current_egress_assignments(state: dict[str, Any] | None = None) -> dict[str, str]:
+    state = state or load_egress_state()
+    saved = state.get("assignments") if isinstance(state.get("assignments"), dict) else {}
+    assignments: dict[str, str] = {}
+    try:
+        response = controller_request("/proxies", timeout=10)
+        proxies = response.get("proxies") if isinstance(response, dict) else {}
+        proxies = proxies if isinstance(proxies, dict) else {}
+        for index in range(1, EGRESS_COUNT + 1):
+            group = egress_group_name(index)
+            detail = proxies.get(group) if isinstance(proxies.get(group), dict) else {}
+            assignments[group] = str(detail.get("now") or saved.get(group) or "")
+    except Exception:
+        assignments = {
+            egress_group_name(index): str(saved.get(egress_group_name(index)) or "")
+            for index in range(1, EGRESS_COUNT + 1)
+        }
+    return assignments
+
+
 def repair_unhealthy_egresses(healthy_names: list[str] | None = None) -> dict[str, Any]:
     with _POOL_LOCK:
         healthy_names = healthy_names if healthy_names is not None else cached_healthy_node_names()
@@ -999,21 +1023,7 @@ def repair_unhealthy_egresses(healthy_names: list[str] | None = None) -> dict[st
             raise ManagerError(f"测速可用节点不足 {EGRESS_COUNT} 个，当前仅 {len(healthy_names)} 个")
         healthy_set = set(healthy_names)
         state = load_egress_state()
-        saved_assignments = state.get("assignments") if isinstance(state.get("assignments"), dict) else {}
-        live_assignments: dict[str, str] = {}
-        try:
-            response = controller_request("/proxies", timeout=10)
-            proxies = response.get("proxies") if isinstance(response, dict) else {}
-            proxies = proxies if isinstance(proxies, dict) else {}
-            for index in range(1, EGRESS_COUNT + 1):
-                group = egress_group_name(index)
-                detail = proxies.get(group) if isinstance(proxies.get(group), dict) else {}
-                live_assignments[group] = str(detail.get("now") or saved_assignments.get(group) or "")
-        except Exception:
-            live_assignments = {
-                egress_group_name(index): str(saved_assignments.get(egress_group_name(index)) or "")
-                for index in range(1, EGRESS_COUNT + 1)
-            }
+        live_assignments = current_egress_assignments(state)
 
         try:
             cursor = int(state.get("cursor") or 0) % len(healthy_names)
@@ -1057,7 +1067,7 @@ def repair_unhealthy_egresses(healthy_names: list[str] | None = None) -> dict[st
         return {"ok": True, "count": EGRESS_COUNT, "switched": switched, "assignments": assignments}
 
 
-def rotate_egresses() -> dict[str, Any]:
+def rotation_healthy_node_names() -> list[str]:
     if not controller_online():
         raise ManagerError("请先启动 Mihomo 核心")
     provider_names = provider_node_names()
@@ -1067,6 +1077,56 @@ def rotate_egresses() -> dict[str, Any]:
         healthy_names = cached_healthy_node_names(provider_names)
     if len(healthy_names) < EGRESS_COUNT:
         raise ManagerError(f"测速可用节点不足 {EGRESS_COUNT} 个，当前仅 {len(healthy_names)} 个")
+    return healthy_names
+
+
+def rotate_egress(index: int) -> dict[str, Any]:
+    if index < 1 or index > EGRESS_COUNT:
+        raise ManagerError(f"出口编号必须在 1-{EGRESS_COUNT} 之间")
+    healthy_names = rotation_healthy_node_names()
+    with _POOL_LOCK:
+        state = load_egress_state()
+        assignments = current_egress_assignments(state)
+        group = egress_group_name(index)
+        current = assignments.get(group) or ""
+        occupied = {node for name, node in assignments.items() if name != group and node}
+        try:
+            start = (healthy_names.index(current) + 1) % len(healthy_names)
+        except ValueError:
+            try:
+                start = int(state.get("cursor") or 0) % len(healthy_names)
+            except (TypeError, ValueError):
+                start = 0
+        replacement = next(
+            (
+                healthy_names[(start + offset) % len(healthy_names)]
+                for offset in range(len(healthy_names))
+                if healthy_names[(start + offset) % len(healthy_names)] != current
+                and healthy_names[(start + offset) % len(healthy_names)] not in occupied
+            ),
+            "",
+        )
+        if not replacement:
+            raise ManagerError("没有可切换的空闲健康节点")
+        select_proxy(replacement, group)
+        assignments[group] = replacement
+        state["assignments"] = assignments
+        state["cursor"] = (healthy_names.index(replacement) + 1) % len(healthy_names)
+        state["last_manual_switched_at"] = utc_now()
+        save_egress_state(state)
+        return {
+            "ok": True,
+            "index": index,
+            "group": group,
+            "port": int(load_settings()["egress_base_port"]) + index - 1,
+            "previous": current,
+            "node": replacement,
+            "healthy_nodes": len(healthy_names),
+        }
+
+
+def rotate_egresses() -> dict[str, Any]:
+    healthy_names = rotation_healthy_node_names()
     with _POOL_LOCK:
         state = load_egress_state()
         try:
@@ -1095,18 +1155,25 @@ def rotate_egresses() -> dict[str, Any]:
 
 def save_runtime_settings(payload: dict[str, Any]) -> dict[str, Any]:
     settings = load_settings()
-    for key in ("auto_update_minutes", "node_test_minutes", "egress_rotate_minutes", "account_reconcile_minutes"):
+    previous_capacity = int(settings["max_accounts_per_egress"])
+    for key in (
+        "auto_update_minutes",
+        "node_test_minutes",
+        "egress_rotate_minutes",
+        "max_accounts_per_egress",
+        "account_reconcile_minutes",
+    ):
         if key in payload:
             settings[key] = payload[key]
+    if "egress_auto_rotate_enabled" in payload:
+        settings["egress_auto_rotate_enabled"] = payload["egress_auto_rotate_enabled"] is True
     settings["egress_pool_enabled"] = True
     settings = normalized_settings(settings)
     save_settings(settings)
-    sync_config(settings)
-    validate_config()
-    if controller_online():
-        reload_core()
-        rotate_egresses()
-    return {"ok": True, "settings": public_settings(settings)}
+    result: dict[str, Any] = {"ok": True, "settings": public_settings(settings)}
+    if int(settings["max_accounts_per_egress"]) != previous_capacity:
+        result["accounts"] = reconcile_accounts()
+    return result
 
 
 def public_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1117,8 +1184,9 @@ def public_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         "egress_pool_enabled": True,
         "egress_count": EGRESS_COUNT,
         "egress_base_port": int(settings["egress_base_port"]),
+        "egress_auto_rotate_enabled": bool(settings["egress_auto_rotate_enabled"]),
         "egress_rotate_minutes": int(settings["egress_rotate_minutes"]),
-        "max_accounts_per_egress": MAX_ACCOUNTS_PER_EGRESS,
+        "max_accounts_per_egress": int(settings["max_accounts_per_egress"]),
         "account_reconcile_minutes": int(settings["account_reconcile_minutes"]),
     }
 
@@ -1219,6 +1287,7 @@ def proxy_snapshot() -> dict[str, Any]:
 def egress_snapshot() -> list[dict[str, Any]]:
     settings = load_settings()
     base_port = int(settings["egress_base_port"])
+    capacity = int(settings["max_accounts_per_egress"])
     pool_state = load_egress_state()
     account_rows = pool_state.get("account_summary") if isinstance(pool_state.get("account_summary"), list) else []
     accounts_by_name = {
@@ -1246,7 +1315,7 @@ def egress_snapshot() -> list[dict[str, Any]]:
                 "node": detail.get("now") or (pool_state.get("assignments") or {}).get(group, ""),
                 "account_count": int(account_row.get("account_count") or 0),
                 "accounts": account_row.get("accounts") if isinstance(account_row.get("accounts"), list) else [],
-                "capacity": MAX_ACCOUNTS_PER_EGRESS,
+                "capacity": capacity,
             }
         )
     return rows
@@ -1402,7 +1471,14 @@ class WebHandler(BaseHTTPRequestHandler):
             elif path == "/api/settings":
                 result = save_runtime_settings(body)
             elif path == "/api/egress/rotate":
-                result = rotate_egresses()
+                if body.get("index") is None:
+                    result = rotate_egresses()
+                else:
+                    try:
+                        index = int(body["index"])
+                    except (TypeError, ValueError) as exc:
+                        raise ManagerError("出口编号无效") from exc
+                    result = rotate_egress(index)
             elif path == "/api/egress/reconcile":
                 result = reconcile_accounts()
             elif path == "/api/shutdown":
@@ -1446,7 +1522,7 @@ def egress_rotate_loop(stop_event: threading.Event) -> None:
     while not stop_event.wait(30):
         settings = load_settings()
         minutes = int(settings.get("egress_rotate_minutes") or 0)
-        if minutes <= 0 or not controller_online():
+        if not bool(settings.get("egress_auto_rotate_enabled")) or minutes <= 0 or not controller_online():
             continue
         state = load_egress_state()
         try:

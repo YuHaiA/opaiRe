@@ -33,8 +33,9 @@ class Sub2MihomoManagerTest(unittest.TestCase):
             [f"EGRESS-{index:02d}" for index in range(1, 11)],
         )
         self.assertEqual(settings["egress_count"], 10)
-        self.assertEqual(settings["max_accounts_per_egress"], 2)
+        self.assertEqual(settings["max_accounts_per_egress"], 20)
         self.assertEqual(settings["node_test_minutes"], 5)
+        self.assertTrue(settings["egress_auto_rotate_enabled"])
 
     def test_cached_healthy_nodes_exclude_failed_and_unknown(self):
         manager = load_manager()
@@ -78,6 +79,36 @@ class Sub2MihomoManagerTest(unittest.TestCase):
         self.assertNotIn("failed", [name for _, name in selected])
         self.assertEqual(len(set(name for _, name in selected)), 10)
         self.assertEqual(len(saved["assignments"]), 10)
+
+    def test_rotate_one_egress_uses_unoccupied_healthy_node(self):
+        manager = load_manager()
+        healthy = [f"healthy-{index}" for index in range(12)]
+        assignments = {
+            manager.egress_group_name(index): healthy[index - 1]
+            for index in range(1, 11)
+        }
+        selected = []
+        saved = {}
+        manager.controller_online = lambda: True
+        manager.provider_node_names = lambda: list(healthy)
+        manager.node_test_due = lambda settings=None: False
+        manager.load_delay_cache = lambda: {
+            "tested_at": "2026-08-14T00:00:00+00:00",
+            "rows": {name: {"ok": True, "delay": 100} for name in healthy},
+        }
+        manager.load_egress_state = lambda: {"cursor": 0, "assignments": dict(assignments)}
+        manager.current_egress_assignments = lambda state=None: dict(assignments)
+        manager.select_proxy = lambda name, group: selected.append((group, name))
+        manager.save_egress_state = lambda state: saved.update(state)
+        manager.load_settings = lambda: manager.normalized_settings()
+
+        result = manager.rotate_egress(3)
+
+        self.assertEqual(result["index"], 3)
+        self.assertEqual(result["previous"], "healthy-2")
+        self.assertEqual(result["node"], "healthy-10")
+        self.assertEqual(selected, [(manager.egress_group_name(3), "healthy-10")])
+        self.assertEqual(len(set(saved["assignments"].values())), 10)
 
     def test_repair_egresses_only_switches_failed_assignments(self):
         manager = load_manager()
@@ -137,6 +168,7 @@ class Sub2MihomoManagerTest(unittest.TestCase):
 
         self.assertEqual(public["egress_count"], 10)
         self.assertEqual(public["max_accounts_per_egress"], 2)
+        self.assertTrue(public["egress_auto_rotate_enabled"])
         self.assertNotIn("sub2api_deploy_dir", public)
         self.assertNotIn("sub2api_postgres_container", public)
 

@@ -109,6 +109,7 @@ function renderEgresses(status) {
       <code>${escapeHtml(row.port)}</code>
       <span class="egress-node" title="${escapeHtml(row.node || "")}">${escapeHtml(row.node || "未选择")}</span>
       <span><b>${row.account_count || 0}/${row.capacity || 2}</b><small>${escapeHtml(accounts)}</small></span>
+      <button class="egress-switch" data-egress-index="${row.index}" title="切换到下一个未占用的健康节点">换节点</button>
     </div>`;
   }).join("");
   $("standby-count").textContent = `${status.standby_accounts || 0} 个候补`;
@@ -141,10 +142,14 @@ function render(status) {
   if (!state.settingsLoaded) {
     $("auto-update-minutes").value = settings.auto_update_minutes ?? 60;
     $("node-test-minutes").value = settings.node_test_minutes ?? 5;
+    $("egress-auto-rotate-enabled").checked = settings.egress_auto_rotate_enabled !== false;
     $("egress-rotate-minutes").value = settings.egress_rotate_minutes ?? 30;
+    $("max-accounts-per-egress").value = settings.max_accounts_per_egress ?? 2;
     $("account-reconcile-minutes").value = settings.account_reconcile_minutes ?? 1;
     state.settingsLoaded = true;
   }
+  const capacity = Number(settings.max_accounts_per_egress || 2);
+  $("online-slot-count").textContent = `${Number(settings.egress_count || 10) * capacity} 在线槽位`;
   renderEgresses(status);
   renderNodes(status);
   $("last-refresh").textContent = `刷新于 ${new Date().toLocaleTimeString()}`;
@@ -193,14 +198,22 @@ $("settings-save-button").addEventListener("click", async () => {
   const body = {
     auto_update_minutes: Number($("auto-update-minutes").value || 0),
     node_test_minutes: Number($("node-test-minutes").value || 0),
+    egress_auto_rotate_enabled: $("egress-auto-rotate-enabled").checked,
     egress_rotate_minutes: Number($("egress-rotate-minutes").value || 0),
+    max_accounts_per_egress: Number($("max-accounts-per-egress").value || 2),
     account_reconcile_minutes: Number($("account-reconcile-minutes").value || 0),
   };
-  const result = await action("/api/settings", body, "自动更新与轮换周期已保存");
+  const result = await action("/api/settings", body, "自动切换与账号容量已保存");
   if (result) state.settingsLoaded = false;
 });
 $("rotate-button").addEventListener("click", () => action("/api/egress/rotate", {}, "10 个固定出口已轮换节点"));
 $("reconcile-button").addEventListener("click", () => action("/api/egress/reconcile", {}, "Grok 在线槽位已同步"));
+$("egress-list").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-egress-index]");
+  if (!button) return;
+  const index = Number(button.dataset.egressIndex);
+  action("/api/egress/rotate", { index }, `出口 ${String(index).padStart(2, "0")} 已切换健康节点`);
+});
 $("save-button").addEventListener("click", async () => {
   const source = $("subscription-source").value.trim();
   if (!source) return toast("请粘贴订阅 URL 或分享链接", true);

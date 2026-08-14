@@ -62,16 +62,17 @@
         </div>
         <div class="subscription-meta">
           <span id="standby-count">0 个候补</span>
-          <strong>20 在线槽位</strong>
+          <strong id="online-slot-count">20 在线槽位</strong>
         </div>
       </div>
-      <p class="muted">出口固定为 7901–7910，不新增端口。订阅更新后只刷新节点池；自动轮换在固定端口内换节点。每个出口最多绑定 2 个 Grok 账号。</p>
+      <p class="muted">出口固定为 7901–7910，不新增端口。手动和自动切换都只从双目标测试通过的健康节点中选择，端口及账号绑定保持不变。</p>
       <div class="settings-grid">
         <label><span>订阅自动更新</span><input id="auto-update-minutes" type="number" min="0" max="10080" step="1"><small>分钟，0 为关闭</small></label>
         <label><span>节点自动测活</span><input id="node-test-minutes" type="number" min="0" max="1440" step="1"><small>分钟，失败立即换节点</small></label>
+        <label class="toggle-setting"><span>自动切换节点</span><span class="switch"><input id="egress-auto-rotate-enabled" type="checkbox"><span aria-hidden="true"></span></span><small>开启后按轮换周期切换</small></label>
         <label><span>出口自动轮换</span><input id="egress-rotate-minutes" type="number" min="0" max="10080" step="1"><small>分钟，0 为关闭</small></label>
+        <label><span>每出口账号数</span><input id="max-accounts-per-egress" type="number" min="1" max="20" step="1"><small>1–20，保存后立即同步</small></label>
         <label><span>账号补位检查</span><input id="account-reconcile-minutes" type="number" min="0" max="1440" step="1"><small>分钟，建议 1</small></label>
-        <label><span>固定规则</span><input value="10 出口 × 2 账号" disabled><small>不会自动扩容</small></label>
       </div>
       <div class="actions pool-actions">
         <button class="button primary" id="settings-save-button">保存周期</button>
@@ -79,7 +80,7 @@
         <button class="button" id="reconcile-button">立即同步账号槽位</button>
       </div>
       <div class="egress-table" role="table" aria-label="固定出口池">
-        <div class="egress-row egress-header" role="row"><span>出口</span><span>端口</span><span>当前节点</span><span>账号槽位</span></div>
+        <div class="egress-row egress-header" role="row"><span>出口</span><span>端口</span><span>当前节点</span><span>账号槽位</span><span>操作</span></div>
         <div id="egress-list"><div class="empty">正在读取固定出口状态。</div></div>
       </div>
       <p class="pool-meta" id="pool-meta">尚未轮换或同步。</p>
