@@ -5,6 +5,7 @@ const state = {
   filter: "",
   busy: false,
   timer: null,
+  settingsLoaded: false,
 };
 
 function apiUrl(path) {
@@ -95,6 +96,25 @@ function renderNodes(status) {
   }).join("");
 }
 
+function renderEgresses(status) {
+  const rows = status.egresses || [];
+  if (!rows.length) {
+    $("egress-list").innerHTML = '<div class="empty">尚未生成固定出口。</div>';
+    return;
+  }
+  $("egress-list").innerHTML = rows.map((row) => {
+    const accounts = (row.accounts || []).map((item) => item.name || `#${item.id}`).join("、") || "等待补位";
+    return `<div class="egress-row" role="row">
+      <strong>${escapeHtml(row.name)}</strong>
+      <code>${escapeHtml(row.port)}</code>
+      <span class="egress-node" title="${escapeHtml(row.node || "")}">${escapeHtml(row.node || "未选择")}</span>
+      <span><b>${row.account_count || 0}/${row.capacity || 2}</b><small>${escapeHtml(accounts)}</small></span>
+    </div>`;
+  }).join("");
+  $("standby-count").textContent = `${status.standby_accounts || 0} 个候补`;
+  $("pool-meta").textContent = `最后轮换 ${status.last_rotated_at || "—"} · 最后补位 ${status.accounts_reconciled_at || "—"}`;
+}
+
 function render(status) {
   state.status = status;
   const runtime = $("runtime-state");
@@ -117,6 +137,14 @@ function render(status) {
   $("reload-button").disabled = state.busy || !status.running;
   $("test-button").disabled = state.busy || !status.running;
   $("dashboard-button").hidden = !status.dashboard_url;
+  const settings = status.settings || {};
+  if (!state.settingsLoaded) {
+    $("auto-update-minutes").value = settings.auto_update_minutes ?? 60;
+    $("egress-rotate-minutes").value = settings.egress_rotate_minutes ?? 30;
+    $("account-reconcile-minutes").value = settings.account_reconcile_minutes ?? 1;
+    state.settingsLoaded = true;
+  }
+  renderEgresses(status);
   renderNodes(status);
   $("last-refresh").textContent = `刷新于 ${new Date().toLocaleTimeString()}`;
 }
@@ -159,6 +187,17 @@ $("test-button").addEventListener("click", async () => {
 });
 $("reload-button").addEventListener("click", () => action("/api/reload", {}, "配置已重载"));
 $("update-button").addEventListener("click", () => action("/api/update", {}, "订阅已更新"));
+$("settings-save-button").addEventListener("click", async () => {
+  const body = {
+    auto_update_minutes: Number($("auto-update-minutes").value || 0),
+    egress_rotate_minutes: Number($("egress-rotate-minutes").value || 0),
+    account_reconcile_minutes: Number($("account-reconcile-minutes").value || 0),
+  };
+  const result = await action("/api/settings", body, "自动更新与轮换周期已保存");
+  if (result) state.settingsLoaded = false;
+});
+$("rotate-button").addEventListener("click", () => action("/api/egress/rotate", {}, "10 个固定出口已轮换节点"));
+$("reconcile-button").addEventListener("click", () => action("/api/egress/reconcile", {}, "Grok 在线槽位已同步"));
 $("save-button").addEventListener("click", async () => {
   const source = $("subscription-source").value.trim();
   if (!source) return toast("请粘贴订阅 URL 或分享链接", true);

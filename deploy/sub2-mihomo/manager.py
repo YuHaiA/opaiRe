@@ -9,6 +9,7 @@ import atexit
 import gzip
 import json
 import os
+import random
 import secrets
 import subprocess
 import sys
@@ -45,6 +46,7 @@ SECRET_FILE = STATE_DIR / "controller.secret"
 PID_FILE = STATE_DIR / "mihomo.pid"
 MANAGER_PID_FILE = STATE_DIR / "manager.pid"
 DELAYS_FILE = STATE_DIR / "delays.json"
+EGRESS_STATE_FILE = STATE_DIR / "egress-pool.json"
 LOG_FILE = ROOT / "logs" / "mihomo.log"
 ERR_FILE = ROOT / "logs" / "mihomo.err.log"
 WEB_DIR = ROOT / "web"
@@ -61,11 +63,44 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "node_count": 0,
     "updated_at": "",
     "auto_update_minutes": 60,
+    "egress_pool_enabled": True,
+    "egress_count": 10,
+    "egress_base_port": 7901,
+    "egress_rotate_minutes": 30,
+    "max_accounts_per_egress": 2,
+    "account_reconcile_minutes": 1,
+    "sub2api_deploy_dir": "/home/ec2-user/sub2api-deploy",
+    "sub2api_postgres_container": "sub2api-postgres",
     "public_base": "https://tupai.cyou/mihomo",
 }
 
 _CORE_LOCK = threading.RLock()
+_POOL_LOCK = threading.RLock()
 _CORE_PROCESS: subprocess.Popen[Any] | None = None
+
+EGRESS_COUNT = 10
+MAX_ACCOUNTS_PER_EGRESS = 2
+
+
+def normalized_settings(value: dict[str, Any] | None = None) -> dict[str, Any]:
+    settings = dict(DEFAULT_SETTINGS)
+    if value:
+        settings.update(value)
+    settings["egress_count"] = EGRESS_COUNT
+    settings["max_accounts_per_egress"] = MAX_ACCOUNTS_PER_EGRESS
+    for key, default, minimum, maximum in (
+        ("auto_update_minutes", 60, 0, 10080),
+        ("egress_base_port", 7901, 1024, 65526),
+        ("egress_rotate_minutes", 30, 0, 10080),
+        ("account_reconcile_minutes", 1, 0, 1440),
+    ):
+        try:
+            number = int(settings.get(key, default))
+        except (TypeError, ValueError):
+            number = default
+        settings[key] = min(max(number, minimum), maximum)
+    settings["egress_pool_enabled"] = bool(settings.get("egress_pool_enabled", True))
+    return settings
 
 
 class ManagerError(RuntimeError):
@@ -84,7 +119,7 @@ def atomic_write(path: Path, content: str) -> None:
 
 
 def load_settings() -> dict[str, Any]:
-    settings = dict(DEFAULT_SETTINGS)
+    settings: dict[str, Any] = {}
     if SETTINGS_FILE.exists():
         try:
             loaded = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
@@ -92,11 +127,42 @@ def load_settings() -> dict[str, Any]:
                 settings.update(loaded)
         except Exception:
             pass
-    return settings
+    return normalized_settings(settings)
 
 
 def save_settings(settings: dict[str, Any]) -> None:
-    atomic_write(SETTINGS_FILE, json.dumps(settings, ensure_ascii=False, indent=2) + "\n")
+    atomic_write(SETTINGS_FILE, json.dumps(normalized_settings(settings), ensure_ascii=False, indent=2) + "\n")
+
+
+def egress_group_name(index: int) -> str:
+    return f"EGRESS-{index:02d}"
+
+
+def egress_listener_name(index: int) -> str:
+    return f"sub2-egress-{index:02d}"
+
+
+def egress_proxy_name(index: int) -> str:
+    return f"mihomo-egress-{index:02d}"
+
+
+def load_egress_state() -> dict[str, Any]:
+    if EGRESS_STATE_FILE.exists():
+        try:
+            value = json.loads(EGRESS_STATE_FILE.read_text(encoding="utf-8"))
+            if isinstance(value, dict):
+                return value
+        except Exception:
+            pass
+        try:
+            update_subscription()
+        except Exception:
+            pass
+    return {"cursor": 0, "last_rotated_at": "", "assignments": {}}
+
+
+def save_egress_state(state: dict[str, Any]) -> None:
+    atomic_write(EGRESS_STATE_FILE, json.dumps(state, ensure_ascii=False, indent=2) + "\n")
 
 
 def controller_secret() -> str:
@@ -131,7 +197,57 @@ def controller_secret() -> str:
 def config_document(settings: dict[str, Any]) -> dict[str, Any]:
     secret = controller_secret()
     allow_lan = bool(settings.get("allow_lan", True))
-    return {
+    groups = [
+        {
+            "name": "STICKY",
+            "type": "fallback",
+            "use": ["subscription"],
+            "url": "https://www.gstatic.com/generate_204",
+            "interval": 300,
+            "lazy": True,
+        },
+        {
+            "name": "AUTO-URLTEST",
+            "type": "url-test",
+            "use": ["subscription"],
+            "url": "https://www.gstatic.com/generate_204",
+            "interval": 300,
+            "tolerance": 50,
+            "lazy": True,
+        },
+        {
+            "name": "AUTO-BALANCE",
+            "type": "load-balance",
+            "strategy": "round-robin",
+            "use": ["subscription"],
+            "url": "https://www.gstatic.com/generate_204",
+            "interval": 300,
+            "lazy": True,
+        },
+        {
+            "name": "PROXY",
+            "type": "select",
+            "use": ["subscription"],
+            "proxies": ["STICKY", "AUTO-URLTEST", "AUTO-BALANCE"],
+        },
+    ]
+    listeners: list[dict[str, Any]] = []
+    if bool(settings.get("egress_pool_enabled", True)):
+        base_port = int(settings.get("egress_base_port") or 7901)
+        for index in range(1, EGRESS_COUNT + 1):
+            group = egress_group_name(index)
+            groups.append({"name": group, "type": "select", "use": ["subscription"]})
+            listeners.append(
+                {
+                    "name": egress_listener_name(index),
+                    "type": "mixed",
+                    "port": base_port + index - 1,
+                    "listen": "0.0.0.0" if allow_lan else "127.0.0.1",
+                    "proxy": group,
+                }
+            )
+
+    document = {
         "mixed-port": int(settings["mixed_port"]),
         "socks-port": int(settings.get("socks_port") or 7891),
         "allow-lan": allow_lan,
@@ -159,42 +275,7 @@ def config_document(settings: dict[str, Any]) -> dict[str, Any]:
                 },
             }
         },
-        "proxy-groups": [
-            {
-                # fallback sticks to the first alive node; switch only after health-check failure.
-                # Same sticky behavior as Server1 /opt/cpa-mihomo CPA-STABLE.
-                "name": "STICKY",
-                "type": "fallback",
-                "use": ["subscription"],
-                "url": "https://www.gstatic.com/generate_204",
-                "interval": 300,
-                "lazy": True,
-            },
-            {
-                "name": "AUTO-URLTEST",
-                "type": "url-test",
-                "use": ["subscription"],
-                "url": "https://www.gstatic.com/generate_204",
-                "interval": 300,
-                "tolerance": 50,
-                "lazy": True,
-            },
-            {
-                "name": "AUTO-BALANCE",
-                "type": "load-balance",
-                "strategy": "round-robin",
-                "use": ["subscription"],
-                "url": "https://www.gstatic.com/generate_204",
-                "interval": 300,
-                "lazy": True,
-            },
-            {
-                "name": "PROXY",
-                "type": "select",
-                "use": ["subscription"],
-                "proxies": ["STICKY", "AUTO-URLTEST", "AUTO-BALANCE"],
-            },
-        ],
+        "proxy-groups": groups,
         "rules": [
             "DOMAIN-SUFFIX,local,DIRECT",
             "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
@@ -204,6 +285,9 @@ def config_document(settings: dict[str, Any]) -> dict[str, Any]:
             "MATCH,PROXY",
         ],
     }
+    if listeners:
+        document["listeners"] = listeners
+    return document
 
 
 def write_config(settings: dict[str, Any] | None = None) -> None:
@@ -343,6 +427,8 @@ def update_subscription(source: str | None = None) -> dict[str, Any]:
     if controller_online():
         try:
             reload_core()
+            if bool(updated_settings.get("egress_pool_enabled", True)):
+                rotate_egresses()
             reloaded = True
         except Exception:
             reloaded = False
@@ -625,6 +711,304 @@ def provider_node_names() -> list[str]:
     return names
 
 
+def _parse_env_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.exists():
+        return values
+    for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        values[key.strip()] = value
+    return values
+
+
+def sub2api_psql(sql: str, *, timeout: float = 30.0) -> str:
+    settings = load_settings()
+    deploy_dir = Path(str(settings.get("sub2api_deploy_dir") or ""))
+    env = _parse_env_file(deploy_dir / ".env")
+    password = env.get("POSTGRES_PASSWORD", "")
+    if not password:
+        raise ManagerError("未能从 Sub2API .env 读取数据库密码")
+    container = str(settings.get("sub2api_postgres_container") or "sub2api-postgres")
+    command = [
+        "docker", "exec", "-i", "-e", f"PGPASSWORD={password}", container,
+        "psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", env.get("POSTGRES_USER", "sub2api"),
+        "-d", env.get("POSTGRES_DB", "sub2api"), "-At",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            input=sql,
+            cwd=str(deploy_dir),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ManagerError(f"连接 Sub2API 数据库失败: {exc}") from exc
+    if result.returncode != 0:
+        raise ManagerError("Sub2API 数据库操作失败: " + (result.stderr or result.stdout)[-800:].strip())
+    return result.stdout
+
+
+def sub2api_json_rows(query: str) -> list[dict[str, Any]]:
+    output = sub2api_psql(query.rstrip().rstrip(";") + ";\n")
+    rows: list[dict[str, Any]] = []
+    for line in output.splitlines():
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            rows.append(value)
+    return rows
+
+
+def ensure_sub2api_egress_proxies() -> list[dict[str, Any]]:
+    settings = load_settings()
+    base_port = int(settings["egress_base_port"])
+    statements = ["BEGIN;"]
+    for index in range(1, EGRESS_COUNT + 1):
+        name = egress_proxy_name(index)
+        port = base_port + index - 1
+        statements.append(
+            "INSERT INTO proxies (name, protocol, host, port, status, fallback_mode) "
+            f"SELECT '{name}', 'http', '172.20.0.1', {port}, 'active', 'none' "
+            f"WHERE NOT EXISTS (SELECT 1 FROM proxies WHERE name='{name}' AND deleted_at IS NULL);"
+        )
+        statements.append(
+            f"UPDATE proxies SET protocol='http', host='172.20.0.1', port={port}, "
+            f"status='active', fallback_mode='none', updated_at=now() WHERE name='{name}' AND deleted_at IS NULL;"
+        )
+    statements.append("COMMIT;")
+    sub2api_psql("\n".join(statements))
+    names = ",".join(f"'{egress_proxy_name(i)}'" for i in range(1, EGRESS_COUNT + 1))
+    return sub2api_json_rows(
+        "SELECT json_build_object('id',id,'name',name,'port',port,'status',status) "
+        f"FROM proxies WHERE deleted_at IS NULL AND name IN ({names}) ORDER BY name"
+    )
+
+
+def _timestamp_is_future(value: Any) -> bool:
+    if not value:
+        return False
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        now = datetime.now(parsed.tzinfo or timezone.utc)
+        return parsed > now
+    except Exception:
+        return False
+
+
+def _account_healthy(account: dict[str, Any]) -> bool:
+    if str(account.get("status") or "") != "active":
+        return False
+    if _timestamp_is_future(account.get("temp_unschedulable_until")):
+        return False
+    expires_at = account.get("expires_at")
+    if expires_at:
+        try:
+            parsed = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+            if parsed <= datetime.now(parsed.tzinfo or timezone.utc):
+                return False
+        except Exception:
+            pass
+    return True
+
+
+def reconcile_accounts() -> dict[str, Any]:
+    """Keep exactly ten fixed egress rows and at most two schedulable Grok accounts on each."""
+    with _POOL_LOCK:
+        proxies = ensure_sub2api_egress_proxies()
+        if len(proxies) != EGRESS_COUNT:
+            raise ManagerError(f"固定出口创建不完整: {len(proxies)}/{EGRESS_COUNT}")
+        proxy_by_id = {int(row["id"]): row for row in proxies}
+        slots = {int(row["id"]): [] for row in proxies}
+        accounts = sub2api_json_rows(
+            "SELECT json_build_object("
+            "'id',id,'name',name,'status',status,'schedulable',schedulable,'proxy_id',proxy_id,"
+            "'extra',extra,'last_used_at',last_used_at,'temp_unschedulable_until',temp_unschedulable_until,"
+            "'expires_at',expires_at) FROM accounts "
+            "WHERE deleted_at IS NULL AND platform='grok' ORDER BY last_used_at NULLS FIRST, id"
+        )
+        selected: dict[int, int] = {}
+        candidates: list[dict[str, Any]] = []
+        externally_disabled: set[int] = set()
+
+        for account in accounts:
+            account_id = int(account["id"])
+            extra = account.get("extra") if isinstance(account.get("extra"), dict) else {}
+            managed = bool(extra.get("mihomo_pool_managed"))
+            standby = bool(extra.get("mihomo_pool_standby"))
+            proxy_id = int(account["proxy_id"]) if account.get("proxy_id") is not None else None
+            healthy = _account_healthy(account)
+            if managed and not standby and not bool(account.get("schedulable")):
+                externally_disabled.add(account_id)
+                continue
+            if healthy and bool(account.get("schedulable")) and proxy_id in slots and len(slots[proxy_id]) < MAX_ACCOUNTS_PER_EGRESS:
+                slots[proxy_id].append(account)
+                selected[account_id] = proxy_id
+                continue
+            if healthy and (bool(account.get("schedulable")) or (managed and standby)):
+                candidates.append(account)
+
+        candidate_index = 0
+        while candidate_index < len(candidates):
+            available = [proxy_id for proxy_id, bound in slots.items() if len(bound) < MAX_ACCOUNTS_PER_EGRESS]
+            if not available:
+                break
+            proxy_id = min(available, key=lambda value: (len(slots[value]), proxy_by_id[value]["name"]))
+            account = candidates[candidate_index]
+            candidate_index += 1
+            account_id = int(account["id"])
+            slots[proxy_id].append(account)
+            selected[account_id] = proxy_id
+
+        changed_ids: list[int] = []
+        managed_account_count = 0
+        statements = ["BEGIN;"]
+        for account in accounts:
+            account_id = int(account["id"])
+            extra = account.get("extra") if isinstance(account.get("extra"), dict) else {}
+            already_managed = bool(extra.get("mihomo_pool_managed"))
+            target_proxy = selected.get(account_id)
+            old_proxy = int(account["proxy_id"]) if account.get("proxy_id") is not None else None
+            old_schedulable = bool(account.get("schedulable"))
+            if account_id in externally_disabled:
+                target_schedulable = False
+                standby = False
+                disabled = True
+            elif target_proxy is not None:
+                target_schedulable = True
+                standby = False
+                disabled = False
+            else:
+                target_schedulable = False
+                standby = True
+                disabled = False
+            should_manage = already_managed or target_proxy is not None or account in candidates
+            if not should_manage and account_id not in externally_disabled:
+                continue
+            managed_account_count += 1
+            marker_changed = (
+                extra.get("mihomo_pool_managed") is not True
+                or extra.get("mihomo_pool_standby") is not standby
+                or bool(extra.get("mihomo_pool_externally_disabled")) is not disabled
+            )
+            if old_proxy != target_proxy or old_schedulable != target_schedulable or marker_changed:
+                changed_ids.append(account_id)
+                proxy_sql = "NULL" if target_proxy is None else str(target_proxy)
+                statements.append(
+                    "UPDATE accounts SET "
+                    f"proxy_id={proxy_sql}, schedulable={'true' if target_schedulable else 'false'}, "
+                    "extra=jsonb_set(jsonb_set(jsonb_set(COALESCE(extra,'{}'::jsonb),"
+                    "'{mihomo_pool_managed}','true'::jsonb,true),"
+                    f"'{{mihomo_pool_standby}}','{'true' if standby else 'false'}'::jsonb,true),"
+                    f"'{{mihomo_pool_externally_disabled}}','{'true' if disabled else 'false'}'::jsonb,true), "
+                    f"updated_at=now() WHERE id={account_id};"
+                )
+        if changed_ids:
+            payload = json.dumps({"account_ids": changed_ids}, separators=(",", ":"))
+            statements.append(
+                "INSERT INTO scheduler_outbox (event_type, payload) "
+                f"VALUES ('account_bulk_changed', '{payload}'::jsonb);"
+            )
+        statements.append("COMMIT;")
+        sub2api_psql("\n".join(statements), timeout=60)
+
+        summary_rows = []
+        for proxy in proxies:
+            proxy_id = int(proxy["id"])
+            bound = slots[proxy_id]
+            summary_rows.append(
+                {
+                    "id": proxy_id,
+                    "name": proxy["name"],
+                    "port": int(proxy["port"]),
+                    "account_count": len(bound),
+                    "accounts": [{"id": int(item["id"]), "name": item.get("name") or ""} for item in bound],
+                }
+            )
+        state = load_egress_state()
+        state["accounts_reconciled_at"] = utc_now()
+        state["account_summary"] = summary_rows
+        state["standby_accounts"] = max(0, managed_account_count - len(selected) - len(externally_disabled))
+        state["externally_disabled_accounts"] = len(externally_disabled)
+        save_egress_state(state)
+        return {
+            "ok": True,
+            "egress_count": EGRESS_COUNT,
+            "online_accounts": len(selected),
+            "standby_accounts": state["standby_accounts"],
+            "externally_disabled_accounts": len(externally_disabled),
+            "changed_accounts": len(changed_ids),
+            "rows": summary_rows,
+        }
+
+
+def rotate_egresses() -> dict[str, Any]:
+    with _POOL_LOCK:
+        if not controller_online():
+            raise ManagerError("请先启动 Mihomo 核心")
+        names = provider_node_names()
+        if len(names) < EGRESS_COUNT:
+            raise ManagerError(f"可用订阅节点不足 {EGRESS_COUNT} 个，当前仅 {len(names)} 个")
+        state = load_egress_state()
+        try:
+            cursor = int(state.get("cursor") or 0) % len(names)
+        except (TypeError, ValueError):
+            cursor = random.randrange(len(names))
+        assignments: dict[str, str] = {}
+        for offset in range(EGRESS_COUNT):
+            index = offset + 1
+            node = names[(cursor + offset) % len(names)]
+            group = egress_group_name(index)
+            select_proxy(node, group)
+            assignments[group] = node
+        state["cursor"] = (cursor + EGRESS_COUNT) % len(names)
+        state["assignments"] = assignments
+        state["last_rotated_at"] = utc_now()
+        save_egress_state(state)
+        return {"ok": True, "count": EGRESS_COUNT, "last_rotated_at": state["last_rotated_at"], "assignments": assignments}
+
+
+def save_runtime_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    settings = load_settings()
+    for key in ("auto_update_minutes", "egress_rotate_minutes", "account_reconcile_minutes"):
+        if key in payload:
+            settings[key] = payload[key]
+    settings["egress_pool_enabled"] = True
+    settings = normalized_settings(settings)
+    save_settings(settings)
+    sync_config(settings)
+    validate_config()
+    if controller_online():
+        reload_core()
+        rotate_egresses()
+    return {"ok": True, "settings": public_settings(settings)}
+
+
+def public_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    settings = settings or load_settings()
+    return {
+        "auto_update_minutes": int(settings["auto_update_minutes"]),
+        "egress_pool_enabled": True,
+        "egress_count": EGRESS_COUNT,
+        "egress_base_port": int(settings["egress_base_port"]),
+        "egress_rotate_minutes": int(settings["egress_rotate_minutes"]),
+        "max_accounts_per_egress": MAX_ACCOUNTS_PER_EGRESS,
+        "account_reconcile_minutes": int(settings["account_reconcile_minutes"]),
+    }
+
+
 def test_nodes() -> dict[str, Any]:
     if not controller_online():
         raise ManagerError("请先启动 Mihomo 核心")
@@ -709,6 +1093,42 @@ def proxy_snapshot() -> dict[str, Any]:
     }
 
 
+def egress_snapshot() -> list[dict[str, Any]]:
+    settings = load_settings()
+    base_port = int(settings["egress_base_port"])
+    pool_state = load_egress_state()
+    account_rows = pool_state.get("account_summary") if isinstance(pool_state.get("account_summary"), list) else []
+    accounts_by_name = {
+        str(row.get("name") or ""): row for row in account_rows if isinstance(row, dict)
+    }
+    proxies: dict[str, Any] = {}
+    if controller_online():
+        try:
+            result = controller_request("/proxies")
+            proxies = result.get("proxies") if isinstance(result, dict) and isinstance(result.get("proxies"), dict) else {}
+        except Exception:
+            proxies = {}
+    rows: list[dict[str, Any]] = []
+    for index in range(1, EGRESS_COUNT + 1):
+        group = egress_group_name(index)
+        detail = proxies.get(group) if isinstance(proxies.get(group), dict) else {}
+        proxy_name = egress_proxy_name(index)
+        account_row = accounts_by_name.get(proxy_name, {})
+        rows.append(
+            {
+                "index": index,
+                "name": proxy_name,
+                "group": group,
+                "port": base_port + index - 1,
+                "node": detail.get("now") or (pool_state.get("assignments") or {}).get(group, ""),
+                "account_count": int(account_row.get("account_count") or 0),
+                "accounts": account_row.get("accounts") if isinstance(account_row.get("accounts"), list) else [],
+                "capacity": MAX_ACCOUNTS_PER_EGRESS,
+            }
+        )
+    return rows
+
+
 def tail_logs(lines: int = 80) -> str:
     chunks: list[str] = []
     if MANAGED_BY_SYSTEMD:
@@ -738,6 +1158,7 @@ def status_payload() -> dict[str, Any]:
     pid = owned_pid()
     public_base = str(settings.get("public_base") or PUBLIC_BASE or "").rstrip("/")
     mixed = int(settings["mixed_port"])
+    pool_state = load_egress_state()
     return {
         "ok": True,
         "running": proxy["running"],
@@ -751,6 +1172,12 @@ def status_payload() -> dict[str, Any]:
         "subscription_kind": settings.get("subscription_kind") or "",
         "source_masked": mask_source(source),
         "updated_at": settings.get("updated_at") or "",
+        "settings": public_settings(settings),
+        "egresses": egress_snapshot(),
+        "last_rotated_at": pool_state.get("last_rotated_at") or "",
+        "accounts_reconciled_at": pool_state.get("accounts_reconciled_at") or "",
+        "standby_accounts": int(pool_state.get("standby_accounts") or 0),
+        "externally_disabled_accounts": int(pool_state.get("externally_disabled_accounts") or 0),
         "mixed_port": mixed,
         "proxy_url": f"http://127.0.0.1:{mixed}",
         "socks_url": f"socks5://127.0.0.1:{mixed}",
@@ -849,6 +1276,12 @@ class WebHandler(BaseHTTPRequestHandler):
                 result = select_proxy(str(body.get("name") or ""), str(body.get("group") or PROXY_GROUP))
             elif path == "/api/test":
                 result = test_nodes()
+            elif path == "/api/settings":
+                result = save_runtime_settings(body)
+            elif path == "/api/egress/rotate":
+                result = rotate_egresses()
+            elif path == "/api/egress/reconcile":
+                result = reconcile_accounts()
             elif path == "/api/shutdown":
                 self._json({"ok": True, "message": "管理器正在关闭"})
                 threading.Thread(target=self.server.shutdown, name="manager-shutdown", daemon=True).start()
@@ -879,8 +1312,49 @@ def auto_update_loop(stop_event: threading.Event) -> None:
                 continue
         except Exception:
             pass
+
         try:
             update_subscription()
+        except Exception:
+            pass
+
+
+def egress_rotate_loop(stop_event: threading.Event) -> None:
+    while not stop_event.wait(30):
+        settings = load_settings()
+        minutes = int(settings.get("egress_rotate_minutes") or 0)
+        if minutes <= 0 or not controller_online():
+            continue
+        state = load_egress_state()
+        try:
+            rotated = datetime.fromisoformat(str(state.get("last_rotated_at") or ""))
+            age = datetime.now(rotated.tzinfo or timezone.utc) - rotated
+            if age.total_seconds() < minutes * 60:
+                continue
+        except Exception:
+            pass
+        try:
+            rotate_egresses()
+        except Exception:
+            pass
+
+
+def account_reconcile_loop(stop_event: threading.Event) -> None:
+    while not stop_event.wait(30):
+        settings = load_settings()
+        minutes = int(settings.get("account_reconcile_minutes") or 0)
+        if minutes <= 0:
+            continue
+        state = load_egress_state()
+        try:
+            reconciled = datetime.fromisoformat(str(state.get("accounts_reconciled_at") or ""))
+            age = datetime.now(reconciled.tzinfo or timezone.utc) - reconciled
+            if age.total_seconds() < minutes * 60:
+                continue
+        except Exception:
+            pass
+        try:
+            reconcile_accounts()
         except Exception:
             pass
 
@@ -917,7 +1391,11 @@ def serve(*, autostart: bool = False, open_browser: bool = False) -> int:
     atexit.register(lambda: MANAGER_PID_FILE.unlink(missing_ok=True))
     stop_event = threading.Event()
     updater = threading.Thread(target=auto_update_loop, args=(stop_event,), name="subscription-auto-update", daemon=True)
+    rotator = threading.Thread(target=egress_rotate_loop, args=(stop_event,), name="egress-auto-rotate", daemon=True)
+    reconciler = threading.Thread(target=account_reconcile_loop, args=(stop_event,), name="account-pool-reconcile", daemon=True)
     updater.start()
+    rotator.start()
+    reconciler.start()
     web_url = f"http://{host}:{port}"
     print(f"[*] Web control: {web_url}", flush=True)
     print("[*] 此窗口是共享代理管理器；按 Ctrl+C 可安全停止核心并退出。", flush=True)
