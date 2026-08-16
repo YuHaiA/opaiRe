@@ -155,7 +155,7 @@ gmail_oauth_mode:
 # [代理配置]
 # openai注册时代理地址，例子：http://127.0.0.1:7897。如果是国外服务器此项可以不填
 default_proxy: ""
-
+check_proxy: ""
 # 是否开启注册多线程并发 (true/false)
 enable_multi_thread_reg: false    
 # 注册时的最大并发线程数 (建议根据你的代理质量调整，不要设置过高)

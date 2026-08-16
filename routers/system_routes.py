@@ -627,7 +627,7 @@ async def start_task(token: str = Depends(verify_token)):
 
     default_proxy = getattr(core_engine.cfg, 'DEFAULT_PROXY', None)
     args = DummyArgs(proxy=default_proxy if default_proxy else None)
-    core_engine.run_stats.update({"success": 0, "failed": 0, "retries": 0, "pwd_blocked": 0, "phone_verify": 0, "start_time": time.time(),"target": 0})
+    core_engine.run_stats.update({"success": 0, "failed": 0, "retries": 0, "pwd_blocked": 0, "phone_verify": 0, "discard_count": 0, "start_time": time.time(),"target": 0})
     mail_service.start_mail_domain_runtime_tracking()
     if getattr(core_engine.cfg, 'ENABLE_CPA_MODE', False):
         engine.start_cpa(args)
@@ -710,7 +710,7 @@ async def get_stats(token: str = Depends(verify_token)):
 
     return {
         "success": stats["success"], "failed": stats["failed"], "retries": stats["retries"],
-        "pwd_blocked": stats.get("pwd_blocked", 0), "phone_verify": stats.get("phone_verify", 0),
+        "pwd_blocked": stats.get("pwd_blocked", 0), "phone_verify": stats.get("phone_verify", 0), "discard_count": stats.get("discard_count", 0),
         "total": total_attempts, "target": stats["target"] if stats["target"] > 0 else "∞",
         "success_rate": f"{success_rate}%", "elapsed": f"{elapsed}s", "avg_time": f"{avg_time}s",
         "progress_pct": f"{progress_pct}%", "is_running": is_running, "mode": current_mode,
@@ -1458,7 +1458,7 @@ def ext_reset_stats(token: str = Depends(verify_token)):
     import time
     core_engine.run_stats.update({
         "success": 0, "failed": 0, "retries": 0,
-        "pwd_blocked": 0, "phone_verify": 0,
+        "pwd_blocked": 0, "phone_verify": 0, "discard_count": 0,
         "start_time": time.time(),
         "target": getattr(core_engine.cfg, 'NORMAL_TARGET_COUNT', 0),
         "ext_is_running": True

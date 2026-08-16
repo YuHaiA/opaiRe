@@ -407,7 +407,7 @@ createApp({
             evtSource: null,
             stats: {
                 success: 0, failed: 0, retries: 0, total: 0, target: 0,
-                pwd_blocked: 0, phone_verify: 0,
+                pwd_blocked: 0, phone_verify: 0, discard_count: 0,
                 success_rate: '0.0%', elapsed: '0.0s', avg_time: '0.0s', progress_pct: '0%',
                 mode: '未启动',
                 memory: { rss_mb: null, predicted_mid_mb: null, predicted_high_mb: null, safety_level: 'unknown', safety_label: '无数据' }
@@ -446,7 +446,7 @@ createApp({
                 cf_key: false, cf_modal_key: false,
                 mail_domains: true, cf_email: true, gpt_base: true, imap_user: true,
                 free_url: true, cm_url: true, cm_email: true, mc_base: true,
-                ai_base: true, cluster_url: true, proxy: true, clash_api: true,
+                ai_base: true, cluster_url: true, proxy: true, clash_api: true,checkProxy:true,
                 clash_test: true, tg_token: false, tg_chatid: false, cpa_url: true, sub_url: true,
                 cluster_secret: false, hero_key: false, duck_token: false, duck_cookie: false,
                 smsbower_key: false,fivesim_key: false,smsbower_cookie: false,
@@ -773,6 +773,9 @@ createApp({
                 if (left.domainIndex !== right.domainIndex) return left.domainIndex - right.domainIndex;
                 return String(a?.domain || '').localeCompare(String(b?.domain || ''));
             });
+        },
+        grokMode() {
+            return !!this.config && this.config.reg_provider === 'grok';
         }
     },
     methods: {
