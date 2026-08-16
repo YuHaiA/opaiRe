@@ -83,7 +83,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "egress_rotate_minutes": 30,
     "egress_reuse_cooldown_minutes": 60,
     "max_accounts_per_egress": 2,
-    "account_reconcile_minutes": 1,
+    "account_reconcile_seconds": 5,
     "sub2api_deploy_dir": SUB2API_DEPLOY_DIR,
     "sub2api_postgres_container": SUB2API_POSTGRES_CONTAINER,
     "sub2api_docker_host": SUB2API_DOCKER_HOST,
@@ -107,9 +107,15 @@ EGRESS_IP_TEST_URL = "https://api.ipify.org?format=json"
 
 
 def normalized_settings(value: dict[str, Any] | None = None) -> dict[str, Any]:
+    raw_value = dict(value or {})
+    if "account_reconcile_seconds" not in raw_value and "account_reconcile_minutes" in raw_value:
+        try:
+            raw_value["account_reconcile_seconds"] = int(raw_value["account_reconcile_minutes"]) * 60
+        except (TypeError, ValueError):
+            pass
+    raw_value.pop("account_reconcile_minutes", None)
     settings = dict(DEFAULT_SETTINGS)
-    if value:
-        settings.update(value)
+    settings.update(raw_value)
     settings["egress_count"] = EGRESS_COUNT
     for key, default, minimum, maximum in (
         ("auto_update_minutes", 60, 0, 10080),
@@ -118,7 +124,7 @@ def normalized_settings(value: dict[str, Any] | None = None) -> dict[str, Any]:
         ("egress_rotate_minutes", 30, 0, 10080),
         ("egress_reuse_cooldown_minutes", 60, 0, 1440),
         ("max_accounts_per_egress", DEFAULT_MAX_ACCOUNTS_PER_EGRESS, 1, MAX_ACCOUNTS_PER_EGRESS_LIMIT),
-        ("account_reconcile_minutes", 1, 0, 1440),
+        ("account_reconcile_seconds", 5, 0, 3600),
     ):
         try:
             number = int(settings.get(key, default))
@@ -1597,7 +1603,7 @@ def save_runtime_settings(payload: dict[str, Any]) -> dict[str, Any]:
         "egress_rotate_minutes",
         "egress_reuse_cooldown_minutes",
         "max_accounts_per_egress",
-        "account_reconcile_minutes",
+        "account_reconcile_seconds",
     ):
         if key in payload:
             settings[key] = payload[key]
@@ -1627,7 +1633,7 @@ def public_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         "egress_rotate_minutes": int(settings["egress_rotate_minutes"]),
         "egress_reuse_cooldown_minutes": int(settings["egress_reuse_cooldown_minutes"]),
         "max_accounts_per_egress": int(settings["max_accounts_per_egress"]),
-        "account_reconcile_minutes": int(settings["account_reconcile_minutes"]),
+        "account_reconcile_seconds": int(settings["account_reconcile_seconds"]),
     }
 
 
@@ -1999,16 +2005,16 @@ def node_health_loop(stop_event: threading.Event) -> None:
 
 
 def account_reconcile_loop(stop_event: threading.Event) -> None:
-    while not stop_event.wait(30):
+    while not stop_event.wait(1):
         settings = load_settings()
-        minutes = int(settings.get("account_reconcile_minutes") or 0)
-        if minutes <= 0:
+        seconds = int(settings.get("account_reconcile_seconds") or 0)
+        if seconds <= 0:
             continue
         state = load_egress_state()
         try:
             reconciled = datetime.fromisoformat(str(state.get("accounts_reconciled_at") or ""))
             age = datetime.now(reconciled.tzinfo or timezone.utc) - reconciled
-            if age.total_seconds() < minutes * 60:
+            if age.total_seconds() < seconds:
                 continue
         except Exception:
             pass

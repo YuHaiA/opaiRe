@@ -77,6 +77,23 @@ class Sub2MihomoManagerTest(unittest.TestCase):
             "compatible",
         )
 
+    def test_account_reconcile_uses_seconds_and_migrates_minutes(self):
+        manager = load_manager()
+
+        self.assertEqual(manager.normalized_settings()["account_reconcile_seconds"], 5)
+        self.assertEqual(
+            manager.normalized_settings({"account_reconcile_minutes": 1})[
+                "account_reconcile_seconds"
+            ],
+            60,
+        )
+        self.assertEqual(
+            manager.normalized_settings({"account_reconcile_seconds": 9999})[
+                "account_reconcile_seconds"
+            ],
+            3600,
+        )
+
     def test_fixed_egress_config_is_exactly_ten(self):
         manager = load_manager()
         manager.controller_secret = lambda: "test-secret"

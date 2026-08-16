@@ -168,7 +168,7 @@ function render(status) {
     $("egress-rotate-minutes").value = settings.egress_rotate_minutes ?? 30;
     $("egress-reuse-cooldown-minutes").value = settings.egress_reuse_cooldown_minutes ?? 60;
     $("max-accounts-per-egress").value = settings.max_accounts_per_egress ?? 2;
-    $("account-reconcile-minutes").value = settings.account_reconcile_minutes ?? 1;
+    $("account-reconcile-seconds").value = settings.account_reconcile_seconds ?? 5;
     setNodeSourceMode(settings.node_source_mode || "compatible", status.node_source_counts);
     state.settingsLoaded = true;
   } else {
@@ -232,7 +232,7 @@ $("settings-save-button").addEventListener("click", async () => {
     egress_rotate_minutes: Number($("egress-rotate-minutes").value || 0),
     egress_reuse_cooldown_minutes: Number($("egress-reuse-cooldown-minutes").value || 0),
     max_accounts_per_egress: Number($("max-accounts-per-egress").value || 2),
-    account_reconcile_minutes: Number($("account-reconcile-minutes").value || 0),
+    account_reconcile_seconds: Number($("account-reconcile-seconds").value || 0),
   };
   const result = await action("/api/settings", body, "设置已保存，节点来源模式将在下次轮换生效");
   if (result) state.settingsLoaded = false;
