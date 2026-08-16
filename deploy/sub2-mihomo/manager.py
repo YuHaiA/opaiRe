@@ -1106,8 +1106,9 @@ def _timestamp_is_future(value: Any) -> bool:
 def _account_healthy(account: dict[str, Any]) -> bool:
     if str(account.get("status") or "") != "active":
         return False
-    if _timestamp_is_future(account.get("temp_unschedulable_until")):
-        return False
+    for field in ("temp_unschedulable_until", "rate_limit_reset_at", "overload_until"):
+        if _timestamp_is_future(account.get(field)):
+            return False
     expires_at = account.get("expires_at")
     if expires_at:
         try:
@@ -1132,28 +1133,34 @@ def reconcile_accounts() -> dict[str, Any]:
             "SELECT json_build_object("
             "'id',id,'name',name,'status',status,'schedulable',schedulable,'proxy_id',proxy_id,"
             "'extra',extra,'last_used_at',last_used_at,'temp_unschedulable_until',temp_unschedulable_until,"
+            "'rate_limit_reset_at',rate_limit_reset_at,'overload_until',overload_until,"
             "'expires_at',expires_at) FROM accounts "
             "WHERE deleted_at IS NULL AND platform='grok' ORDER BY last_used_at NULLS FIRST, id"
         )
         selected: dict[int, int] = {}
         candidates: list[dict[str, Any]] = []
         externally_disabled: set[int] = set()
+        previous_slots = {int(row["id"]): set() for row in proxies}
 
         for account in accounts:
             account_id = int(account["id"])
             extra = account.get("extra") if isinstance(account.get("extra"), dict) else {}
             managed = bool(extra.get("mihomo_pool_managed"))
-            standby = bool(extra.get("mihomo_pool_standby"))
             proxy_id = int(account["proxy_id"]) if account.get("proxy_id") is not None else None
+            if proxy_id in previous_slots:
+                previous_slots[proxy_id].add(account_id)
             healthy = _account_healthy(account)
-            if managed and not standby and not bool(account.get("schedulable")):
+            manually_disabled = bool(extra.get("manual_schedulable_disabled")) or bool(
+                extra.get("mihomo_pool_externally_disabled")
+            )
+            if manually_disabled:
                 externally_disabled.add(account_id)
                 continue
-            if healthy and bool(account.get("schedulable")) and proxy_id in slots and len(slots[proxy_id]) < max_accounts_per_egress:
+            if healthy and proxy_id in slots and len(slots[proxy_id]) < max_accounts_per_egress:
                 slots[proxy_id].append(account)
                 selected[account_id] = proxy_id
                 continue
-            if healthy and (bool(account.get("schedulable")) or (managed and standby)):
+            if healthy and (bool(account.get("schedulable")) or managed):
                 candidates.append(account)
 
         candidate_index = 0
@@ -1183,13 +1190,9 @@ def reconcile_accounts() -> dict[str, Any]:
                 target_schedulable = False
                 standby = False
                 disabled = True
-            elif target_proxy is not None:
-                target_schedulable = True
-                standby = False
-                disabled = False
             else:
-                target_schedulable = False
-                standby = True
+                target_schedulable = str(account.get("status") or "") == "active"
+                standby = target_proxy is None
                 disabled = False
             should_manage = already_managed or target_proxy is not None or account_id in candidate_ids
             if not should_manage and account_id not in externally_disabled:
@@ -1240,6 +1243,28 @@ def reconcile_accounts() -> dict[str, Any]:
         state["standby_accounts"] = max(0, managed_account_count - len(selected) - len(externally_disabled))
         state["externally_disabled_accounts"] = len(externally_disabled)
         save_egress_state(state)
+        rotated_egresses: list[int] = []
+        rotation_errors: dict[str, str] = {}
+        for proxy in proxies:
+            proxy_id = int(proxy["id"])
+            current_ids = {int(account["id"]) for account in slots[proxy_id]}
+            if not (previous_slots[proxy_id] - current_ids and current_ids - previous_slots[proxy_id]):
+                continue
+            index = next(
+                (
+                    value
+                    for value in range(1, EGRESS_COUNT + 1)
+                    if egress_proxy_name(value) == str(proxy.get("name") or "")
+                ),
+                None,
+            )
+            if index is None:
+                continue
+            try:
+                rotate_egress(index)
+                rotated_egresses.append(index)
+            except Exception as exc:
+                rotation_errors[str(index)] = str(exc)
         return {
             "ok": True,
             "egress_count": EGRESS_COUNT,
@@ -1247,6 +1272,8 @@ def reconcile_accounts() -> dict[str, Any]:
             "standby_accounts": state["standby_accounts"],
             "externally_disabled_accounts": len(externally_disabled),
             "changed_accounts": len(changed_ids),
+            "rotated_egresses": rotated_egresses,
+            "rotation_errors": rotation_errors,
             "rows": summary_rows,
         }
 

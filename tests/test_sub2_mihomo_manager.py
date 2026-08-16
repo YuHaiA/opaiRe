@@ -422,7 +422,86 @@ class Sub2MihomoManagerTest(unittest.TestCase):
                 {"status": "active", "temp_unschedulable_until": "2999-01-01T00:00:00+00:00"}
             )
         )
+        self.assertFalse(
+            manager._account_healthy(
+                {"status": "active", "rate_limit_reset_at": "2999-01-01T00:00:00+00:00"}
+            )
+        )
+        self.assertFalse(
+            manager._account_healthy(
+                {"status": "active", "overload_until": "2999-01-01T00:00:00+00:00"}
+            )
+        )
         self.assertFalse(manager._account_healthy({"status": "error", "temp_unschedulable_until": None}))
+
+    def test_reconcile_replaces_cooling_account_and_rotates_egress(self):
+        manager = load_manager()
+        proxies = [
+            {
+                "id": index,
+                "name": manager.egress_proxy_name(index),
+                "port": 7900 + index,
+            }
+            for index in range(1, 11)
+        ]
+        accounts = [
+            {
+                "id": 1,
+                "name": "cooling",
+                "status": "active",
+                "schedulable": True,
+                "proxy_id": 1,
+                "extra": {
+                    "mihomo_pool_managed": True,
+                    "mihomo_pool_standby": False,
+                    "mihomo_pool_externally_disabled": False,
+                },
+                "last_used_at": None,
+                "temp_unschedulable_until": None,
+                "rate_limit_reset_at": "2999-01-01T00:00:00+00:00",
+                "overload_until": None,
+                "expires_at": None,
+            },
+            {
+                "id": 2,
+                "name": "standby",
+                "status": "active",
+                "schedulable": False,
+                "proxy_id": None,
+                "extra": {
+                    "mihomo_pool_managed": True,
+                    "mihomo_pool_standby": True,
+                    "mihomo_pool_externally_disabled": False,
+                },
+                "last_used_at": None,
+                "temp_unschedulable_until": None,
+                "rate_limit_reset_at": None,
+                "overload_until": None,
+                "expires_at": None,
+            },
+        ]
+        statements = []
+        rotated = []
+        saved = {}
+        manager.load_settings = lambda: manager.normalized_settings({"max_accounts_per_egress": 2})
+        manager.ensure_sub2api_egress_proxies = lambda: proxies
+        manager.sub2api_json_rows = lambda query: accounts
+        manager.sub2api_psql = lambda sql, timeout=30: statements.append(sql)
+        manager.load_egress_state = lambda: {}
+        manager.save_egress_state = lambda state: saved.update(state)
+        manager.rotate_egress = lambda index: rotated.append(index) or {"ok": True}
+
+        result = manager.reconcile_accounts()
+
+        self.assertEqual(result["online_accounts"], 1)
+        self.assertEqual(result["standby_accounts"], 1)
+        self.assertEqual(result["rotated_egresses"], [1])
+        self.assertEqual(rotated, [1])
+        self.assertIn("proxy_id=NULL, schedulable=true", statements[0])
+        self.assertIn("updated_at=now() WHERE id=1", statements[0])
+        self.assertIn("proxy_id=1, schedulable=true", statements[0])
+        self.assertIn("updated_at=now() WHERE id=2", statements[0])
+        self.assertEqual(saved["standby_accounts"], 1)
 
 
 if __name__ == "__main__":
