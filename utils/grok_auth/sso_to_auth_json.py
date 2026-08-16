@@ -91,10 +91,19 @@ def _proxy_kwargs(fixed: str = None) -> dict:
             host_part = parsed.hostname
 
         port_part = f":{parsed.port}" if parsed.port else ""
-        final_url = f"{parsed.scheme}://{host_part}{port_part}"
+        if parsed.username:
+            user = urllib.parse.quote(urllib.parse.unquote(parsed.username), safe="")
+            if parsed.password is not None:
+                password = urllib.parse.quote(urllib.parse.unquote(parsed.password), safe="")
+                auth = f"{user}:{password}@"
+            else:
+                auth = f"{user}@"
+        else:
+            auth = ""
+        final_url = f"{parsed.scheme}://{auth}{host_part}{port_part}"
 
         return {"proxies": {"http": final_url, "https": final_url}}
-    except Exception as e:
+    except Exception:
         return {"proxies": {"http": proxy, "https": proxy}}
 
 def _resolve_sticky_proxy(explicit: str='') -> str:
