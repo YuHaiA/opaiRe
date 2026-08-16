@@ -8,7 +8,7 @@ import string
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com&return_to=%2F"
 POST_SIGNUP_URL = "https://grok.com/"
@@ -117,23 +117,31 @@ def _settle_post_signup_page(page, log=None, rounds: int = 8) -> bool:
 
 
 
-def _build_proxy_config(proxy: Optional[str]) -> Optional[dict]:
-    proxy = (proxy or "").strip()
+def _build_proxy_config(proxy: Optional[str]) -> dict:
     if not proxy:
-        return None
+        return {}
+
     if proxy.startswith("socks5h://"):
-        proxy = "socks5://" + proxy[len("socks5h://"):]
+        proxy = proxy.replace("socks5h://", "socks5://", 1)
     try:
         parsed = urlparse(proxy)
-        if not parsed.scheme or not parsed.hostname or not parsed.port:
+        if not parsed.scheme or not parsed.hostname:
             return {"server": proxy}
-        cfg = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
+        if ":" in parsed.hostname and not parsed.hostname.startswith("["):
+            host_part = f"[{parsed.hostname}]"
+        else:
+            host_part = parsed.hostname
+
+        port_part = f":{parsed.port}" if parsed.port else ""
+        final_url = f"{parsed.scheme}://{host_part}{port_part}"
+
+        cfg = {"server": final_url}
         if parsed.username:
-            cfg["username"] = parsed.username
-        if parsed.password:
-            cfg["password"] = parsed.password
+            cfg["username"] = unquote(parsed.username)
+        if parsed.password is not None:
+            cfg["password"] = unquote(parsed.password)
         return cfg
-    except Exception:
+    except Exception as e:
         return {"server": proxy}
 
 
@@ -947,7 +955,6 @@ def signup_with_camoufox(
         headless = False
     elif env_h in {"1", "true", "yes", "on"}:
         headless = True
-
     return _signup_sync(
         email=email,
         password=password,

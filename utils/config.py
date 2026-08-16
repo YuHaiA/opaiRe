@@ -75,6 +75,46 @@ def openai_cpa_local_webhook_enabled(receive_mode: str) -> bool:
     return str(receive_mode or "").strip().lower() in {"local_webhook", "dual"}
 
 
+def _bracket_proxy_host(hostname: str) -> str:
+    host = str(hostname or "").strip()
+    if not host:
+        return ""
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]"
+    return host
+
+
+def _looks_like_ipv6_host(host: str) -> bool:
+    raw = str(host or "").strip()
+    if raw.startswith("[") and raw.endswith("]") and len(raw) > 2:
+        raw = raw[1:-1]
+    if ":" not in raw:
+        return False
+    for group in raw.split(":"):
+        if not group:
+            continue
+        if "." in group:
+            octets = group.split(".")
+            if len(octets) != 4:
+                return False
+            try:
+                if any(int(part) < 0 or int(part) > 255 for part in octets):
+                    return False
+            except ValueError:
+                return False
+            continue
+        if len(group) > 4 or any(ch not in "0123456789abcdefABCDEF" for ch in group):
+            return False
+    return True
+
+
+def _encode_proxy_auth(username: str, password: Optional[str] = None) -> str:
+    auth = urllib.parse.quote(urllib.parse.unquote(str(username)), safe="")
+    if password is not None:
+        auth += ":" + urllib.parse.quote(urllib.parse.unquote(str(password)), safe="")
+    return auth + "@"
+
+
 def normalize_raw_proxy_entry(entry: str) -> str:
     value = str(entry or "").strip()
     if not value or value.startswith("#"):
@@ -90,19 +130,36 @@ def normalize_raw_proxy_entry(entry: str) -> str:
         if not parsed.hostname:
             return ""
 
+        host_part = _bracket_proxy_host(parsed.hostname)
         if parsed.username is not None:
-            auth = urllib.parse.quote(urllib.parse.unquote(parsed.username), safe="")
-            if parsed.password is not None:
-                auth += ":" + urllib.parse.quote(urllib.parse.unquote(parsed.password), safe="")
-            auth += "@"
+            auth = _encode_proxy_auth(parsed.username, parsed.password)
         else:
             auth = ""
 
         default_port = 1080 if scheme == "socks5h" else 8080
-        return format_docker_url(f"{scheme}://{auth}{parsed.hostname}:{parsed.port or default_port}")
+        return format_docker_url(f"{scheme}://{auth}{host_part}:{parsed.port or default_port}")
 
     if "@" in value:
         return normalize_raw_proxy_entry(f"socks5h://{value}")
+
+    if value.startswith("["):
+        end = value.find("]")
+        if end == -1 or end + 1 >= len(value) or value[end + 1] != ":":
+            return ""
+        host = value[: end + 1]
+        rest_parts = value[end + 2 :].split(":")
+        if len(rest_parts) == 1:
+            port = rest_parts[0].strip()
+            if host and port:
+                return format_docker_url(f"socks5h://{host}:{port}")
+            return ""
+        if len(rest_parts) >= 3:
+            port = rest_parts[0].strip()
+            username = rest_parts[1].strip()
+            password = ":".join(rest_parts[2:]).strip()
+            if host and port and username:
+                return format_docker_url(f"socks5h://{_encode_proxy_auth(username, password)}{host}:{port}")
+        return ""
 
     parts = value.split(":")
     if len(parts) == 2:
@@ -113,18 +170,20 @@ def normalize_raw_proxy_entry(entry: str) -> str:
             return format_docker_url(f"socks5h://{host}:{port}")
         return ""
 
+    if len(parts) >= 3:
+        port = parts[-1].strip()
+        host = ":".join(parts[:-1]).strip()
+        if port.isdigit() and _looks_like_ipv6_host(host):
+            return format_docker_url(f"socks5h://{_bracket_proxy_host(host)}:{port}")
+
     if len(parts) >= 4:
         host = parts[0].strip()
         port = parts[1].strip()
         username = parts[2].strip()
         password = ":".join(parts[3:]).strip()
         if host and port and username:
-            auth = urllib.parse.quote(urllib.parse.unquote(username), safe="")
-            if password:
-                auth += ":" + urllib.parse.quote(urllib.parse.unquote(password), safe="")
-            return format_docker_url(f"socks5h://{auth}@{host}:{port}")
+            return format_docker_url(f"socks5h://{_encode_proxy_auth(username, password)}{host}:{port}")
     return ""
-
 
 def normalize_raw_proxy_list(entries) -> list:
     normalized = []
@@ -226,7 +285,7 @@ def init_config():
                 print(f"[{ts()}] [WARNING] 自动补全配置文件写入失败: {e}")
 
     return user_config
-APP_VERSION = "v18.1.1"
+APP_VERSION = "v18.1.3"
 _c: dict = {}
 WEB_PASSWORD: str = "admin"
 RETAIN_REG_ONLY: bool = False
@@ -274,6 +333,7 @@ CM_WEBHOOK_SECRET: str = ""
 MC_API_BASE: str = ""
 MC_KEY: str = ""
 DEFAULT_PROXY: str = ""
+GROK_INSPECT_PROXY = ""
 ENABLE_MULTI_THREAD_REG: bool = False
 REG_THREADS: int = 3
 MAX_OTP_RETRIES: int = 5
@@ -533,7 +593,7 @@ def reload_all_configs(new_config_dict=None):
     global FREEMAIL_API_URL, FREEMAIL_API_TOKEN, FREEMAIL_LOCAL_WEBHOOK, FREEMAIL_WEBHOOK_SECRET
     global CM_API_URL, CM_ADMIN_EMAIL, CM_ADMIN_PASS, CM_LOCAL_WEBHOOK, CM_WEBHOOK_SECRET
     global MC_API_BASE, MC_KEY
-    global DEFAULT_PROXY
+    global DEFAULT_PROXY, GROK_INSPECT_PROXY
     global SUB_DOMAIN_LEVEL, RANDOM_SUB_DOMAIN_LEVEL
     global ENABLE_MULTI_THREAD_REG, REG_THREADS, MAX_OTP_RETRIES, OTP_POLL_MAX_ATTEMPTS
     global USE_PROXY_FOR_EMAIL, ENABLE_EMAIL_MASKING
@@ -836,7 +896,7 @@ def reload_all_configs(new_config_dict=None):
     _c["openai_cpa"] = _ocpa
 
     DEFAULT_PROXY = format_docker_url(_c.get("default_proxy", ""))
-
+    GROK_INSPECT_PROXY = format_docker_url(_c.get("check_proxy", ""))
     ENABLE_MULTI_THREAD_REG = _c.get("enable_multi_thread_reg", False)
     REG_THREADS = _c.get("reg_threads", 3)
     MAX_OTP_RETRIES = _c.get("max_otp_retries", 5)

@@ -73,6 +73,16 @@ class RawProxyPoolTests(unittest.TestCase):
             cfg.normalize_raw_proxy_entry("127.0.0.1:1080"),
         )
 
+    def test_normalize_raw_proxy_entry_brackets_ipv6_host(self):
+        self.assertEqual(
+            "http://user:pass@[2001:db8::1]:8080",
+            cfg.normalize_raw_proxy_entry("http://user:pass@[2001:db8::1]:8080"),
+        )
+        self.assertEqual(
+            "socks5h://[2001:db8::1]:1080",
+            cfg.normalize_raw_proxy_entry("socks5://[2001:db8::1]:1080"),
+        )
+
     def test_reload_all_configs_prefers_raw_pool_over_clash_pool(self):
         fake_config = {
             "default_proxy": "http://default:8000",

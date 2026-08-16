@@ -97,6 +97,7 @@ description: Durable project memory for opaiRe. Use this skill to recover stable
 
 - Keep reducing coupling in large frontend and launcher files when touching adjacent logic.
 - Keep local project version aligned with upstream release tags during upstream sync work.
+- Current aligned upstream release is `v18.1.3` (`e5662e6`).
 - Keep `.codex/docs/` concise but not empty: retain current-state and history summaries, remove junk.
 - For session cleanup, first migrate durable facts into this project memory and `SYSTEM.md`, then archive only old project-related sessions.
 

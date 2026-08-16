@@ -10,6 +10,7 @@ import time
 import urllib.parse
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from curl_cffi import requests
 try:
@@ -68,27 +69,33 @@ def _is_rate_limited_payload(text: str | None=None, url: str | None=None, status
     blob = f"{status or ''} {url or ''} {text or ''}".lower()
     return any((k in blob for k in ('slow_down', 'rate_limited', 'rate limit', 'too many', '429')))
 
-def _proxy_kwargs(fixed: str | None=None) -> dict:
-    """Return curl_cffi compatible proxy kwargs.
-
-    Prefer a sticky fixed URL for an entire device-flow.
-    """
-    proxy = (fixed or '').strip()
-    if not proxy:
-        try:
-            from proxy_pool import resolve_proxy_for_request, curl_proxies_arg
-            url = resolve_proxy_for_request(fallback_env=True)
-            proxies = curl_proxies_arg(url)
-            if proxies:
-                return {'proxies': proxies}
-        except Exception:
-            pass
+def _proxy_kwargs(fixed: str = None) -> dict:
+    if fixed:
+        proxy = fixed
+    else:
         proxy = (os.getenv('GROK2API_XAI_PROXY') or os.getenv('GROK2API_PROXY') or os.getenv('GROK_CLI_PROXY') or '').strip()
         if '\n' in proxy or '\r' in proxy:
-            proxy = next((ln.strip() for ln in proxy.replace('\r', '\n').split('\n') if ln.strip() and (not ln.strip().startswith('#'))), '')
-    if proxy:
-        return {'proxies': {'http': proxy, 'https': proxy}}
-    return {}
+            proxy = next((ln.strip() for ln in proxy.replace('\r', '\n').split('\n') if ln.strip() and not ln.strip().startswith('#')), '')
+
+    if not proxy:
+        return {}
+
+    try:
+        parsed = urlparse(proxy)
+        if not parsed.scheme or not parsed.hostname:
+            return {'proxies': {'http': proxy, 'https': proxy}}
+
+        if ":" in parsed.hostname and not parsed.hostname.startswith("["):
+            host_part = f"[{parsed.hostname}]"
+        else:
+            host_part = parsed.hostname
+
+        port_part = f":{parsed.port}" if parsed.port else ""
+        final_url = f"{parsed.scheme}://{host_part}{port_part}"
+
+        return {"proxies": {"http": final_url, "https": final_url}}
+    except Exception as e:
+        return {"proxies": {"http": proxy, "https": proxy}}
 
 def _resolve_sticky_proxy(explicit: str='') -> str:
     """Pick one proxy URL and keep it for the whole device-flow."""

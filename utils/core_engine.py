@@ -80,7 +80,8 @@ run_stats = {
     "start_time": 0,
     "target": 0,
     "pwd_blocked": 0,
-    "phone_verify": 0
+    "phone_verify": 0,
+    "discard_count": 0
 }
 KNOWN_CLIPROXY_ERROR_LABELS = {
     "usage_limit_reached":  "周限额已耗尽",
@@ -1264,6 +1265,8 @@ def handle_registration_result(result: Any, cpa_upload: bool = False, run_ctx: d
         if run_ctx.get('phone_verify'):
             with _stats_lock: run_stats["phone_verify"] += 1
             is_dead = True
+        if run_ctx.get('discarded'):
+            with _stats_lock: run_stats["discard_count"] += 1
     signup_blocked = run_ctx.get('signup_blocked', False) if run_ctx else False
     if (signup_blocked or is_dead) and getattr(cfg, "EMAIL_API_MODE", "") == "local_microsoft":
         if getattr(cfg, "LOCAL_MS_POOL_FISSION", False):
@@ -2977,6 +2980,7 @@ def oauth_upgrade_main_loop(args, target_accounts: list, stop_event: threading.E
         run_stats["retries"] = 0
         run_stats["pwd_blocked"] = 0
         run_stats["phone_verify"] = 0
+        run_stats["discard_count"] = 0
         run_stats["start_time"] = time.time()
         run_stats["target"] = total_tasks
 
