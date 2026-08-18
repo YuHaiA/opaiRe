@@ -18,6 +18,7 @@ files=(
   config.example.yaml
   install.sh
   install-panel.sh
+  update-from-github.sh
   export-deployment.sh
   manager.py
   v2ray_convert.py
@@ -43,6 +44,9 @@ for file in "${files[@]}"; do
   fi
   archive_paths+=("$PACKAGE_DIR/$file")
 done
+if [ -f "$SOURCE_DIR/REVISION" ]; then
+  archive_paths+=("$PACKAGE_DIR/REVISION")
+fi
 
 tar -czf "$OUTPUT" -C "$PARENT_DIR" "${archive_paths[@]}"
 echo "$OUTPUT"

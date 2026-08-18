@@ -86,3 +86,55 @@ def test_failed_egress_can_reuse_cooled_but_unoccupied_candidate() -> None:
     assert node == "cooled-node"
     assert exit_ip == "203.0.113.10"
     assert selected_nodes == ["cooled-node"]
+
+
+def test_group_selection_normalizes_ids_and_matches_accounts() -> None:
+    assert manager.normalized_group_ids([6, "5", 6, 0, "bad", None]) == [5, 6]
+    assert manager._account_matches_selected_groups({"group_ids": [5]}, {5}) is True
+    assert manager._account_matches_selected_groups({"group_ids": [6]}, {5}) is False
+    assert manager._account_matches_selected_groups({"group_ids": [6]}, set()) is True
+
+
+def test_reconcile_releases_accounts_outside_selected_groups() -> None:
+    proxies = _proxies(10)
+    accounts = [
+        {
+            "id": 100,
+            "name": "selected@example.com",
+            "status": "active",
+            "schedulable": True,
+            "proxy_id": 1,
+            "extra": {"mihomo_pool_managed": True, "mihomo_pool_standby": False},
+            "group_ids": [5],
+            "last_used_at": "",
+        },
+        {
+            "id": 200,
+            "name": "released@example.com",
+            "status": "active",
+            "schedulable": True,
+            "proxy_id": 2,
+            "extra": {"mihomo_pool_managed": True, "mihomo_pool_standby": False},
+            "group_ids": [6],
+            "last_used_at": "",
+        },
+    ]
+    statements: list[str] = []
+
+    with (
+        patch.object(manager, "load_settings", return_value={"max_accounts_per_egress": 2, "account_group_ids": [5]}),
+        patch.object(manager, "ensure_sub2api_egress_proxies", return_value=proxies),
+        patch.object(manager, "sub2api_json_rows", return_value=accounts),
+        patch.object(manager, "sub2api_psql", side_effect=lambda query, timeout=30: statements.append(query) or ""),
+        patch.object(manager, "load_egress_state", return_value={}),
+        patch.object(manager, "save_egress_state"),
+        patch.object(manager, "rotate_egress"),
+    ):
+        result = manager.reconcile_accounts()
+
+    assert result["account_group_ids"] == [5]
+    assert result["online_accounts"] == 1
+    sql = "\n".join(statements)
+    assert "proxy_id=NULL" in sql
+    assert "-'mihomo_pool_managed'-'mihomo_pool_standby'" in sql
+    assert "WHERE id=200" in sql

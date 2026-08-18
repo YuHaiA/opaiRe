@@ -7,6 +7,8 @@ const state = {
   timer: null,
   settingsLoaded: false,
   nodeSourceMode: "compatible",
+  accountGroupIds: [],
+  accountGroups: [],
 };
 
 const nodeSourceModes = {
@@ -118,14 +120,47 @@ function setNodeSourceMode(mode, counts = state.status?.node_source_counts || {}
   if (state.status) renderNodes(state.status);
 }
 
+function renderAccountGroups(groups = []) {
+  state.accountGroups = Array.isArray(groups) ? groups : [];
+  const allMode = state.accountGroupIds.length === 0;
+  const selected = new Set(state.accountGroupIds.map(Number));
+  $("account-groups-all").checked = allMode;
+
+  if (!state.accountGroups.length) {
+    $("account-group-options").innerHTML = '<span class="account-group-empty">没有可用的 Grok 分组。</span>';
+    $("account-group-hint").textContent = "Sub2API 中尚未配置包含 Grok 账号的分组。";
+    return;
+  }
+
+  $("account-group-options").innerHTML = state.accountGroups.map((group) => {
+    const groupId = Number(group.id);
+    const checked = allMode || selected.has(groupId);
+    return `<label class="account-group-option">
+      <input type="checkbox" data-account-group-id="${groupId}" ${checked ? "checked" : ""} ${allMode ? "disabled" : ""}>
+      <span><strong>${escapeHtml(group.name || `#${groupId}`)}</strong><small>${Number(group.healthy_account_count || 0)} 健康 / ${Number(group.account_count || 0)} 总数</small></span>
+    </label>`;
+  }).join("");
+
+  const activeGroups = allMode
+    ? state.accountGroups
+    : state.accountGroups.filter((group) => selected.has(Number(group.id)));
+  const healthy = activeGroups.reduce((sum, group) => sum + Number(group.healthy_account_count || 0), 0);
+  const total = activeGroups.reduce((sum, group) => sum + Number(group.account_count || 0), 0);
+  $("account-group-hint").textContent = `${allMode ? "全部" : "已选"} ${activeGroups.length} 个分组 · 健康 ${healthy} / ${total}`;
+}
+
 function renderEgresses(status) {
   const rows = status.egresses || [];
   if (!rows.length) {
     $("egress-list").innerHTML = '<div class="empty">尚未生成固定出口。</div>';
     return;
   }
+  const groupNames = new Map((status.account_groups || []).map((group) => [Number(group.id), group.name]));
   $("egress-list").innerHTML = rows.map((row) => {
-    const accounts = (row.accounts || []).map((item) => item.name || `#${item.id}`).join("、") || "等待补位";
+    const accounts = (row.accounts || []).map((item) => {
+      const labels = (item.group_ids || []).map((id) => groupNames.get(Number(id))).filter(Boolean);
+      return `${item.name || `#${item.id}`}${labels.length ? ` · ${labels.join("/")}` : ""}`;
+    }).join("、") || "等待补位";
     return `<div class="egress-row" role="row">
       <strong>${escapeHtml(row.name)}</strong>
       <code>${escapeHtml(row.port)}</code>
@@ -169,10 +204,13 @@ function render(status) {
     $("egress-reuse-cooldown-minutes").value = settings.egress_reuse_cooldown_minutes ?? 60;
     $("max-accounts-per-egress").value = settings.max_accounts_per_egress ?? 2;
     $("account-reconcile-seconds").value = settings.account_reconcile_seconds ?? 5;
+    state.accountGroupIds = Array.isArray(settings.account_group_ids) ? settings.account_group_ids.map(Number) : [];
     setNodeSourceMode(settings.node_source_mode || "compatible", status.node_source_counts);
+    renderAccountGroups(status.account_groups || []);
     state.settingsLoaded = true;
   } else {
     setNodeSourceMode(state.nodeSourceMode, status.node_source_counts);
+    renderAccountGroups(status.account_groups || []);
   }
   const capacity = Number(settings.max_accounts_per_egress || 2);
   $("online-slot-count").textContent = `${Number(settings.egress_count || 10) * capacity} 在线槽位`;
@@ -223,6 +261,28 @@ $("update-button").addEventListener("click", () => action("/api/update", {}, "�
 document.querySelectorAll("[data-node-source-mode]").forEach((button) => {
   button.addEventListener("click", () => setNodeSourceMode(button.dataset.nodeSourceMode));
 });
+$("account-groups-all").addEventListener("change", (event) => {
+  if (event.target.checked) {
+    state.accountGroupIds = [];
+  } else {
+    state.accountGroupIds = state.accountGroups.map((group) => Number(group.id));
+  }
+  renderAccountGroups(state.accountGroups);
+});
+$("account-group-options").addEventListener("change", (event) => {
+  const input = event.target.closest("[data-account-group-id]");
+  if (!input) return;
+  const selected = new Set(state.accountGroupIds.map(Number));
+  const groupId = Number(input.dataset.accountGroupId);
+  if (input.checked) selected.add(groupId);
+  else selected.delete(groupId);
+  if (!selected.size) {
+    input.checked = true;
+    return toast("至少保留一个账号分组，或选择全部分组", true);
+  }
+  state.accountGroupIds = [...selected].sort((a, b) => a - b);
+  renderAccountGroups(state.accountGroups);
+});
 $("settings-save-button").addEventListener("click", async () => {
   const body = {
     auto_update_minutes: Number($("auto-update-minutes").value || 0),
@@ -233,8 +293,9 @@ $("settings-save-button").addEventListener("click", async () => {
     egress_reuse_cooldown_minutes: Number($("egress-reuse-cooldown-minutes").value || 0),
     max_accounts_per_egress: Number($("max-accounts-per-egress").value || 2),
     account_reconcile_seconds: Number($("account-reconcile-seconds").value || 0),
+    account_group_ids: state.accountGroupIds,
   };
-  const result = await action("/api/settings", body, "设置已保存，节点来源模式将在下次轮换生效");
+  const result = await action("/api/settings", body, "设置已保存，账号分组已同步");
   if (result) state.settingsLoaded = false;
 });
 $("rotate-button").addEventListener("click", () => action("/api/egress/rotate", {}, "10 个固定出口已轮换节点"));

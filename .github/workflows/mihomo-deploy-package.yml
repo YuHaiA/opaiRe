@@ -1,0 +1,78 @@
+name: Publish Mihomo Deploy Package
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - deploy/sub2-mihomo/**
+      - tests/test_mihomo_pool_manager.py
+      - .github/workflows/mihomo-deploy-package.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mihomo-deploy-main
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Test manager
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check pyyaml pytest
+          python -m py_compile deploy/sub2-mihomo/manager.py
+          python -m pytest -q tests/test_mihomo_pool_manager.py
+          bash -n deploy/sub2-mihomo/install-panel.sh
+          bash -n deploy/sub2-mihomo/update-from-github.sh
+          bash -n deploy/sub2-mihomo/export-deployment.sh
+
+      - name: Build fixed deploy package
+        shell: bash
+        run: |
+          mkdir -p dist
+          printf '%s\n' "${GITHUB_SHA}" > deploy/sub2-mihomo/REVISION
+          bash deploy/sub2-mihomo/export-deployment.sh "$PWD/dist/sub2-mihomo-deploy.tar.gz"
+          cd dist
+          sha256sum sub2-mihomo-deploy.tar.gz > sub2-mihomo-deploy.tar.gz.sha256
+          MIHOMO_PACKAGE_URL="file://$PWD/sub2-mihomo-deploy.tar.gz" \
+          MIHOMO_CHECKSUM_URL="file://$PWD/sub2-mihomo-deploy.tar.gz.sha256" \
+          MIHOMO_VERIFY_ONLY=1 \
+            bash ../deploy/sub2-mihomo/update-from-github.sh
+
+      - name: Move fixed deploy tag to this commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f mihomo-deploy "${GITHUB_SHA}"
+          git push -f origin refs/tags/mihomo-deploy
+
+      - name: Publish fixed deploy package
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: mihomo-deploy
+          name: Mihomo Deploy Package
+          body: Fixed Mihomo host package built from `${{ github.sha }}`.
+          files: |
+            dist/sub2-mihomo-deploy.tar.gz
+            dist/sub2-mihomo-deploy.tar.gz.sha256
+          make_latest: false
+          prerelease: true
+          append_body: false
+          generate_release_notes: false
+          fail_on_unmatched_files: true
+          target_commitish: ${{ github.sha }}
+          overwrite_files: true

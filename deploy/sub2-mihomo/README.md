@@ -54,6 +54,18 @@ bash install-panel.sh
 
 若初次安装使用了自定义变量，更新时继续传入相同变量。安装器会保留现有 `config.yaml`、`providers/`、`state/` 和 `CREDENTIALS.txt`。
 
+生产更新使用 GitHub Actions 生成的固定发布包：
+
+```bash
+/opt/sub2-mihomo/update-from-github.sh
+```
+
+`main` 分支中 `deploy/sub2-mihomo/` 的修改会触发 `Publish Mihomo Deploy Package`，更新固定标签 `mihomo-deploy` 和带 SHA256 的发布包。更新脚本会校验压缩包后运行 `install-panel.sh`，默认只重启面板服务，不重启 Mihomo 核心，避免中断现有代理连接。确实需要同步重启核心时执行：
+
+```bash
+MIHOMO_RESTART_CORE=1 /opt/sub2-mihomo/update-from-github.sh
+```
+
 ## 安全导出
 
 生成可复制到其他服务器的源码包：

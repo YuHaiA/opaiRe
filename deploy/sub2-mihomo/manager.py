@@ -84,6 +84,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "egress_reuse_cooldown_minutes": 60,
     "max_accounts_per_egress": 2,
     "account_reconcile_seconds": 5,
+    "account_group_ids": [],
     "sub2api_deploy_dir": SUB2API_DEPLOY_DIR,
     "sub2api_postgres_container": SUB2API_POSTGRES_CONTAINER,
     "sub2api_docker_host": SUB2API_DOCKER_HOST,
@@ -93,7 +94,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 _CORE_LOCK = threading.RLock()
 _POOL_LOCK = threading.RLock()
 _HEALTH_LOCK = threading.Lock()
+_ACCOUNT_GROUP_CACHE_LOCK = threading.Lock()
 _CORE_PROCESS: subprocess.Popen[Any] | None = None
+_ACCOUNT_GROUP_CACHE: dict[str, Any] = {"rows": [], "expires_at": 0.0}
 
 EGRESS_COUNT = 10
 NODE_SOURCE_MODES = {"subscription", "http", "compatible"}
@@ -108,6 +111,20 @@ GROK_EGRESS_TEST_URL = (
     os.environ.get("MIHOMO_GROK_EGRESS_TEST_URL", "https://cli-chat-proxy.grok.com/v1/models").strip()
     or "https://cli-chat-proxy.grok.com/v1/models"
 )
+
+
+def normalized_group_ids(value: Any) -> list[int]:
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    group_ids: set[int] = set()
+    for item in value:
+        try:
+            group_id = int(item)
+        except (TypeError, ValueError):
+            continue
+        if group_id > 0:
+            group_ids.add(group_id)
+    return sorted(group_ids)
 
 
 def normalized_settings(value: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -139,6 +156,7 @@ def normalized_settings(value: dict[str, Any] | None = None) -> dict[str, Any]:
     settings["egress_auto_rotate_enabled"] = bool(settings.get("egress_auto_rotate_enabled", True))
     source_mode = str(settings.get("node_source_mode") or "compatible").strip().lower()
     settings["node_source_mode"] = source_mode if source_mode in NODE_SOURCE_MODES else "compatible"
+    settings["account_group_ids"] = normalized_group_ids(settings.get("account_group_ids"))
     return settings
 
 
@@ -1113,6 +1131,39 @@ def sub2api_json_rows(query: str) -> list[dict[str, Any]]:
     return rows
 
 
+def grok_account_group_snapshot(*, refresh: bool = False) -> list[dict[str, Any]]:
+    now = time.monotonic()
+    with _ACCOUNT_GROUP_CACHE_LOCK:
+        cached_rows = _ACCOUNT_GROUP_CACHE.get("rows")
+        expires_at = float(_ACCOUNT_GROUP_CACHE.get("expires_at") or 0)
+        if not refresh and isinstance(cached_rows, list) and now < expires_at:
+            return [dict(row) for row in cached_rows if isinstance(row, dict)]
+
+    try:
+        rows = sub2api_json_rows(
+            "SELECT json_build_object("
+            "'id',g.id,'name',g.name,'platform',g.platform,'status',g.status,"
+            "'account_count',COUNT(DISTINCT a.id),"
+            "'healthy_account_count',COUNT(DISTINCT a.id) FILTER (WHERE a.status='active' "
+            "AND (a.expires_at IS NULL OR a.expires_at>now()) "
+            "AND (a.temp_unschedulable_until IS NULL OR a.temp_unschedulable_until<=now()) "
+            "AND (a.rate_limit_reset_at IS NULL OR a.rate_limit_reset_at<=now()) "
+            "AND (a.overload_until IS NULL OR a.overload_until<=now()))) "
+            "FROM groups g JOIN account_groups ag ON ag.group_id=g.id "
+            "JOIN accounts a ON a.id=ag.account_id AND a.deleted_at IS NULL AND a.platform='grok' "
+            "WHERE g.deleted_at IS NULL AND g.status='active' "
+            "GROUP BY g.id,g.name,g.platform,g.status ORDER BY g.id"
+        )
+    except ManagerError:
+        if refresh:
+            raise
+        return [dict(row) for row in cached_rows if isinstance(row, dict)]
+    with _ACCOUNT_GROUP_CACHE_LOCK:
+        _ACCOUNT_GROUP_CACHE["rows"] = [dict(row) for row in rows]
+        _ACCOUNT_GROUP_CACHE["expires_at"] = time.monotonic() + 30
+    return rows
+
+
 def ensure_sub2api_egress_proxies() -> list[dict[str, Any]]:
     settings = load_settings()
     base_port = int(settings["egress_base_port"])
@@ -1176,6 +1227,12 @@ def _account_group_ids(account: dict[str, Any]) -> tuple[int, ...]:
         except (TypeError, ValueError):
             continue
     return tuple(sorted(group_ids)) or (0,)
+
+
+def _account_matches_selected_groups(account: dict[str, Any], selected_group_ids: set[int]) -> bool:
+    if not selected_group_ids:
+        return True
+    return bool(selected_group_ids.intersection(_account_group_ids(account)))
 
 
 def _allocate_accounts_to_egresses(
@@ -1246,7 +1303,9 @@ def _allocate_accounts_to_egresses(
 def reconcile_accounts() -> dict[str, Any]:
     """Keep ten fixed egress rows and the configured schedulable Grok account capacity on each."""
     with _POOL_LOCK:
-        max_accounts_per_egress = int(load_settings()["max_accounts_per_egress"])
+        settings = load_settings()
+        max_accounts_per_egress = int(settings["max_accounts_per_egress"])
+        selected_group_ids = set(normalized_group_ids(settings.get("account_group_ids")))
         proxies = ensure_sub2api_egress_proxies()
         if len(proxies) != EGRESS_COUNT:
             raise ManagerError(f"固定出口创建不完整: {len(proxies)}/{EGRESS_COUNT}")
@@ -1261,6 +1320,7 @@ def reconcile_accounts() -> dict[str, Any]:
         )
         candidates: list[dict[str, Any]] = []
         externally_disabled: set[int] = set()
+        manually_disabled_ids: set[int] = set()
         previous_slots = {int(row["id"]): set() for row in proxies}
         unhealthy_previous_slots = {int(row["id"]): set() for row in proxies}
 
@@ -1278,9 +1338,15 @@ def reconcile_accounts() -> dict[str, Any]:
                 extra.get("mihomo_pool_externally_disabled")
             )
             if manually_disabled:
-                externally_disabled.add(account_id)
+                manually_disabled_ids.add(account_id)
+                if _account_matches_selected_groups(account, selected_group_ids):
+                    externally_disabled.add(account_id)
                 continue
-            if healthy and (bool(account.get("schedulable")) or managed):
+            if (
+                healthy
+                and _account_matches_selected_groups(account, selected_group_ids)
+                and (bool(account.get("schedulable")) or managed)
+            ):
                 candidates.append(account)
 
         slots, selected = _allocate_accounts_to_egresses(candidates, proxies, max_accounts_per_egress)
@@ -1296,6 +1362,24 @@ def reconcile_accounts() -> dict[str, Any]:
             target_proxy = selected.get(account_id)
             old_proxy = int(account["proxy_id"]) if account.get("proxy_id") is not None else None
             old_schedulable = bool(account.get("schedulable"))
+            if selected_group_ids and not _account_matches_selected_groups(account, selected_group_ids):
+                if not already_managed and old_proxy not in slots:
+                    continue
+                target_schedulable = (
+                    str(account.get("status") or "") == "active" and account_id not in manually_disabled_ids
+                )
+                marker_changed = (
+                    "mihomo_pool_managed" in extra or "mihomo_pool_standby" in extra
+                )
+                if old_proxy is not None or old_schedulable != target_schedulable or marker_changed:
+                    changed_ids.append(account_id)
+                    statements.append(
+                        "UPDATE accounts SET proxy_id=NULL, "
+                        f"schedulable={'true' if target_schedulable else 'false'}, "
+                        "extra=COALESCE(extra,'{}'::jsonb)-'mihomo_pool_managed'-'mihomo_pool_standby', "
+                        f"updated_at=now() WHERE id={account_id};"
+                    )
+                continue
             if account_id in externally_disabled:
                 target_schedulable = False
                 standby = False
@@ -1386,6 +1470,7 @@ def reconcile_accounts() -> dict[str, Any]:
         return {
             "ok": True,
             "egress_count": EGRESS_COUNT,
+            "account_group_ids": sorted(selected_group_ids),
             "online_accounts": len(selected),
             "standby_accounts": state["standby_accounts"],
             "externally_disabled_accounts": len(externally_disabled),
@@ -1717,6 +1802,7 @@ def rotate_egresses() -> dict[str, Any]:
 def save_runtime_settings(payload: dict[str, Any]) -> dict[str, Any]:
     settings = load_settings()
     previous_capacity = int(settings["max_accounts_per_egress"])
+    previous_group_ids = normalized_group_ids(settings.get("account_group_ids"))
     for key in (
         "auto_update_minutes",
         "node_test_minutes",
@@ -1731,11 +1817,26 @@ def save_runtime_settings(payload: dict[str, Any]) -> dict[str, Any]:
         settings["egress_auto_rotate_enabled"] = payload["egress_auto_rotate_enabled"] is True
     if "node_source_mode" in payload:
         settings["node_source_mode"] = payload["node_source_mode"]
+    if "account_group_ids" in payload:
+        requested_group_ids = normalized_group_ids(payload["account_group_ids"])
+        if requested_group_ids:
+            available_group_ids = {
+                int(row["id"])
+                for row in grok_account_group_snapshot(refresh=True)
+                if row.get("id") is not None
+            }
+            missing_group_ids = sorted(set(requested_group_ids) - available_group_ids)
+            if missing_group_ids:
+                raise ManagerError("账号分组不存在或没有 Grok 账号: " + ", ".join(map(str, missing_group_ids)))
+        settings["account_group_ids"] = requested_group_ids
     settings["egress_pool_enabled"] = True
     settings = normalized_settings(settings)
     save_settings(settings)
     result: dict[str, Any] = {"ok": True, "settings": public_settings(settings)}
-    if int(settings["max_accounts_per_egress"]) != previous_capacity:
+    if (
+        int(settings["max_accounts_per_egress"]) != previous_capacity
+        or normalized_group_ids(settings.get("account_group_ids")) != previous_group_ids
+    ):
         result["accounts"] = reconcile_accounts()
     return result
 
@@ -1754,6 +1855,7 @@ def public_settings(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         "egress_reuse_cooldown_minutes": int(settings["egress_reuse_cooldown_minutes"]),
         "max_accounts_per_egress": int(settings["max_accounts_per_egress"]),
         "account_reconcile_seconds": int(settings["account_reconcile_seconds"]),
+        "account_group_ids": normalized_group_ids(settings.get("account_group_ids")),
     }
 
 
@@ -1940,6 +2042,7 @@ def status_payload() -> dict[str, Any]:
         "source_masked": mask_source(source),
         "updated_at": settings.get("updated_at") or "",
         "settings": public_settings(settings),
+        "account_groups": grok_account_group_snapshot(),
         "egresses": egress_snapshot(),
         "last_rotated_at": pool_state.get("last_rotated_at") or "",
         "accounts_reconciled_at": pool_state.get("accounts_reconciled_at") or "",

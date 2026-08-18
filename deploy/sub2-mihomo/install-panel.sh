@@ -14,6 +14,7 @@ SUB2API_DOCKER_HOST="${SUB2API_DOCKER_HOST:-172.20.0.1}"
 SUB2API_DEPLOY_DIR="${SUB2API_DEPLOY_DIR:-/home/${MIHOMO_USER}/sub2api-deploy}"
 SUB2API_POSTGRES_CONTAINER="${SUB2API_POSTGRES_CONTAINER:-sub2api-postgres}"
 NGINX_SNIPPET_CONFIG="${NGINX_SNIPPET_CONFIG:-/etc/nginx/snippets/mihomo.conf}"
+MIHOMO_RESTART_CORE="${MIHOMO_RESTART_CORE:-1}"
 
 export MIHOMO_ROOT MIHOMO_USER MIHOMO_GROUP MIHOMO_PUBLIC_BASE MIHOMO_URL_PATH
 export SUB2API_DOCKER_HOST SUB2API_DEPLOY_DIR SUB2API_POSTGRES_CONTAINER
@@ -73,13 +74,16 @@ echo "[1/7] sync panel files"
 sudo install -d -o "$MIHOMO_USER" -g "$MIHOMO_GROUP" \
   "$MIHOMO_ROOT" "$MIHOMO_ROOT/web" "$MIHOMO_ROOT/state" \
   "$MIHOMO_ROOT/providers" "$MIHOMO_ROOT/logs"
-for file in manager.py v2ray_convert.py set_subscription.py; do
+for file in manager.py v2ray_convert.py set_subscription.py update-from-github.sh; do
   sudo install -o "$MIHOMO_USER" -g "$MIHOMO_GROUP" -m 0755 "$REPO_DIR/$file" "$MIHOMO_ROOT/$file"
 done
 sudo install -o "$MIHOMO_USER" -g "$MIHOMO_GROUP" -m 0755 "$REPO_DIR/mihomoctl" "$MIHOMO_ROOT/mihomoctl"
 for file in index.html app.js app.css; do
   sudo install -o "$MIHOMO_USER" -g "$MIHOMO_GROUP" -m 0644 "$REPO_DIR/web/$file" "$MIHOMO_ROOT/web/$file"
 done
+if [ -f "$REPO_DIR/REVISION" ]; then
+  sudo install -o "$MIHOMO_USER" -g "$MIHOMO_GROUP" -m 0644 "$REPO_DIR/REVISION" "$MIHOMO_ROOT/REVISION"
+fi
 
 echo "[2/7] initialize provider and config"
 sudo -u "$MIHOMO_USER" env MIHOMO_ROOT="$MIHOMO_ROOT" python3 - <<'PY'
@@ -156,8 +160,10 @@ PY
 echo "[6/7] restart services"
 sudo systemctl daemon-reload
 sudo systemctl enable --now sub2-mihomo.service
-sudo systemctl restart sub2-mihomo.service
-sleep 1
+if [ "$MIHOMO_RESTART_CORE" = "1" ]; then
+  sudo systemctl restart sub2-mihomo.service
+  sleep 1
+fi
 sudo systemctl enable --now sub2-mihomo-panel.service
 sudo systemctl restart sub2-mihomo-panel.service
 systemctl is-active sub2-mihomo.service
