@@ -104,6 +104,10 @@ NODE_TEST_TARGETS = (
     "https://api.openai.com/v1/models",
 )
 EGRESS_IP_TEST_URL = "https://api.ipify.org?format=json"
+GROK_EGRESS_TEST_URL = (
+    os.environ.get("MIHOMO_GROK_EGRESS_TEST_URL", "https://cli-chat-proxy.grok.com/v1/models").strip()
+    or "https://cli-chat-proxy.grok.com/v1/models"
+)
 
 
 def normalized_settings(value: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -882,6 +886,43 @@ def probe_current_egress_ips() -> dict[str, str]:
     return results
 
 
+def probe_grok_egress(index: int, timeout: float = 8.0) -> int:
+    if index < 1 or index > EGRESS_COUNT:
+        raise ManagerError(f"出口编号必须在 1-{EGRESS_COUNT} 之间")
+    settings = load_settings()
+    port = int(settings["egress_base_port"]) + index - 1
+    proxy_url = f"http://127.0.0.1:{port}"
+    opener = build_opener(ProxyHandler({"http": proxy_url, "https": proxy_url}))
+    request = Request(GROK_EGRESS_TEST_URL, headers={"User-Agent": "sub2-mihomo/1.0"})
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            status = int(response.status)
+    except HTTPError as exc:
+        status = int(exc.code)
+    except (URLError, TimeoutError, OSError) as exc:
+        raise ManagerError(f"出口 {index:02d} 无法连接 Grok 目标站") from exc
+    if status >= 500:
+        raise ManagerError(f"出口 {index:02d} 的 Grok 目标站返回 HTTP {status}")
+    return status
+
+
+def probe_current_grok_egresses() -> dict[str, bool]:
+    results = {egress_group_name(index): False for index in range(1, EGRESS_COUNT + 1)}
+    with ThreadPoolExecutor(max_workers=EGRESS_COUNT) as executor:
+        futures = {
+            executor.submit(probe_grok_egress, index): index
+            for index in range(1, EGRESS_COUNT + 1)
+        }
+        for future in as_completed(futures):
+            index = futures[future]
+            try:
+                future.result()
+                results[egress_group_name(index)] = True
+            except ManagerError:
+                pass
+    return results
+
+
 def load_delay_cache() -> dict[str, Any]:
     if not DELAYS_FILE.exists():
         return {"tested_at": "", "rows": {}}
@@ -1126,6 +1167,82 @@ def _account_healthy(account: dict[str, Any]) -> bool:
     return True
 
 
+def _account_group_ids(account: dict[str, Any]) -> tuple[int, ...]:
+    values = account.get("group_ids") if isinstance(account.get("group_ids"), list) else []
+    group_ids: set[int] = set()
+    for value in values:
+        try:
+            group_ids.add(int(value))
+        except (TypeError, ValueError):
+            continue
+    return tuple(sorted(group_ids)) or (0,)
+
+
+def _allocate_accounts_to_egresses(
+    candidates: list[dict[str, Any]],
+    proxies: list[dict[str, Any]],
+    max_accounts_per_egress: int,
+) -> tuple[dict[int, list[dict[str, Any]]], dict[int, int]]:
+    slots = {int(row["id"]): [] for row in proxies}
+    if not candidates or not slots or max_accounts_per_egress <= 0:
+        return slots, {}
+
+    queues: dict[tuple[int, ...], list[dict[str, Any]]] = {}
+    valid_proxy_ids = set(slots)
+    for account in candidates:
+        queues.setdefault(_account_group_ids(account), []).append(account)
+    for queue in queues.values():
+        queue.sort(
+            key=lambda account: (
+                int(account["proxy_id"]) not in valid_proxy_ids if account.get("proxy_id") is not None else True,
+                str(account.get("last_used_at") or ""),
+                int(account["id"]),
+            )
+        )
+
+    capacity = len(slots) * max_accounts_per_egress
+    selected_accounts: list[dict[str, Any]] = []
+    group_keys = sorted(queues)
+    while len(selected_accounts) < capacity:
+        added = False
+        for group_key in group_keys:
+            queue = queues[group_key]
+            if not queue:
+                continue
+            selected_accounts.append(queue.pop(0))
+            added = True
+            if len(selected_accounts) >= capacity:
+                break
+        if not added:
+            break
+
+    proxy_by_id = {int(row["id"]): row for row in proxies}
+    selected: dict[int, int] = {}
+    for account in selected_accounts:
+        available = [proxy_id for proxy_id, bound in slots.items() if len(bound) < max_accounts_per_egress]
+        if not available:
+            break
+        account_groups = set(_account_group_ids(account))
+        old_proxy = int(account["proxy_id"]) if account.get("proxy_id") is not None else None
+
+        def assignment_score(proxy_id: int) -> tuple[int, int, int, str]:
+            group_overlap = sum(
+                len(account_groups.intersection(_account_group_ids(bound_account)))
+                for bound_account in slots[proxy_id]
+            )
+            return (
+                group_overlap,
+                len(slots[proxy_id]),
+                0 if proxy_id == old_proxy else 1,
+                str(proxy_by_id[proxy_id]["name"]),
+            )
+
+        proxy_id = min(available, key=assignment_score)
+        slots[proxy_id].append(account)
+        selected[int(account["id"])] = proxy_id
+    return slots, selected
+
+
 def reconcile_accounts() -> dict[str, Any]:
     """Keep ten fixed egress rows and the configured schedulable Grok account capacity on each."""
     with _POOL_LOCK:
@@ -1133,20 +1250,19 @@ def reconcile_accounts() -> dict[str, Any]:
         proxies = ensure_sub2api_egress_proxies()
         if len(proxies) != EGRESS_COUNT:
             raise ManagerError(f"固定出口创建不完整: {len(proxies)}/{EGRESS_COUNT}")
-        proxy_by_id = {int(row["id"]): row for row in proxies}
-        slots = {int(row["id"]): [] for row in proxies}
         accounts = sub2api_json_rows(
             "SELECT json_build_object("
             "'id',id,'name',name,'status',status,'schedulable',schedulable,'proxy_id',proxy_id,"
             "'extra',extra,'last_used_at',last_used_at,'temp_unschedulable_until',temp_unschedulable_until,"
             "'rate_limit_reset_at',rate_limit_reset_at,'overload_until',overload_until,"
-            "'expires_at',expires_at) FROM accounts "
+            "'expires_at',expires_at,'group_ids',COALESCE((SELECT json_agg(ag.group_id ORDER BY ag.group_id) "
+            "FROM account_groups ag WHERE ag.account_id=accounts.id),'[]'::json)) FROM accounts "
             "WHERE deleted_at IS NULL AND platform='grok' ORDER BY last_used_at NULLS FIRST, id"
         )
-        selected: dict[int, int] = {}
         candidates: list[dict[str, Any]] = []
         externally_disabled: set[int] = set()
         previous_slots = {int(row["id"]): set() for row in proxies}
+        unhealthy_previous_slots = {int(row["id"]): set() for row in proxies}
 
         for account in accounts:
             account_id = int(account["id"])
@@ -1156,30 +1272,18 @@ def reconcile_accounts() -> dict[str, Any]:
             if proxy_id in previous_slots:
                 previous_slots[proxy_id].add(account_id)
             healthy = _account_healthy(account)
+            if not healthy and proxy_id in unhealthy_previous_slots:
+                unhealthy_previous_slots[proxy_id].add(account_id)
             manually_disabled = bool(extra.get("manual_schedulable_disabled")) or bool(
                 extra.get("mihomo_pool_externally_disabled")
             )
             if manually_disabled:
                 externally_disabled.add(account_id)
                 continue
-            if healthy and proxy_id in slots and len(slots[proxy_id]) < max_accounts_per_egress:
-                slots[proxy_id].append(account)
-                selected[account_id] = proxy_id
-                continue
             if healthy and (bool(account.get("schedulable")) or managed):
                 candidates.append(account)
 
-        candidate_index = 0
-        while candidate_index < len(candidates):
-            available = [proxy_id for proxy_id, bound in slots.items() if len(bound) < max_accounts_per_egress]
-            if not available:
-                break
-            proxy_id = min(available, key=lambda value: (len(slots[value]), proxy_by_id[value]["name"]))
-            account = candidates[candidate_index]
-            candidate_index += 1
-            account_id = int(account["id"])
-            slots[proxy_id].append(account)
-            selected[account_id] = proxy_id
+        slots, selected = _allocate_accounts_to_egresses(candidates, proxies, max_accounts_per_egress)
 
         candidate_ids = {int(account["id"]) for account in candidates}
         changed_ids: list[int] = []
@@ -1240,7 +1344,14 @@ def reconcile_accounts() -> dict[str, Any]:
                     "name": proxy["name"],
                     "port": int(proxy["port"]),
                     "account_count": len(bound),
-                    "accounts": [{"id": int(item["id"]), "name": item.get("name") or ""} for item in bound],
+                    "accounts": [
+                        {
+                            "id": int(item["id"]),
+                            "name": item.get("name") or "",
+                            "group_ids": [value for value in _account_group_ids(item) if value != 0],
+                        }
+                        for item in bound
+                    ],
                 }
             )
         state = load_egress_state()
@@ -1254,7 +1365,8 @@ def reconcile_accounts() -> dict[str, Any]:
         for proxy in proxies:
             proxy_id = int(proxy["id"])
             current_ids = {int(account["id"]) for account in slots[proxy_id]}
-            if not (previous_slots[proxy_id] - current_ids and current_ids - previous_slots[proxy_id]):
+            removed_unhealthy = unhealthy_previous_slots[proxy_id] - current_ids
+            if not (removed_unhealthy and current_ids - previous_slots[proxy_id]):
                 continue
             index = next(
                 (
@@ -1315,6 +1427,7 @@ def _select_unique_egress_candidate(
     reserved_ips: set[str],
     start: int,
     cooldown_minutes: int,
+    allow_recent_fallback: bool = False,
 ) -> tuple[str, str, int]:
     group = egress_group_name(index)
     recent_nodes = _recent_history_values(_state_map(state, "node_last_used_at"), cooldown_minutes)
@@ -1325,26 +1438,31 @@ def _select_unique_egress_candidate(
         recent_ips.add(current_ip)
 
     attempted = 0
-    for offset in range(len(healthy_names)):
-        candidate_index = (start + offset) % len(healthy_names)
-        candidate = healthy_names[candidate_index]
-        if candidate in reserved_nodes or candidate in recent_nodes:
-            continue
-        attempted += 1
-        select_proxy(candidate, group)
-        try:
-            exit_ip = probe_egress_ip(index)
-        except ManagerError:
-            continue
-        if exit_ip in reserved_ips or exit_ip in recent_ips:
-            continue
-        return candidate, exit_ip, (candidate_index + 1) % len(healthy_names)
+    respect_recent_values = (True, False) if allow_recent_fallback else (True,)
+    for respect_recent in respect_recent_values:
+        for offset in range(len(healthy_names)):
+            candidate_index = (start + offset) % len(healthy_names)
+            candidate = healthy_names[candidate_index]
+            if candidate in reserved_nodes or candidate == current:
+                continue
+            if respect_recent and candidate in recent_nodes:
+                continue
+            attempted += 1
+            select_proxy(candidate, group)
+            try:
+                exit_ip = probe_egress_ip(index)
+                if exit_ip in reserved_ips or (respect_recent and exit_ip in recent_ips):
+                    continue
+                probe_grok_egress(index)
+            except ManagerError:
+                continue
+            return candidate, exit_ip, (candidate_index + 1) % len(healthy_names)
 
     if current:
         select_proxy(current, group)
     if attempted == 0:
         raise ManagerError("没有未占用且不在冷却期的健康节点")
-    raise ManagerError("健康候选节点的公网 IP 均重复、处于冷却期或探测失败")
+    raise ManagerError("健康候选节点的公网 IP 均重复、处于冷却期或无法连接 Grok 目标站")
 
 
 def _restore_egress_assignments(assignments: dict[str, str]) -> None:
@@ -1365,6 +1483,7 @@ def repair_unhealthy_egresses(healthy_names: list[str] | None = None) -> dict[st
         state = load_egress_state()
         live_assignments = current_egress_assignments(state)
         live_ips = probe_current_egress_ips()
+        grok_reachability = probe_current_grok_egresses()
         if not any(live_ips.values()):
             raise ManagerError("公网 IP 探测暂不可用，已保留当前固定出口")
         settings = load_settings()
@@ -1386,6 +1505,7 @@ def repair_unhealthy_egresses(healthy_names: list[str] | None = None) -> dict[st
                 and current not in reserved_nodes
                 and exit_ip
                 and exit_ip not in reserved_ips
+                and grok_reachability.get(group) is True
             ):
                 retained[group] = (current, exit_ip)
                 reserved_nodes.add(current)
@@ -1426,6 +1546,7 @@ def repair_unhealthy_egresses(healthy_names: list[str] | None = None) -> dict[st
                     reserved_ips=reserved_ips,
                     start=cursor,
                     cooldown_minutes=cooldown_minutes,
+                    allow_recent_fallback=True,
                 )
                 assignments[group] = replacement
                 exit_ips[group] = exit_ip
@@ -1447,7 +1568,7 @@ def repair_unhealthy_egresses(healthy_names: list[str] | None = None) -> dict[st
             "ok": True,
             "count": EGRESS_COUNT,
             "switched": switched,
-            "unique_exit_ips": len(set(exit_ips.values())),
+            "unique_exit_ips": len({value for value in exit_ips.values() if value}),
             "assignments": assignments,
         }
 
@@ -1484,10 +1605,8 @@ def rotate_egress(index: int) -> dict[str, Any]:
             for other in range(1, EGRESS_COUNT + 1)
             if other != index
         ]
-        if not all(other_ips) or len(set(other_ips)) != EGRESS_COUNT - 1:
-            raise ManagerError("其他固定出口的公网 IP 无法确认唯一，请先执行目标站测活自动修复")
         occupied = {node for name, node in assignments.items() if name != group and node}
-        occupied_ips = set(other_ips)
+        occupied_ips = {value for value in other_ips if value}
         cooldown_minutes = int(load_settings()["egress_reuse_cooldown_minutes"])
         try:
             start = (healthy_names.index(current) + 1) % len(healthy_names)
@@ -1508,6 +1627,7 @@ def rotate_egress(index: int) -> dict[str, Any]:
             reserved_ips=occupied_ips,
             start=start,
             cooldown_minutes=cooldown_minutes,
+            allow_recent_fallback=True,
         )
         assignments[group] = replacement
         live_ips[group] = exit_ip
@@ -1526,7 +1646,7 @@ def rotate_egress(index: int) -> dict[str, Any]:
             "previous": current,
             "node": replacement,
             "healthy_nodes": len(healthy_names),
-            "unique_exit_ips": len(set(live_ips.values())),
+            "unique_exit_ips": len({value for value in live_ips.values() if value}),
         }
 
 
