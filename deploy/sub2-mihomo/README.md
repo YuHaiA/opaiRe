@@ -43,6 +43,8 @@ bash install.sh
 
 安装器会创建单个 Mihomo 进程、10 个固定出口端口 `7901-7910`、管理面板服务、受限 sudoers 和 Nginx 路由，不会额外创建 Docker 镜像。首次密码与控制器密钥保存在服务器的 `/opt/sub2-mihomo/CREDENTIALS.txt`，权限为 `0600`。
 
+安装器同时启用 `sub2-mihomo-health.timer`。它每 30 秒检查控制器 `127.0.0.1:9090` 和混合代理端口 `7890`；连续 3 次无响应时主动重启 Mihomo，清理进程仍存活但连接堆积的假死状态。检查状态仅写入 `/run/sub2-mihomo-health.json`，不会触碰订阅、配置或运行数据。
+
 ## 更新面板代码
 
 不重新下载核心、不覆盖订阅和运行状态：

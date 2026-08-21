@@ -1,0 +1,12 @@
+[Unit]
+Description=Sub2 Mihomo health recovery check
+After=network-online.target sub2-mihomo.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/sub2-mihomo/healthcheck.py
+User=root
+NoNewPrivileges=false
+PrivateTmp=true
+

@@ -77,6 +77,7 @@ sudo install -d -o "$MIHOMO_USER" -g "$MIHOMO_GROUP" \
 for file in manager.py v2ray_convert.py set_subscription.py update-from-github.sh; do
   sudo install -o "$MIHOMO_USER" -g "$MIHOMO_GROUP" -m 0755 "$REPO_DIR/$file" "$MIHOMO_ROOT/$file"
 done
+sudo install -o root -g root -m 0755 "$REPO_DIR/healthcheck.py" "$MIHOMO_ROOT/healthcheck.py"
 sudo install -o "$MIHOMO_USER" -g "$MIHOMO_GROUP" -m 0755 "$REPO_DIR/mihomoctl" "$MIHOMO_ROOT/mihomoctl"
 for file in index.html app.js app.css; do
   sudo install -o "$MIHOMO_USER" -g "$MIHOMO_GROUP" -m 0644 "$REPO_DIR/web/$file" "$MIHOMO_ROOT/web/$file"
@@ -114,6 +115,8 @@ fi
 echo "[3/7] install systemd units"
 render_template "$REPO_DIR/sub2-mihomo.service" /etc/systemd/system/sub2-mihomo.service
 render_template "$REPO_DIR/sub2-mihomo-panel.service" /etc/systemd/system/sub2-mihomo-panel.service
+sudo install -m 0644 "$REPO_DIR/sub2-mihomo-health.service" /etc/systemd/system/sub2-mihomo-health.service
+sudo install -m 0644 "$REPO_DIR/sub2-mihomo-health.timer" /etc/systemd/system/sub2-mihomo-health.timer
 
 echo "[4/7] install restricted sudo helper"
 temp_sudoers="$(mktemp)"
@@ -160,6 +163,7 @@ PY
 echo "[6/7] restart services"
 sudo systemctl daemon-reload
 sudo systemctl enable --now sub2-mihomo.service
+sudo systemctl enable --now sub2-mihomo-health.timer
 if [ "$MIHOMO_RESTART_CORE" = "1" ]; then
   sudo systemctl restart sub2-mihomo.service
   sleep 1

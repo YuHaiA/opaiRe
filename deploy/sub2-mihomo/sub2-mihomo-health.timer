@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Sub2 Mihomo health recovery check
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=30s
+Unit=sub2-mihomo-health.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target
