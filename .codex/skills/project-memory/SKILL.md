@@ -42,6 +42,7 @@ description: Durable project memory for opaiRe. Use this skill to recover stable
 - Mobile UI changes should account for `index.html`, `static/css/`, and `static/js/` together.
 - Cloud inventory pagination is frontend-sliced after merged fetch to avoid repeated multi-platform aggregation.
 - Server-side git over HTTPS may fail with `gnutls_handshake()`; if so, prefer SSH/file sync rather than repeated HTTPS retries.
+- The upstream GitHub default branch was reset to a license-only `master` history on 2026-08-21. Do not merge it into opaiRe; absorb verified release tags instead.
 - When syncing to remote Git, include project `.codex` files when they contain durable project docs or skills; do not ignore them by habit.
 - A registration `batch_id` must not suppress ordinary mail-domain fallback when domain runtime control is disabled. Only skip fallback when runtime control is enabled and a worker truly lacks a preallocated domain.
 - Concurrent Grok registration workers need distinct physical egress IPs. Multiple local ports mapped to the same upstream node do not reduce Grok/Castle IP risk.
@@ -110,7 +111,7 @@ description: Durable project memory for opaiRe. Use this skill to recover stable
 
 - Keep reducing coupling in large frontend and launcher files when touching adjacent logic.
 - Keep local project version aligned with upstream release tags during upstream sync work.
-- Current aligned upstream release is `v18.1.3` (`e5662e6`).
+- Current aligned upstream release is `v18.1.4` (`7abf465`).
 - Keep `.codex/docs/` concise but not empty: retain current-state and history summaries, remove junk.
 - For session cleanup, first migrate durable facts into this project memory and `SYSTEM.md`, then archive only old project-related sessions.
 

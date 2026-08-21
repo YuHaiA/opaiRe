@@ -15,9 +15,10 @@
 
 ## 最新吸收
 
-- 2026-08-16 合并上游 `wenfxl/openai-cpa` 的 `upstream/main`，对应标签 `v18.1.3` / 提交 `e5662e6`。
-- 吸收 `v18.1.1 -> v18.1.3`：Grok 丢弃数统计、检测状态优化、IPv6 入站代理兼容、Grok 独立检测代理。
-- 本地 `APP_VERSION` 已同步到 `v18.1.3`。
+- 2026-08-21 按发行标签吸收上游 `v18.1.4`（`7abf465`），本地 `APP_VERSION` 已同步到 `v18.1.4`。
+- 新增 Grok2API `sso_only_mode`：注册后可仅保留 SSO、先导入 Grok Web，并跳过 Build OAuth；前端配置面板同步增加开关与说明。
+- 合并时保留本地 Grok 状态探测失败丢弃、可配置降智丢弃、OAuth 代理鉴权、浏览器资源回收，以及服务6和 Mihomo 运行保护。
+- 上游 GitHub 默认分支已重置为仅含 LICENSE 的新 `master` 历史，不能直接合并；后续升级继续以可验证的发行标签为基线。
 - 保留本地 CPA 收码路径、Mihomo/Clash 定制、email-bridge 与 `.codex` 文档体系。
 - 顺手修正上游集群页把丢弃数绑到 `pwd_blocked` 的显示错误。
 

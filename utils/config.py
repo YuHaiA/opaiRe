@@ -285,7 +285,7 @@ def init_config():
                 print(f"[{ts()}] [WARNING] 自动补全配置文件写入失败: {e}")
 
     return user_config
-APP_VERSION = "v18.1.3"
+APP_VERSION = "v18.1.4"
 _c: dict = {}
 WEB_PASSWORD: str = "admin"
 RETAIN_REG_ONLY: bool = False
@@ -416,6 +416,7 @@ GROK2API_DEFAULT_PROXY: str = ""
 GROK2API_DEFAULT_PROXY_POOL: list = []
 GROK2API_AUTO_IMPORT_AFTER_REGISTER: bool = False
 GROK2API_IMPORT_SSO_AS_GROK_WEB: bool = False
+GROK2API_SSO_ONLY_MODE: bool = False
 
 LUCKMAIL_PREFERRED_DOMAIN: str = ""
 LUCKMAIL_EMAIL_TYPE: str = ""
@@ -618,6 +619,7 @@ def reload_all_configs(new_config_dict=None):
     global SUB2API_ACCOUNT_RATE_MULTIPLIER, SUB2API_ACCOUNT_GROUP_IDS, SUB2API_ENABLE_WS_MODE
     global ENABLE_IMAGE2API_MODE, IMAGE2API_URL, IMAGE2API_KEY, IMAGE2API_RETAIN_REG_ONLY, IMAGE2API_IMG_ONLY_MODE
     global GROK2API_URL, GROK2API_ADMIN_PASSWORD, GROK2API_AUTO_IMPORT_AFTER_REGISTER, GROK2API_IMPORT_SSO_AS_GROK_WEB
+    global GROK2API_SSO_ONLY_MODE
     global ENABLE_GROK2API_MODE, SAVE_TO_LOCAL_IN_GROK2API_MODE
     global GROK2API_MIN_THRESHOLD, GROK2API_BATCH_COUNT, GROK2API_MIN_REMAINING_WEEKLY_PERCENT
     global GROK2API_REMOVE_ON_LIMIT_REACHED, GROK2API_REMOVE_DEAD_ACCOUNTS, GROK2API_ENABLE_TOKEN_REVIVE
@@ -1006,6 +1008,9 @@ def reload_all_configs(new_config_dict=None):
     )
     GROK2API_IMPORT_SSO_AS_GROK_WEB = safe_bool(
         _grok2api.get("import_sso_as_grok_web", False)
+    )
+    GROK2API_SSO_ONLY_MODE = safe_bool(
+        _grok2api.get("sso_only_mode", False)
     )
 
     reset_sub2api_proxy_rotation()

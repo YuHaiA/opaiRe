@@ -16,6 +16,7 @@ def load_manager():
     module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
     spec.loader.exec_module(module)
+    module.probe_grok_egress = lambda index, timeout=8.0: 200
     return module
 
 
