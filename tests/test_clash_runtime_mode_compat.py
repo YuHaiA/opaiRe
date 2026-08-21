@@ -33,6 +33,18 @@ def test_detect_runtime_mode_local_gui_explicit(monkeypatch):
     assert cm._detect_runtime_mode(client=None) == "local_gui"
 
 
+def test_detect_native_linux_core_outside_path(monkeypatch, tmp_path):
+    cm = importlib.import_module("utils.integrations.clash_manager")
+    core = tmp_path / "mihomo"
+    core.write_bytes(b"core")
+    core.chmod(0o755)
+
+    monkeypatch.setattr(cm.os, "name", "posix")
+    monkeypatch.setenv("MIHOMO_BIN", str(core))
+
+    assert cm._linux_mihomo_core_available() is True
+
+
 def test_control_runtime_does_not_touch_external_windows_core(monkeypatch):
     cm = importlib.import_module("utils.integrations.clash_manager")
     monkeypatch.setattr(cm, "_detect_runtime_mode", lambda client: "windows_single_core")

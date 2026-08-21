@@ -225,7 +225,15 @@ def run(
                 run_ctx["discarded"] = True
                 return None, None
         else:
-            _log(f"账号状态检测失败: {bot_flag_dict['error']}", email)
+            error_detail = str(bot_flag_dict.get("error") or "未知原因")
+            _log(f"账号状态检测失败: {error_detail}", email)
+            # A successful SSO is not sufficient to trust the account. If the
+            # post-registration risk probe cannot validate botFlag (for
+            # example, a TLS/proxy failure), do not send the account onward.
+            run_ctx["discarded"] = True
+            run_ctx["discard_reason"] = "status_check_failed"
+            _log("⚠️ 账号状态未知，按检测失败丢弃，不进入账号库", email)
+            return None, None
 
         _import_grok_web_before_oauth(sso, email, run_ctx)
         try:

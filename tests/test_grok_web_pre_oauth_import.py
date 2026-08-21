@@ -19,7 +19,7 @@ class _OAuth:
     userinfo = {"email": "test@example.com"}
 
 
-def _run(monkeypatch, events, *, enabled=True, web_ok=True):
+def _run(monkeypatch, events, *, enabled=True, web_ok=True, status_ok=True):
     monkeypatch.setattr(register.cfg, "GROK2API_IMPORT_SSO_AS_GROK_WEB", enabled, raising=False)
     monkeypatch.setattr(register, "ensure_camoufox", lambda force=False: (True, ""))
     monkeypatch.setattr(register, "get_email_and_token", lambda *a, **k: ("test@example.com", "mail-token"))
@@ -29,6 +29,11 @@ def _run(monkeypatch, events, *, enabled=True, web_ok=True):
         "sso": "sso-secret",
         "cookies": {"sso": "sso-secret"},
     })
+    monkeypatch.setattr(register, "inspect_sso_account_state", lambda *a, **k: (
+        {"found": True, "bot_flag_source": 0, "denied": False, "risk": 0.1}
+        if status_ok else
+        {"found": False, "error": "TLS connect error"}
+    ))
 
     def complete(*args, **kwargs):
         events.append("build_oauth")
@@ -74,3 +79,12 @@ def test_disabled_skips_grok_web_and_keeps_build_oauth(monkeypatch):
     assert result[0]
     assert events == ["build_oauth"]
     assert "grok_web_import_ok" not in ctx
+
+
+def test_status_probe_failure_discards_before_build_oauth(monkeypatch):
+    events = []
+    result, ctx = _run(monkeypatch, events, status_ok=False)
+    assert result is None
+    assert events == []
+    assert ctx["discarded"] is True
+    assert ctx["discard_reason"] == "status_check_failed"

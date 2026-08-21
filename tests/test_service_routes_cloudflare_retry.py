@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 import httpx
 
@@ -28,6 +29,20 @@ class CloudflareRequestRetryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(expected, result)
         self.assertEqual(3, client.calls)
+
+    def test_bundled_email_worker_contract(self):
+        source = service_routes._load_cf_email_worker_source()
+
+        self.assertIn("async email", source)
+        self.assertIn('"X-Webhook-Secret"', source)
+        self.assertIn("message.raw", source)
+        self.assertIn("message.to", source)
+        self.assertNotIn("raw.githubusercontent.com", source)
+
+        self.assertEqual(
+            Path(service_routes.CF_EMAIL_WORKER_PATH).name,
+            "cloudflare-email-worker.js",
+        )
 
 
 if __name__ == "__main__":

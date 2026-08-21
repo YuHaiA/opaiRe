@@ -521,6 +521,9 @@ REG_PROVIDER: str = "openai"
 AUTH_FINGERPRINT_MODE: str = "compat"
 # Grok
 GROK_OAUTH_TIMEOUT: float = 180.0
+GROK_BROWSER_RECYCLE_JOBS: int = 8
+GROK_BROWSER_MAX_WORKERS: int = 2
+GROK_BROWSER_IDLE_TIMEOUT: float = 60.0
 DB_TYPE: str = "sqlite"
 MYSQL_CFG: dict = {}
 _sub2api_proxy_rotation_lock = threading.Lock()
@@ -644,7 +647,7 @@ def reload_all_configs(new_config_dict=None):
     global REG_PROVIDER
     global AUTH_FINGERPRINT_MODE
     # Grok 仅加载可配置项；其余固定常量不在此处改写
-    global GROK_OAUTH_TIMEOUT, DISCARD_ON_DOWNGRADE
+    global GROK_OAUTH_TIMEOUT, GROK_BROWSER_RECYCLE_JOBS, GROK_BROWSER_MAX_WORKERS, GROK_BROWSER_IDLE_TIMEOUT, DISCARD_ON_DOWNGRADE
     global LOCAL_MS_ENABLE_FISSION, LOCAL_MS_MASTER_EMAIL, LOCAL_MS_PASSWORD, LOCAL_MS_CLIENT_ID, LOCAL_MS_REFRESH_TOKEN, LOCAL_MS_POOL_FISSION
     global LOCAL_MS_SUFFIX_MODE, LOCAL_MS_SUFFIX_LEN_MIN, LOCAL_MS_SUFFIX_LEN_MAX
     global DB_TYPE, MYSQL_CFG
@@ -1188,6 +1191,13 @@ def reload_all_configs(new_config_dict=None):
         GROK_OAUTH_TIMEOUT = 180.0
     if GROK_OAUTH_TIMEOUT <= 0:
         GROK_OAUTH_TIMEOUT = 180.0
+    GROK_BROWSER_RECYCLE_JOBS = safe_int(_grok.get("browser_recycle_jobs", 8), 8, minimum=0)
+    GROK_BROWSER_MAX_WORKERS = safe_int(_grok.get("browser_max_workers", 2), 2, minimum=0)
+    try:
+        GROK_BROWSER_IDLE_TIMEOUT = float(_grok.get("browser_idle_timeout", 60.0) or 0)
+    except Exception:
+        GROK_BROWSER_IDLE_TIMEOUT = 60.0
+    GROK_BROWSER_IDLE_TIMEOUT = max(0.0, GROK_BROWSER_IDLE_TIMEOUT)
 
     _temporam = _c.get("temporam", {})
     TEMPORAM_COOKIE = str(_temporam.get("cookie") or "").strip()

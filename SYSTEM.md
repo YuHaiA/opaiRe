@@ -21,6 +21,27 @@
 - 保留本地 CPA 收码路径、Mihomo/Clash 定制、email-bridge 与 `.codex` 文档体系。
 - 顺手修正上游集群页把丢弃数绑到 `pwd_blocked` 的显示错误。
 
+## 服务6轻量部署（2026-08-19）
+
+- 服务6公网入口：`http://69.33.213.130:8000/`；SSH 使用 `root@69.33.213.130`，密钥仅保存在本机桌面文件目录，不写入仓库。
+- 部署路径：服务器 `/opt/opaire`，运行用户 `opaire`；使用 Python 3.11 venv 和 systemd `opaire.service`，不使用 Docker。
+- 低压力配置：Grok、单线程注册、关闭代理池及 CPA/Sub2API/Grok2API 自动巡检；Grok 浏览器每 4 个任务回收。
+- 已上线浏览器资源保护：浏览器池最多 2 个 worker、空闲 60 秒自动关闭；`opaire.service` 使用 `deploy/systemd/opaire-memory-guard.conf`，在本机 1.9 GiB 内存规格上实际生效为 `MemoryHigh=1.34G`、`MemoryMax=1.53G`、`MemorySwapMax=1G`，超限只回收/重启 opaiRe cgroup，不拖垮 SSH、Nginx 和 Mihomo。
+- 服务6的 `opaire.service`、`sub2-mihomo.service`、`sub2-mihomo-panel.service` 均配置 `Restart=always` 与 5 秒延迟；进程异常退出或被内存保护回收后会自动拉起，手动 `systemctl stop` 仍不会被自动恢复。
+- systemd 已启用 `NoNewPrivileges`、`ProtectSystem=full`、`PrivateTmp`、失败自动重启和 4096 文件描述符上限；服务器启用 1 GiB swap。
+- 2026-08-19 验证：服务 active，单 Python 主进程约 150 MB cgroup 内存、8 个任务，空闲时无 Camoufox/Firefox/Chromium 残留；本机和公网 HTTP 均返回 200。
+- 服务端未上传本地账号数据、真实邮箱配置、日志、token 或数据库；首次使用需通过 Web 控制台补齐业务配置。
+- 2026-08-19 已将 `chlin.bond` / `www.chlin.bond` 解析到服务6并由 Nginx 反向代理到 `127.0.0.1:8000`；Let's Encrypt 证书已部署，HTTP 自动跳转 HTTPS，证书由 `certbot.timer` 自动续期。
+- 2026-08-19 服务6已部署独立 Mihomo：核心 `sub2-mihomo.service`、面板 `sub2-mihomo-panel.service`，目录 `/opt/sub2-mihomo`，面板入口 `https://chlin.bond/mihomo/`，高级 UI 为 `/mihomo/ui/`，均由 Nginx Basic Auth 保护。
+- Mihomo 使用官方 `v1.19.30`，代理混合端口 `7890`、SOCKS 端口 `7891`、控制器 `9090` 和 10 个出口端口 `7901-7910` 全部仅监听 `127.0.0.1`，避免形成公网开放代理；核心约 10 MB、面板约 21 MB。
+- Mihomo 运行时也已加独立内存保护：核心 `MemoryMax=384M`、面板 `MemoryMax=192M`，并各自限制 swap；超过自身上限时由 systemd 单独重启对应服务，不影响 SSH、Nginx 或 opaiRe。
+- 服务6当前未上传或配置订阅/节点，Mihomo 日志中的空 provider 提示属于无节点初始状态；订阅需通过 Mihomo 面板录入。opaiRe 已对齐本机控制器地址和密钥，但 `clash_proxy_pool.enable` 保持关闭，待有节点后再按需启用。
+- 服务6邮箱已切换为 CF 直收：`email_api_mode=openai_cpa`、`receive_mode=local_webhook`，CF Worker `openai-cpa1` 的 `EMAIL_WEBHOOK_URL` 指向 `https://chlin.bond/api/webhook/email`；不再经过 `tupai.cyou`，真实 webhook 密钥仅写入服务器配置。
+- 2026-08-19 修复 CF 邮件已被 MX 接收但 Worker 不转发：以项目内置、可审计的 `deploy/cloudflare-email-worker.js` 替换线上混淆脚本，Worker 部署改为更新已有脚本而非直接跳过；`kaikj.bond` Email Routing 已启用为 `ready`。四个邮箱域名的根域/随机子域投递均实测 webhook 200，测试邮件记录已清理。
+- 2026-08-19 修复服务6域名访问下实时日志不显示：Nginx 为 `/api/logs/stream` 增加 SSE 专用反代并关闭缓冲，保留 `X-Accel-Buffering: no`；服务日志本身仍在进程内存队列与 journald，不单独落盘。
+- 30 天签名 Web 令牌已部署，HTTP、SSE 与 WebSocket 统一验证；已实测服务6重启前后同一令牌均可访问 `/api/status`，修改 Web 密码会自动使旧令牌失效。
+- 服务6 Mihomo 运行模式固定为 `linux_single_core`，核心为官方 Linux `v1.19.30`；修复了项目在找不到 PATH 中 `mihomo` 时误显示 `local_gui` 的识别问题，现可识别 `/opt/sub2-mihomo/bin/mihomo`。
+
 ## 前端界面要点
 
 - 主布局由顶部状态区、左侧导航、右侧主内容区组成。

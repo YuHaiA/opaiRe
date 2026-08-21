@@ -43,6 +43,10 @@ description: Durable project memory for opaiRe. Use this skill to recover stable
 - Cloud inventory pagination is frontend-sliced after merged fetch to avoid repeated multi-platform aggregation.
 - Server-side git over HTTPS may fail with `gnutls_handshake()`; if so, prefer SSH/file sync rather than repeated HTTPS retries.
 - When syncing to remote Git, include project `.codex` files when they contain durable project docs or skills; do not ignore them by habit.
+- A registration `batch_id` must not suppress ordinary mail-domain fallback when domain runtime control is disabled. Only skip fallback when runtime control is enabled and a worker truly lacks a preallocated domain.
+- Concurrent Grok registration workers need distinct physical egress IPs. Multiple local ports mapped to the same upstream node do not reduce Grok/Castle IP risk.
+- Recycle the shared Grok browser after the configured job count or idle timeout, and shut the browser pool down when a task stops. Closing only per-job browser contexts is insufficient on memory-constrained hosts.
+- For restart-tolerant deployments, keep authentication tokens signed by a persisted local secret and let Nginx serve the page shell/static assets directly while the Python backend restarts.
 
 ## Deployment and server memory
 
@@ -86,12 +90,21 @@ description: Durable project memory for opaiRe. Use this skill to recover stable
 - Current TG direct entries: MTProto on `18453/18454`, authenticated SOCKS5 on `18443/18444`.
 - 2026-06-20 local SOCKS5 tests exceeded `3MB/s`; MTProto stayed around `900KB/s`, so Telegram App should test SOCKS5 first.
 
+## Service 6 resource controls
+
+- Service 6 is a memory-constrained opaiRe deployment; verify live capacity before changing its limits.
+- The deployed opaiRe systemd guard uses `MemoryHigh=1.34G`, `MemoryMax=1.53G`, and `MemorySwapMax=1G` so browser OOM pressure does not freeze SSH, Nginx, or Mihomo.
+- Its Grok browser pool is capped at two workers, idles out after 60 seconds, and recycles after four jobs.
+- The Mihomo core and panel have separate memory ceilings of `384M` and `192M`; their proxy/controller ports should remain loopback-only behind Nginx authentication.
+- Service 6's Nginx serves the homepage/static assets directly and proxies backend APIs, reducing the impact of a backend restart.
+
 ## Known issues
 
 - Local-to-OCI Phoenix / NLB routing can be the real speed bottleneck; cloud-to-cloud tests may not reflect local Telegram speed.
 - `index.html` remains large; keep future frontend changes scoped and consider extracting adjacent logic.
 - Sub2API full inventory reads can be timeout-heavy on unstable local networks.
 - Old docs and memory may contain outdated Server 4 references; prefer `SYSTEM.md` and `.codex/docs/oracle-proxy-current.md`.
+- Camoufox `WebExtensions` memory growth has previously triggered a host-wide OOM on Service 6. Preserve browser recycling and systemd memory controls when absorbing upstream or redeploying.
 
 ## Open follow-ups
 

@@ -3107,6 +3107,13 @@ class RegEngine:
             except Exception as exc:
                 print(f"[{ts()}] [WARNING] 事件循环清理未完全完成: {exc}")
         self.async_stop_event = None
+        # The browser pool is process-global and otherwise survives natural
+        # task completion, leaving Camoufox workers resident until process exit.
+        try:
+            from utils.grok_auth.embedded_turnstile import stop_embedded_solver
+            stop_embedded_solver(timeout=8.0)
+        except Exception:
+            pass
         if self.current_thread is None or self.current_thread is threading.current_thread():
             self._shutdown_executor()
 

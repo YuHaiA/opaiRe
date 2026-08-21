@@ -61,6 +61,9 @@ NODE_SOURCES_FILE = STATE_DIR / "node-sources.json"
 LOG_FILE = ROOT / "logs" / "mihomo.log"
 ERR_FILE = ROOT / "logs" / "mihomo.err.log"
 WEB_DIR = ROOT / "web"
+REVISION_FILE = ROOT / "REVISION"
+ASSET_VERSION_TOKEN = "__ASSET_VERSION__"
+STATIC_CACHE_CONTROL = "no-store, no-cache, must-revalidate, max-age=0"
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "mixed_port": 7890,
@@ -69,7 +72,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "controller_port": 9090,
     "web_host": "127.0.0.1",
     "web_port": 19099,
-    "allow_lan": True,
+    "allow_lan": False,
     "subscription_kind": "",
     "node_count": 0,
     "updated_at": "",
@@ -312,7 +315,7 @@ def controller_secret() -> str:
 
 def config_document(settings: dict[str, Any]) -> dict[str, Any]:
     secret = controller_secret()
-    allow_lan = bool(settings.get("allow_lan", True))
+    allow_lan = bool(settings.get("allow_lan", False))
     groups = [
         {
             "name": "STICKY",
@@ -2108,10 +2111,29 @@ class WebHandler(BaseHTTPRequestHandler):
             ".svg": "image/svg+xml",
         }.get(target.suffix.lower(), "application/octet-stream")
         body = target.read_bytes()
+        if target == WEB_DIR / "index.html":
+            try:
+                revision = REVISION_FILE.read_text(encoding="utf-8").strip()
+            except OSError:
+                revision = ""
+            asset_version = "".join(
+                character for character in revision if character.isalnum() or character in "-_."
+            )[:64]
+            if not asset_version:
+                asset_mtimes = []
+                for asset_name in ("app.css", "app.js"):
+                    try:
+                        asset_mtimes.append((WEB_DIR / asset_name).stat().st_mtime_ns)
+                    except OSError:
+                        pass
+                asset_version = str(max(asset_mtimes, default=0))
+            body = body.replace(ASSET_VERSION_TOKEN.encode("ascii"), asset_version.encode("ascii"))
         self.send_response(200)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Cache-Control", STATIC_CACHE_CONTROL)
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
         self.end_headers()
         self.wfile.write(body)
 

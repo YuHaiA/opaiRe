@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="color-scheme" content="dark" />
   <title>Mihomo 代理面板</title>
-  <link rel="stylesheet" href="app.css" />
+  <link rel="stylesheet" href="app.css?v=__ASSET_VERSION__" />
 </head>
 <body>
   <div class="ambient" aria-hidden="true"></div>
@@ -80,10 +80,10 @@
       <div class="account-group-setting">
         <div class="account-group-heading">
           <div>
-            <strong>出口池账号分组</strong>
-            <small id="account-group-hint">正在读取 Grok 分组。</small>
+            <strong>出口池 Grok 账号分组</strong>
+            <small id="account-group-hint">正在读取实际包含 Grok 账号的分组。</small>
           </div>
-          <label class="account-group-all"><input id="account-groups-all" type="checkbox" checked><span>全部 Grok 分组</span></label>
+          <label class="account-group-all"><input id="account-groups-all" type="checkbox" checked><span>使用全部可用分组</span></label>
         </div>
         <div class="account-group-options" id="account-group-options" role="group" aria-label="出口池账号分组"></div>
       </div>
@@ -162,6 +162,6 @@
     </footer>
   </main>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="app.js" defer></script>
+  <script src="app.js?v=__ASSET_VERSION__" defer></script>
 </body>
 </html>

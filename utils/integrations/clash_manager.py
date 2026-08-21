@@ -1069,9 +1069,23 @@ def _detect_runtime_mode(client) -> str:
 
     if client:
         return "docker_pool"
-    if os.name != "nt" and shutil.which("mihomo"):
+    if os.name != "nt" and _linux_mihomo_core_available():
         return "linux_single_core"
     return "local_gui"
+
+
+def _linux_mihomo_core_available() -> bool:
+    """Detect a native Mihomo core even when it is managed outside PATH/systemd."""
+    if os.name == "nt":
+        return False
+    configured = str(os.environ.get("MIHOMO_BIN") or "").strip()
+    candidates = [
+        configured,
+        "/opt/sub2-mihomo/bin/mihomo",
+        "/usr/local/bin/mihomo",
+        "/usr/bin/mihomo",
+    ]
+    return any(path and os.path.isfile(path) and os.access(path, os.X_OK) for path in candidates)
 
 
 def _build_sample_container_config():

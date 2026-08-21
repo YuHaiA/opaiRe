@@ -2,8 +2,8 @@
 # manager.py then maintains the full fixed-egress configuration.
 mixed-port: 7890
 socks-port: 7891
-allow-lan: true
-bind-address: "*"
+allow-lan: false
+bind-address: 127.0.0.1
 mode: rule
 log-level: warning
 ipv6: false

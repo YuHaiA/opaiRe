@@ -1,7 +1,6 @@
 ﻿import hashlib
 import os
 import time
-import secrets
 import re
 import asyncio
 import threading
@@ -19,7 +18,7 @@ from fastapi import APIRouter, Depends, Query, Request, WebSocket, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
-from global_state import VALID_TOKENS, CLUSTER_NODES, NODE_COMMANDS, cluster_lock, log_history, engine, verify_token, worker_status, append_log
+from global_state import VALID_TOKENS, CLUSTER_NODES, NODE_COMMANDS, cluster_lock, log_history, engine, verify_token, worker_status, append_log, create_auth_token, is_valid_auth_token
 from utils import core_engine, db_manager
 from utils.email_providers import mail_service
 from utils.config import reload_all_configs
@@ -604,8 +603,7 @@ async def get_dashboard():
 async def login(data: LoginData):
     current_password = getattr(core_engine.cfg, "WEB_PASSWORD", "admin")
     if data.password == current_password:
-        token = secrets.token_hex(16)
-        VALID_TOKENS.add(token)
+        token = create_auth_token()
         return {"status": "success", "token": token}
     return {"status": "error", "message": "密码错误"}
 
@@ -1087,7 +1085,7 @@ async def clear_backend_logs(token: str = Depends(verify_token)):
 
 @router.get("/api/logs/stream")
 async def stream_logs(request: Request, token: str = Query(None)):
-    if token not in VALID_TOKENS: raise HTTPException(status_code=401, detail="Unauthorized")
+    if not is_valid_auth_token(token): raise HTTPException(status_code=401, detail="Unauthorized")
 
     async def log_generator():
         current_snapshot = list(log_history)
@@ -1291,7 +1289,7 @@ async def ws_cluster_report(websocket: WebSocket, node_name: str, secret: str):
 
 @router.websocket("/api/cluster/view_ws")
 async def cluster_view_ws(websocket: WebSocket, token: str = Query(None)):
-    if token not in VALID_TOKENS:
+    if not is_valid_auth_token(token):
         await websocket.close(code=1008)
         return
     await websocket.accept()

@@ -20,6 +20,7 @@ router = APIRouter()
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GMAIL_VERIFIER_PATH = os.path.join(BASE_DIR, "data", "temp_verifier.txt")
+CF_EMAIL_WORKER_PATH = os.path.join(BASE_DIR, "deploy", "cloudflare-email-worker.js")
 
 class CFSyncExistingReq(BaseModel): sub_domains: str; api_email: str; api_key: str
 class LuckMailBulkBuyReq(BaseModel): quantity: int; auto_tag: bool; config: dict
@@ -56,6 +57,14 @@ async def _cloudflare_request_with_retry(client: httpx.AsyncClient, method: str,
                 raise
             await asyncio.sleep(0.8 * (attempt + 1))
     raise last_error
+
+
+def _load_cf_email_worker_source() -> str:
+    with open(CF_EMAIL_WORKER_PATH, "r", encoding="utf-8") as worker_file:
+        source = worker_file.read().strip()
+    if "async email" not in source or "EMAIL_WEBHOOK_URL" not in source:
+        raise ValueError("本地 CF 邮件 Worker 源码不完整")
+    return source
 
 
 @router.post("/api/config/add_wildcard_dns")
@@ -578,7 +587,6 @@ async def cloudflare_deploy_worker(req: CFDeployWorkerReq, token: str = Depends(
     if not is_valid:
         print(f"[{core_engine.ts()}] [CF Worker] ❌ URL校验失败: {err_msg}")
         return {"status": "error", "message": err_msg}
-    WORKER_RAW_URL = "https://raw.githubusercontent.com/wenfxl/openai-cpa-email/refs/heads/master/worker.js"
     try:
         proxy_url = getattr(core_engine.cfg, 'DEFAULT_PROXY', None)
         client_kwargs = {"timeout": 30.0, "proxy": proxy_url} if proxy_url else {"timeout": 30.0}
@@ -597,14 +605,10 @@ async def cloudflare_deploy_worker(req: CFDeployWorkerReq, token: str = Depends(
                 f"https://api.cloudflare.com/client/v4/accounts/{account_id}/workers/scripts/{req.worker_name}",
                 headers=headers)
             if check_worker.status_code == 200:
-                print(f"[{core_engine.ts()}] [CF Worker] ✅ Worker [{req.worker_name}] 已经存在，安全跳过覆盖部署。")
-                return {"status": "success", "message": f"✅ Worker [{req.worker_name}] 已存在，无需重复部署"}
+                print(f"[{core_engine.ts()}] [CF Worker] Worker [{req.worker_name}] 已存在，准备更新为项目内置版本。")
 
-            print(f"[{core_engine.ts()}] [CF Worker] 正在从 Github 拉取最新源码...")
-            code_resp = await client.get(WORKER_RAW_URL)
-            if code_resp.status_code != 200:
-                print(f"[{core_engine.ts()}] [CF Worker] ❌ 获取 Github 源码失败")
-                return {"status": "error", "message": "获取 Github 源码失败"}
+            print(f"[{core_engine.ts()}] [CF Worker] 正在加载项目内置邮件 Worker...")
+            safe_code = _load_cf_email_worker_source()
 
             metadata = {
                 "main_module": "worker.js",
@@ -615,7 +619,6 @@ async def cloudflare_deploy_worker(req: CFDeployWorkerReq, token: str = Depends(
                     {"name": "EMAIL_WEBHOOK_SECRET", "type": "secret_text", "text": req.webhook_secret}
                 ]
             }
-            safe_code = code_resp.text.strip()
             files = {
                 "metadata": (None, json.dumps(metadata), "application/json"),
                 "worker.js": ("worker.js", safe_code, "application/javascript+module")
@@ -627,7 +630,7 @@ async def cloudflare_deploy_worker(req: CFDeployWorkerReq, token: str = Depends(
 
             if deploy_resp.status_code == 200 and deploy_resp.json().get("success"):
                 print(f"[{core_engine.ts()}] [CF Worker] 🎉 部署成功！环境变量已就位。")
-                return {"status": "success", "message": "✅ 部署并绑定环境变量成功"}
+                return {"status": "success", "message": "✅ Worker 已更新并绑定环境变量"}
             else:
                 err_msg = str(deploy_resp.json().get("errors", "未知错误"))
                 print(f"[{core_engine.ts()}] [CF Worker] ❌ 部署失败: {err_msg}")

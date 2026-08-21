@@ -146,7 +146,7 @@ function renderAccountGroups(groups = []) {
     : state.accountGroups.filter((group) => selected.has(Number(group.id)));
   const healthy = activeGroups.reduce((sum, group) => sum + Number(group.healthy_account_count || 0), 0);
   const total = activeGroups.reduce((sum, group) => sum + Number(group.account_count || 0), 0);
-  $("account-group-hint").textContent = `${allMode ? "全部" : "已选"} ${activeGroups.length} 个分组 · 健康 ${healthy} / ${total}`;
+  $("account-group-hint").textContent = `仅显示含 Grok 账号的分组 · ${allMode ? "全部" : "已选"} ${activeGroups.length} 个 · 健康 ${healthy} / ${total}`;
 }
 
 function renderEgresses(status) {

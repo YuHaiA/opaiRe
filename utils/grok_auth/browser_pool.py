@@ -15,6 +15,9 @@ _worker_count = 0
 _headless = True
 _started = False
 _shutting_down = False
+_DEFAULT_RECYCLE_JOBS = 8
+_DEFAULT_MAX_WORKERS = 2
+_DEFAULT_IDLE_TIMEOUT = 60.0
 
 
 class _PoolJob:
@@ -32,11 +35,37 @@ def _desired_size() -> int:
 
         multi = bool(getattr(cfg, "ENABLE_MULTI_THREAD_REG", False))
         threads = int(getattr(cfg, "REG_THREADS", 1) or 1)
-        if multi:
-            return max(1, threads)
-        return 1
+        wanted = max(1, threads) if multi else 1
+        max_workers = int(getattr(cfg, "GROK_BROWSER_MAX_WORKERS", _DEFAULT_MAX_WORKERS) or 0)
+        return min(wanted, max_workers) if max_workers > 0 else wanted
     except Exception:
         return 1
+
+
+def _recycle_jobs() -> int:
+    """Return the number of completed jobs before recycling a browser.
+
+    A zero value disables periodic recycling; task shutdown still closes the
+    pool. Keeping this behind config lets low-memory hosts choose a smaller
+    lifetime without changing the worker protocol.
+    """
+    try:
+        from utils import config as cfg
+
+        value = int(getattr(cfg, "GROK_BROWSER_RECYCLE_JOBS", _DEFAULT_RECYCLE_JOBS) or 0)
+    except Exception:
+        value = _DEFAULT_RECYCLE_JOBS
+    return max(0, value)
+
+
+def _idle_timeout() -> float:
+    try:
+        from utils import config as cfg
+
+        value = float(getattr(cfg, "GROK_BROWSER_IDLE_TIMEOUT", _DEFAULT_IDLE_TIMEOUT) or 0)
+    except Exception:
+        value = _DEFAULT_IDLE_TIMEOUT
+    return max(0.0, value)
 
 
 def _launch_browser(headless: bool):
@@ -76,6 +105,8 @@ def _worker_loop(worker_id: int, headless: bool) -> None:
     global _shutting_down
     cm = None
     browser = None
+    jobs_since_launch = 0
+    last_job_finished_at = 0.0
     try:
         while True:
             with _lock:
@@ -84,6 +115,16 @@ def _worker_loop(worker_id: int, headless: bool) -> None:
             try:
                 job = _job_q.get(timeout=0.4) if _job_q is not None else None
             except queue.Empty:
+                idle_timeout = _idle_timeout()
+                if (
+                    browser is not None
+                    and idle_timeout > 0
+                    and last_job_finished_at > 0
+                    and time.monotonic() - last_job_finished_at >= idle_timeout
+                ):
+                    _close_browser(cm, browser)
+                    cm, browser = None, None
+                    jobs_since_launch = 0
                 continue
             if job is None:
                 # 毒丸：退出
@@ -97,6 +138,7 @@ def _worker_loop(worker_id: int, headless: bool) -> None:
             if not _browser_alive(browser):
                 _close_browser(cm, browser)
                 cm, browser = None, None
+                jobs_since_launch = 0
                 try:
                     cm, browser = _launch_browser(headless)
                 except Exception as exc:
@@ -121,19 +163,29 @@ def _worker_loop(worker_id: int, headless: bool) -> None:
                     if not _browser_alive(browser):
                         _close_browser(cm, browser)
                         cm, browser = None, None
+                        jobs_since_launch = 0
                 except Exception:
                     cm, browser = None, None
+                    jobs_since_launch = 0
                 if not job.future.done():
                     try:
                         job.future.set_exception(exc)
                     except Exception:
                         pass
             finally:
+                jobs_since_launch += 1
+                last_job_finished_at = time.monotonic()
                 try:
                     if _job_q is not None:
                         _job_q.task_done()
                 except Exception:
                     pass
+
+            recycle_after = _recycle_jobs()
+            if browser is not None and recycle_after > 0 and jobs_since_launch >= recycle_after:
+                _close_browser(cm, browser)
+                cm, browser = None, None
+                jobs_since_launch = 0
     finally:
         _close_browser(cm, browser)
 

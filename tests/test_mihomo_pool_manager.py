@@ -95,6 +95,45 @@ def test_group_selection_normalizes_ids_and_matches_accounts() -> None:
     assert manager._account_matches_selected_groups({"group_ids": [6]}, set()) is True
 
 
+def test_default_config_listens_on_loopback_only() -> None:
+    document = manager.config_document(manager.normalized_settings())
+
+    assert document["allow-lan"] is False
+    assert document["bind-address"] == "127.0.0.1"
+    assert all(listener["listen"] == "127.0.0.1" for listener in document["listeners"])
+
+
+def test_panel_assets_use_revision_cache_key(tmp_path: Path) -> None:
+    web_dir = tmp_path / "web"
+    web_dir.mkdir()
+    index = web_dir / "index.html"
+    index.write_text(
+        '<link href="app.css?v=__ASSET_VERSION__"><script src="app.js?v=__ASSET_VERSION__"></script>',
+        encoding="utf-8",
+    )
+    (web_dir / "app.css").write_text("body {}", encoding="utf-8")
+    (web_dir / "app.js").write_text("void 0;", encoding="utf-8")
+    revision_file = tmp_path / "REVISION"
+    revision_file.write_text("abc123\n", encoding="utf-8")
+
+    with (
+        patch.object(manager, "WEB_DIR", web_dir),
+        patch.object(manager, "REVISION_FILE", revision_file),
+        patch.object(manager.WebHandler, "send_response"),
+        patch.object(manager.WebHandler, "send_header") as send_header,
+        patch.object(manager.WebHandler, "end_headers"),
+    ):
+        handler = object.__new__(manager.WebHandler)
+        handler.wfile = type("Writer", (), {"write": lambda self, body: setattr(self, "body", body)})()
+        handler._serve_static("/")
+
+    assert b"app.css?v=abc123" in handler.wfile.body
+    assert b"app.js?v=abc123" in handler.wfile.body
+    send_header.assert_any_call("Cache-Control", manager.STATIC_CACHE_CONTROL)
+    send_header.assert_any_call("Pragma", "no-cache")
+    send_header.assert_any_call("Expires", "0")
+
+
 def test_reconcile_releases_accounts_outside_selected_groups() -> None:
     proxies = _proxies(10)
     accounts = [

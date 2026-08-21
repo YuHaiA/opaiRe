@@ -9,6 +9,11 @@ reg_mode: "email"
 reg_provider: "openai"
 grok:
   oauth_timeout: 180
+  browser_recycle_jobs: 8
+  # 浏览器比普通注册线程占用更多内存；0 表示不限制。
+  browser_max_workers: 2
+  # 池空闲多少秒后关闭浏览器；0 表示仅在任务结束时关闭。
+  browser_idle_timeout: 60
 # 可选值: "imap" / "freemail" / "cloudflare_temp_email" / "cloudmail" / "mail_curl" / "luckmail"
 email_api_mode: "cloudflare_temp_email"
 
