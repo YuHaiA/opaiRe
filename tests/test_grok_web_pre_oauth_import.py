@@ -194,8 +194,10 @@ def test_sso_only_disabled_grok_web_import(monkeypatch):
     result, ctx = _run_sso_only(monkeypatch, events, enabled=False)
     token_json_str, password = result
     assert token_json_str is not None
-    assert events == []
-    assert "grok_web_import_ok" not in ctx
+    # v18.2.0 always imports SSO-only records into Grok2API; the legacy
+    # feature flag only gates the pre-OAuth import path.
+    assert events == ["grok_web"]
+    assert ctx["grok_web_import_ok"] is True
 
 
 def test_sso_only_runs_status_check(monkeypatch):

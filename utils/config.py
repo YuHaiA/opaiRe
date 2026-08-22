@@ -1,4 +1,4 @@
-﻿import os
+import os
 import queue
 import threading
 import yaml
@@ -285,7 +285,7 @@ def init_config():
                 print(f"[{ts()}] [WARNING] 自动补全配置文件写入失败: {e}")
 
     return user_config
-APP_VERSION = "v18.1.4"
+APP_VERSION = "v18.2.0"
 _c: dict = {}
 WEB_PASSWORD: str = "admin"
 RETAIN_REG_ONLY: bool = False
@@ -336,6 +336,9 @@ DEFAULT_PROXY: str = ""
 GROK_INSPECT_PROXY = ""
 ENABLE_MULTI_THREAD_REG: bool = False
 REG_THREADS: int = 3
+GROK_BROWSER_RECYCLE_ENABLED: bool = True
+GROK_BROWSER_RECYCLE_TASK_LIMIT: int = 50
+GROK_BROWSER_RECYCLE_MINUTES_LIMIT: int = 120
 MAX_OTP_RETRIES: int = 5
 OTP_POLL_MAX_ATTEMPTS: int = 20
 USE_PROXY_FOR_EMAIL: bool = False
@@ -600,6 +603,7 @@ def reload_all_configs(new_config_dict=None):
     global DEFAULT_PROXY, GROK_INSPECT_PROXY
     global SUB_DOMAIN_LEVEL, RANDOM_SUB_DOMAIN_LEVEL
     global ENABLE_MULTI_THREAD_REG, REG_THREADS, MAX_OTP_RETRIES, OTP_POLL_MAX_ATTEMPTS
+    global GROK_BROWSER_RECYCLE_ENABLED, GROK_BROWSER_RECYCLE_TASK_LIMIT, GROK_BROWSER_RECYCLE_MINUTES_LIMIT
     global USE_PROXY_FOR_EMAIL, ENABLE_EMAIL_MASKING
     global LOGIN_DELAY_MIN, LOGIN_DELAY_MAX
     global ENABLE_CPA_MODE, SAVE_TO_LOCAL_IN_CPA_MODE
@@ -902,8 +906,11 @@ def reload_all_configs(new_config_dict=None):
 
     DEFAULT_PROXY = format_docker_url(_c.get("default_proxy", ""))
     GROK_INSPECT_PROXY = format_docker_url(_c.get("check_proxy", ""))
-    ENABLE_MULTI_THREAD_REG = _c.get("enable_multi_thread_reg", False)
-    REG_THREADS = _c.get("reg_threads", 3)
+    ENABLE_MULTI_THREAD_REG = safe_bool(_c.get("enable_multi_thread_reg", False))
+    REG_THREADS = max(1, int(_c.get("reg_threads", 3) or 3))
+    GROK_BROWSER_RECYCLE_ENABLED = safe_bool(_c.get("grok_browser_recycle_enabled", True), default=True)
+    GROK_BROWSER_RECYCLE_TASK_LIMIT = max(0, int(_c.get("grok_browser_recycle_task_limit", 50) or 0))
+    GROK_BROWSER_RECYCLE_MINUTES_LIMIT = max(0, int(_c.get("grok_browser_recycle_minutes_limit", 120) or 0))
     MAX_OTP_RETRIES = _c.get("max_otp_retries", 5)
     OTP_POLL_MAX_ATTEMPTS = _c.get("otp_poll_max_attempts", 20)
     USE_PROXY_FOR_EMAIL = _c.get("use_proxy_for_email", False)

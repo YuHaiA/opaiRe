@@ -165,6 +165,11 @@ check_proxy: ""
 enable_multi_thread_reg: false    
 # 注册时的最大并发线程数 (建议根据你的代理质量调整，不要设置过高)
 reg_threads: 10
+# Grok 自动重建：达到任一阈值后，在下个任务开始前重建
+# 数量或时长设置为 0 时，分别禁用对应阈值
+grok_browser_recycle_enabled: true
+grok_browser_recycle_task_limit: 50
+grok_browser_recycle_minutes_limit: 120
 
 
 

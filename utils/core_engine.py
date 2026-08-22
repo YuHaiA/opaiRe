@@ -65,6 +65,24 @@ from utils.integrations.cpa_diagnostics import (
     format_failure,
     should_preserve_enabled_state,
 )
+from utils.integrations.grok2api_client import (
+    _delete_grok2api_account,
+    _grok2api_account_label,
+    _grok2api_provider,
+    _grok2api_quota_exhausted,
+    _set_grok2api_account_enabled,
+    grok2api_admin_login,
+    grok2api_admin_request,
+    grok2api_list_accounts,
+    import_to_grok2api,
+)
+
+
+def _grok2api_import_web_sso(sso: str, token_value: str):
+    """Compatibility forwarder for older extensions and test integrations."""
+    from utils.integrations.grok2api_client import import_web_sso
+
+    return import_web_sso(sso, token_value)
 from utils.integrations.tg_notifier import send_tg_msg_sync
 from utils.email_providers.postman_center import global_postman_fleet
 
@@ -302,8 +320,6 @@ def set_cpa_auth_file_status(
         print(f"[{ts()}] [ERROR] 切换凭证状态异常: {e}")
         return False
 
-
-
 def _is_xai_like_token(token_or_item: Any) -> bool:
     """识别 Grok/xAI 账号（CPA 文件或 Sub2API 账号项）。"""
     if not isinstance(token_or_item, dict):
@@ -319,7 +335,6 @@ def _is_xai_like_token(token_or_item: Any) -> bool:
             if "xai" in val or "grok" in val:
                 return True
     return False
-
 
 def _is_codex_free_cpa_file(item: dict) -> bool:
     if not isinstance(item, dict):
@@ -391,190 +406,21 @@ def upload_to_cpa_integrated(
         return False, str(e)
 
 
-def _grok2api_import_expires_at(token_data: dict) -> str:
-    """Return Grok2API import expires_at.
-
-    Grok2API schedules OAuth refresh from this value. Build tokens imported with a
-    future access-token expiry may sit unrefreshed and miss Build model discovery
-    (for example grok-imagine-video-1.5). If a refresh_token exists, deliberately
-    mark the imported access token as already expired so Grok2API refreshes it
-    immediately and discovers capabilities from the fresh token/session.
-    """
-    if token_data.get("refresh_token"):
-        return datetime.fromtimestamp(int(time.time()) - 60, timezone.utc).isoformat().replace("+00:00", "Z")
-
-    exp = token_data.get("expires_at")
-    expires_str = ""
-    if exp is not None:
-        try:
-            if isinstance(exp, (int, float)):
-                expires_str = datetime.fromtimestamp(int(exp), timezone.utc).isoformat().replace("+00:00", "Z")
-            elif str(exp).isdigit():
-                expires_str = datetime.fromtimestamp(int(str(exp)), timezone.utc).isoformat().replace("+00:00", "Z")
-            else:
-                expires_str = str(exp)
-        except Exception:
-            expires_str = str(exp) if exp else ""
-    return expires_str
-
-
-def _grok2api_import_payload(token_data: dict) -> dict:
-    expires_str = _grok2api_import_expires_at(token_data)
-    return {
-        "provider": "grok_build",
-        "name": token_data.get("email", "Grok Build account"),
-        "client_id": token_data.get("client_id", ""),
-        "access_token": token_data.get("access_token", ""),
-        "refresh_token": token_data.get("refresh_token", ""),
-        "id_token": token_data.get("id_token", ""),
-        "token_type": token_data.get("token_type", "Bearer"),
-        "email": token_data.get("email", ""),
-        "user_id": token_data.get("user_id") or token_data.get("principal_id", ""),
-        "team_id": token_data.get("team_id", ""),
-        "expires_at": expires_str,
-    }
 
 
 
-def _grok2api_import_web_sso(sso: str, token_value: str) -> Tuple[bool, str]:
-    """Import one SSO cookie through Grok2API's dedicated Grok Web endpoint."""
-    sso = str(sso or "").strip()
-    if not sso:
-        return False, "缺少 sso"
-    grok_url = (getattr(cfg, "GROK2API_URL", "") or "http://host.docker.internal:8000").rstrip("/")
-    mime = CurlMime()
-    mime.addpart(
-        name="files",
-        data=(sso + "\n").encode("utf-8"),
-        filename="grok-web-sso-token.txt",
-        content_type="text/plain",
-    )
-    try:
-        resp = requests.post(
-            f"{grok_url}/api/admin/v1/accounts/web/import",
-            multipart=mime,
-            headers={"Authorization": f"Bearer {token_value}"},
-            timeout=180,
-            impersonate="chrome",
-        )
-        if resp.status_code in (200, 201):
-            return True, "Grok Web SSO 导入成功"
-        return False, f"Grok Web SSO 导入失败 HTTP {resp.status_code}"
-    except Exception as exc:
-        return False, f"Grok Web SSO 导入异常: {exc}"
 
 
-def import_to_grok2api(token_data: dict) -> Tuple[bool, str]:
-    """Import one freshly registered xAI/Grok account into Grok2API.
-
-    Keep logs secret-safe: callers should only print email masks/status codes, never token payloads.
-    """
-    grok_url = (getattr(cfg, "GROK2API_URL", "") or "http://host.docker.internal:8000").rstrip("/")
-    grok_pass = getattr(cfg, "GROK2API_ADMIN_PASSWORD", "") or ""
-    if not grok_pass:
-        return False, "Grok2API admin_password 未配置"
-    if not _is_xai_like_token(token_data) and str(getattr(cfg, "REG_PROVIDER", "openai")).lower() != "grok":
-        return False, "非 Grok/xAI 账号"
-    if not (token_data.get("access_token") or token_data.get("refresh_token")):
-        return False, "缺少 access_token/refresh_token"
-    try:
-        login_resp = requests.post(
-            f"{grok_url}/api/admin/v1/auth/login",
-            json={"username": "admin", "password": grok_pass},
-            timeout=20,
-            impersonate="chrome",
-        )
-        if login_resp.status_code != 200:
-            return False, f"Grok2API 登录失败 HTTP {login_resp.status_code}"
-        grok_token = login_resp.json().get("data", {}).get("tokens", {}).get("accessToken", "")
-        if not grok_token:
-            return False, "Grok2API 登录未返回 accessToken"
-
-        payload = _grok2api_import_payload(token_data)
-        file_content = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        mime = CurlMime()
-        mime.addpart(name="file", data=file_content, filename="auth.json", content_type="application/json")
-        import_resp = requests.post(
-            f"{grok_url}/api/admin/v1/accounts/import",
-            multipart=mime,
-            headers={"Authorization": f"Bearer {grok_token}"},
-            timeout=180,
-            impersonate="chrome",
-        )
-        if import_resp.status_code in (200, 201):
-            return True, "导入成功"
-        return False, f"导入失败 HTTP {import_resp.status_code}"
-    except Exception as e:
-        return False, str(e)
 
 
-def grok2api_admin_login() -> Tuple[bool, str, str]:
-    """登录 Grok2API 管理端，供独立仓管巡检/补货使用。"""
-    grok_url = (getattr(cfg, "GROK2API_URL", "") or "").rstrip("/")
-    grok_pass = getattr(cfg, "GROK2API_ADMIN_PASSWORD", "") or ""
-    if not grok_url:
-        return False, "", "Grok2API api_url 未配置"
-    if not grok_pass:
-        return False, "", "Grok2API admin_password 未配置"
-    try:
-        resp = requests.post(
-            f"{grok_url}/api/admin/v1/auth/login",
-            json={"username": "admin", "password": grok_pass},
-            timeout=30,
-            impersonate="chrome",
-        )
-        if resp.status_code != 200:
-            return False, "", f"Grok2API 登录失败 HTTP {resp.status_code}"
-        token_value = resp.json().get("data", {}).get("tokens", {}).get("accessToken", "")
-        if not token_value:
-            return False, "", "Grok2API 登录未返回 accessToken"
-        return True, token_value, "OK"
-    except Exception as exc:
-        return False, "", f"Grok2API 登录异常: {exc}"
 
 
-def grok2api_admin_request(method: str, path: str, token_value: str, **kwargs):
-    grok_url = (getattr(cfg, "GROK2API_URL", "") or "").rstrip("/")
-    headers = kwargs.pop("headers", {}) or {}
-    headers["Authorization"] = f"Bearer {token_value}"
-    return requests.request(
-        method,
-        f"{grok_url}/api/admin/v1{path}",
-        headers=headers,
-        timeout=kwargs.pop("timeout", 60),
-        impersonate="chrome",
-        **kwargs,
-    )
 
 
-def grok2api_list_accounts(token_value: str, provider: str = None, page_size: int = 500) -> Tuple[bool, list, str]:
-    items = []
-    page = 1
-    total = None
-    try:
-        while True:
-            params = {"page": page, "pageSize": page_size}
-            if provider:
-                params["provider"] = provider
-            resp = grok2api_admin_request("GET", "/accounts", token_value, params=params, timeout=30)
-            if resp.status_code != 200:
-                return False, items, f"Grok2API 账号列表 HTTP {resp.status_code}"
-            data = resp.json().get("data", {})
-            batch = data.get("items", []) or []
-            items.extend(batch)
-            total = data.get("total", total)
-            if not batch or len(items) >= int(total or 0) or len(batch) < page_size:
-                break
-            page += 1
-            if page > 50:
-                break
-        return True, items, "OK"
-    except Exception as exc:
-        return False, items, f"Grok2API 拉取账号异常: {exc}"
 
 
-def _grok2api_provider(item: dict) -> str:
-    return str((item or {}).get("provider") or "").strip().lower()
+
+
 
 
 def _is_grok2api_inventory_item(item: dict) -> bool:
@@ -584,66 +430,14 @@ def _is_grok2api_inventory_item(item: dict) -> bool:
     return provider.startswith("grok") or "xai" in provider
 
 
-def _grok2api_account_label(item: dict) -> str:
-    return str((item or {}).get("email") or (item or {}).get("name") or (item or {}).get("id") or "unknown")
 
 
-def _grok2api_quota_remaining_percent(item: dict) -> Optional[float]:
-    quota = (item or {}).get("quota") or {}
-    if not isinstance(quota, dict):
-        return None
-    usage = quota.get("usagePercent")
-    if isinstance(usage, (int, float)):
-        return max(0.0, min(100.0, 100.0 - float(usage)))
-    remaining = quota.get("remaining")
-    limit = quota.get("limit")
-    try:
-        if remaining is not None and limit:
-            return max(0.0, min(100.0, float(remaining) * 100.0 / float(limit)))
-    except Exception:
-        return None
-    return None
 
 
-def _grok2api_quota_exhausted(item: dict) -> bool:
-    quota = (item or {}).get("quota") or {}
-    if isinstance(quota, dict):
-        status = str(quota.get("status") or "").lower()
-        if status in {"exhausted", "limit_reached", "limited", "disabled"}:
-            return True
-        remaining = quota.get("remaining")
-        try:
-            if remaining is not None and float(remaining) <= 0:
-                return True
-        except Exception:
-            pass
-    pct = _grok2api_quota_remaining_percent(item)
-    threshold = int(getattr(cfg, "GROK2API_MIN_REMAINING_WEEKLY_PERCENT", 0) or 0)
-    return threshold > 0 and pct is not None and pct < threshold
 
 
-def _set_grok2api_account_enabled(token_value: str, account_id: str, enabled: bool) -> Tuple[bool, str]:
-    try:
-        resp = grok2api_admin_request(
-            "PATCH", f"/accounts/{account_id}", token_value,
-            json={"enabled": enabled}, timeout=30,
-        )
-        return resp.status_code == 200, f"HTTP {resp.status_code}"
-    except Exception as exc:
-        return False, str(exc)
 
 
-def _delete_grok2api_account(token_value: str, item: dict) -> Tuple[bool, str]:
-    account_id = str((item or {}).get("id") or "")
-    if not account_id:
-        return False, "缺少账号 ID"
-    provider = _grok2api_provider(item)
-    body = {"provider": provider} if provider else {}
-    try:
-        resp = grok2api_admin_request("DELETE", f"/accounts/{account_id}", token_value, json=body, timeout=40)
-        return resp.status_code in (200, 204), f"HTTP {resp.status_code}"
-    except Exception as exc:
-        return False, str(exc)
 
 
 def process_grok2api_worker(i: int, total: int, item: dict, token_value: str, args: Any) -> bool:
@@ -1382,9 +1176,19 @@ def handle_registration_result(result: Any, cpa_upload: bool = False, run_ctx: d
 
         # Grok/xAI 注册完成后导入 Grok2API。仓管补货模式下，导入失败不计作本轮补货成功。
         if is_grok_token and (grok2api_upload or getattr(cfg, "GROK2API_AUTO_IMPORT_AFTER_REGISTER", False)):
-            ok, grok_msg = import_to_grok2api(token_data)
+            is_sso_record = str(token_data.get("status") or "").lower() == "grok_sso"
+            if is_sso_record:
+                ok = bool(run_ctx and run_ctx.get("grok_web_import_ok"))
+                grok_msg = str(
+                    (run_ctx or {}).get("grok_web_import_message")
+                    or "Grok Web SSO 未完成先行导入"
+                )
+            else:
+                ok, grok_msg = import_to_grok2api(token_data)
+
             if ok:
-                print(f"[{ts()}] [SUCCESS] [Grok2API] 注册账号 {mask_email(account_email)} 已自动导入 Grok2API！")
+                import_type = "Grok Web SSO" if is_sso_record else "Build OAuth"
+                print(f"[{ts()}] [SUCCESS] [Grok2API] 注册账号 {mask_email(account_email)} 的 {import_type} 已导入！")
                 try:
                     db_manager.update_account_push_info([account_email], "GROK2API", mode="sync")
                 except Exception:
@@ -1424,14 +1228,22 @@ def dispatch_register(proxy, run_ctx=None, assigned_domain=None, batch_id=None, 
         run_ctx = {}
     provider = str(provider or getattr(cfg, "REG_PROVIDER", "openai") or "openai").strip().lower()
     if provider == "grok":
+        import os
+        from utils.grok_auth.browser_recycler import mark_task_finished, recycle_before_next_task
         from utils.grok_auth.register import run as grok_run
-        return grok_run(
-            proxy,
-            run_ctx=run_ctx,
-            assigned_domain=assigned_domain,
-            batch_id=batch_id,
-            worker_index=worker_index,
-        )
+
+        headless_raw = str(os.environ.get("GROK_BROWSER_SIGNUP_HEADLESS", "1") or "1").strip().lower()
+        recycle_before_next_task(headless=headless_raw not in {"0", "false", "no", "off"})
+        try:
+            return grok_run(
+                proxy,
+                run_ctx=run_ctx,
+                assigned_domain=assigned_domain,
+                batch_id=batch_id,
+                worker_index=worker_index,
+            )
+        finally:
+            mark_task_finished()
     return run(
         proxy,
         run_ctx=run_ctx,
@@ -1439,7 +1251,6 @@ def dispatch_register(proxy, run_ctx=None, assigned_domain=None, batch_id=None, 
         batch_id=batch_id,
         worker_index=worker_index,
     )
-
 
 def _should_switch_before_registration(skip_switch=False):
     if skip_switch:

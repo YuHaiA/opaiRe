@@ -5165,6 +5165,32 @@
                                     </div>
                                 </div>
 
+                                <div class="bg-sky-50/60 p-5 md:p-6 rounded-2xl border border-sky-200/70 mb-6 shadow-inner">
+                                    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
+                                        <div>
+                                            <div class="text-sm font-black text-sky-900">Grok 自动重建</div>
+                                            <div class="text-[11px] text-sky-700 mt-1">达到任一阈值后，不中断当前任务，并在下一个任务执行前重建</div>
+                                        </div>
+                                        <label class="relative inline-flex items-center cursor-pointer">
+                                            <input type="checkbox" v-model="config.grok_browser_recycle_enabled" class="sr-only peer">
+                                            <div class="relative w-11 h-6 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sky-500"></div>
+                                            <span class="ml-3 text-sm font-black text-sky-900">启用</span>
+                                        </label>
+                                    </div>
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4" :class="{'opacity-50': !config.grok_browser_recycle_enabled}">
+                                        <div class="bg-white p-4 rounded-xl border border-sky-200 shadow-sm">
+                                            <label class="block text-[11px] text-sky-800 font-black uppercase tracking-wider mb-2">任务数量阈值</label>
+                                            <input type="number" min="0" v-model.number="config.grok_browser_recycle_task_limit" :disabled="!config.grok_browser_recycle_enabled" class="w-full bg-sky-50 border border-sky-200 text-sky-900 font-black rounded-lg py-2.5 px-3 text-center" placeholder="50">
+                                            <p class="text-[10px] text-slate-500 mt-2">成功、失败、降智丢弃和异常任务均计数；0 表示禁用数量阈值。</p>
+                                        </div>
+                                        <div class="bg-white p-4 rounded-xl border border-sky-200 shadow-sm">
+                                            <label class="block text-[11px] text-sky-800 font-black uppercase tracking-wider mb-2">运行时长阈值（分钟）</label>
+                                            <input type="number" min="0" v-model.number="config.grok_browser_recycle_minutes_limit" :disabled="!config.grok_browser_recycle_enabled" class="w-full bg-sky-50 border border-sky-200 text-sky-900 font-black rounded-lg py-2.5 px-3 text-center" placeholder="120">
+                                            <p class="text-[10px] text-slate-500 mt-2">从本轮生命周期开始计算；0 表示禁用时长阈值。</p>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-6">
                                     <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                                         <label class="block text-[11px] text-slate-500 font-black uppercase tracking-wider mb-2">Token 等待下限(秒)</label>
