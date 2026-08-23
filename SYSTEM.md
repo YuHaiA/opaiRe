@@ -24,7 +24,7 @@
 
 ## 服务6轻量部署（2026-08-19）
 
-- 服务6公网入口：`http://69.33.213.130:8000/`；SSH 使用 `root@69.33.213.130`，密钥仅保存在本机桌面文件目录，不写入仓库。
+- 服务6公网入口：`http://69.33.213.130:8000/`；SSH 使用 `root@69.33.213.130`，本机密钥为 `C:\Users\yu\Desktop\file\hk`（只记录路径，不记录密钥内容）。
 - 部署路径：服务器 `/opt/opaire`，运行用户 `opaire`；使用 Python 3.11 venv 和 systemd `opaire.service`，不使用 Docker。
 - 低压力配置：Grok、单线程注册、关闭代理池及 CPA/Sub2API/Grok2API 自动巡检；Grok 浏览器每 4 个任务回收。
 - 已上线浏览器资源保护：浏览器池最多 2 个 worker、空闲 60 秒自动关闭；`opaire.service` 使用 `deploy/systemd/opaire-memory-guard.conf`，在本机 1.9 GiB 内存规格上实际生效为 `MemoryHigh=1.34G`、`MemoryMax=1.53G`、`MemorySwapMax=1G`，超限只回收/重启 opaiRe cgroup，不拖垮 SSH、Nginx 和 Mihomo。
