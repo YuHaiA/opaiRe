@@ -34,6 +34,7 @@
 - 服务端未上传本地账号数据、真实邮箱配置、日志、token 或数据库；首次使用需通过 Web 控制台补齐业务配置。
 - 2026-08-19 已将 `chlin.bond` / `www.chlin.bond` 解析到服务6并由 Nginx 反向代理到 `127.0.0.1:8000`；Let's Encrypt 证书已部署，HTTP 自动跳转 HTTPS，证书由 `certbot.timer` 自动续期。
 - 2026-08-19 服务6已部署独立 Mihomo：核心 `sub2-mihomo.service`、面板 `sub2-mihomo-panel.service`，目录 `/opt/sub2-mihomo`，面板入口 `https://chlin.bond/mihomo/`，高级 UI 为 `/mihomo/ui/`，均由 Nginx Basic Auth 保护。
+- 2026-08-23 排查确认服务6曾出现 Mihomo 进程显示 Running、但 `127.0.0.1:9090` 控制器连续超时的假死；健康守护现同时检查 systemd 状态、控制器 HTTP 和 `7890` 真实 HTTP 代理请求，连续 3 次失败会重启核心。发布包 allowlist 已纳入 `healthcheck.py`、health service/timer，避免线上更新漏部署守护文件。
 - Mihomo 使用官方 `v1.19.30`，代理混合端口 `7890`、SOCKS 端口 `7891`、控制器 `9090` 和 10 个出口端口 `7901-7910` 全部仅监听 `127.0.0.1`，避免形成公网开放代理；核心约 10 MB、面板约 21 MB。
 - Mihomo 运行时也已加独立内存保护：核心 `MemoryMax=384M`、面板 `MemoryMax=192M`，并各自限制 swap；超过自身上限时由 systemd 单独重启对应服务，不影响 SSH、Nginx 或 opaiRe。
 - 服务6当前未上传或配置订阅/节点，Mihomo 日志中的空 provider 提示属于无节点初始状态；订阅需通过 Mihomo 面板录入。opaiRe 已对齐本机控制器地址和密钥，但 `clash_proxy_pool.enable` 保持关闭，待有节点后再按需启用。

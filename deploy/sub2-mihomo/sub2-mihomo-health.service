@@ -7,6 +7,6 @@ Wants=network-online.target
 Type=oneshot
 ExecStart=/usr/bin/python3 /opt/sub2-mihomo/healthcheck.py
 User=root
+TimeoutStartSec=25s
 NoNewPrivileges=false
 PrivateTmp=true
-

@@ -27,8 +27,11 @@ files=(
   set_subscription.py
   set-subscription.sh
   wire-sub2api-proxy.sh
+  healthcheck.py
   sub2-mihomo.service
   sub2-mihomo-panel.service
+  sub2-mihomo-health.service
+  sub2-mihomo-health.timer
   sudoers-mihomo
   nginx-mihomo.conf
   web/index.html
